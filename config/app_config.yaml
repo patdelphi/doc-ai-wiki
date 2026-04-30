@@ -1,0 +1,9 @@
+default_page: 1
+default_page_size: 20
+default_top_k: 5
+max_input_length: 4000
+chunk_size: 500
+chunk_overlap: 100
+enable_cache: false
+quality_template: "default"
+retry_count: 1

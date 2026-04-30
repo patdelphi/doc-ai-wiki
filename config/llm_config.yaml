@@ -1,0 +1,10 @@
+primary_provider: "qwen"
+primary_model: "qwen-max"
+fallback_provider: ""
+fallback_model: ""
+embedding_provider: "dashscope"
+embedding_model: "text-embedding-v3"
+rerank_provider: "dashscope"
+rerank_model: "default"
+timeout_seconds: 60
+cost_threshold: 5.0
