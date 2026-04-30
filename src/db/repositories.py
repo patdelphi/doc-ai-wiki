@@ -229,12 +229,14 @@ class QualityRepository:
             connection.execute(
                 """
                 INSERT INTO quality_checks (
-                    check_id, input_text, overall_verdict, risk_level, summary, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    check_id, input_text, template_id, template_name, overall_verdict, risk_level, summary, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     quality_check["check_id"],
                     quality_check["input_text"],
+                    quality_check.get("template_id"),
+                    quality_check.get("template_name"),
                     quality_check["overall_verdict"],
                     quality_check["risk_level"],
                     quality_check["summary"],
@@ -245,9 +247,9 @@ class QualityRepository:
             connection.executemany(
                 """
                 INSERT INTO quality_claims (
-                    claim_id, check_id, claim_text, verdict, confidence, evidence,
+                    claim_id, check_id, claim_text, verdict, risk_level, confidence, evidence,
                     source_doc, source_span, review_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -255,6 +257,7 @@ class QualityRepository:
                         claim["check_id"],
                         claim["claim_text"],
                         claim["verdict"],
+                        claim.get("risk_level", "medium"),
                         claim["confidence"],
                         claim["evidence"],
                         claim.get("source_doc"),
@@ -353,6 +356,8 @@ class QualityRepository:
                     {
                         "check_id": check_row["check_id"],
                         "input_text": check_row["input_text"],
+                        "template_id": check_row["template_id"],
+                        "template_name": check_row["template_name"],
                         "overall_verdict": check_row["overall_verdict"],
                         "risk_level": check_row["risk_level"],
                         "created_at": check_row["created_at"],
@@ -405,8 +410,15 @@ class QualityRepository:
             ).fetchone()
             rows = connection.execute(
                 """
-                SELECT *
-                FROM review_records
+                SELECT
+                    rr.*,
+                    qc.check_id AS check_id,
+                    qc.claim_text AS claim_text,
+                    qc.review_status AS review_status,
+                    q.template_name AS template_name
+                FROM review_records rr
+                JOIN quality_claims qc ON qc.claim_id = rr.claim_id
+                JOIN quality_checks q ON q.check_id = qc.check_id
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
                 """,

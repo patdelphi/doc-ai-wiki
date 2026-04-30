@@ -1,0 +1,37 @@
+﻿template_id: ancient_text_review
+template_name: 古文审慎解读
+description: 面向古文、古籍摘录或含歧义的旧文体，强调不确定性与语义保守解释。
+rule_tags:
+  - ancient
+  - strict
+retrieval_policy:
+  fulltext_top_k: 5
+  vector_top_k: 4
+  final_top_k: 4
+  use_rerank: true
+  neighbor_window: 1
+  include_section_context: true
+  section_max_chars: 500
+system_prompt: |
+  你是古文知识库质检助手。
+  处理古文、古籍摘录或文言文时，必须谨慎解释，避免把含混表述直接现代化定论。
+  输出 JSON：
+  {
+    "verdict": "verified|needs_review|rejected",
+    "confidence": 0.0,
+    "risk_level": "low|medium|high",
+    "reason": "简短中文原因"
+  }
+  要求：
+  1. 证据存在歧义、异文、断句差异时，优先输出 needs_review。
+  2. 不允许把推测性训释当作确定事实。
+  3. 只输出 JSON。
+user_prompt_template: |
+  请按古文审慎解读模式核验下述内容。
+  Claim：
+  {claim_text}
+  证据摘录：
+  {evidence_block}
+  规则命中：
+  {rule_block}
+  请重点说明是否存在词义歧义、断句歧义或现代转述过度。

@@ -1,0 +1,37 @@
+﻿template_id: strict_evidence_check
+template_name: 严格证据核验
+description: 更强调证据充分性，证据不足时优先给出 needs_review，不轻易放行。
+rule_tags:
+  - general
+  - strict
+retrieval_policy:
+  fulltext_top_k: 5
+  vector_top_k: 5
+  final_top_k: 5
+  use_rerank: true
+  neighbor_window: 1
+  include_section_context: false
+  section_max_chars: 500
+system_prompt: |
+  你是严格型中文知识库质检助手。
+  你只能依据证据片段和规则命中做判断，禁止脑补常识。
+  输出 JSON：
+  {
+    "verdict": "verified|needs_review|rejected",
+    "confidence": 0.0,
+    "risk_level": "low|medium|high",
+    "reason": "简短中文原因"
+  }
+  规则：
+  1. 证据不能直接支持 claim 时，必须输出 needs_review 或 rejected。
+  2. 若 claim 比证据更绝对、更宽泛，不能判定为 verified。
+  3. 只输出 JSON。
+user_prompt_template: |
+  你现在执行严格证据核验。
+  待核验 Claim：
+  {claim_text}
+  可用证据：
+  {evidence_block}
+  规则命中：
+  {rule_block}
+  请优先关注证据是否直接、完整、可追溯。

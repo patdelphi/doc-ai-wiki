@@ -35,14 +35,39 @@ class AppSettings(BaseSettings):
     rules_dir: Path = Field(default=Path("rules"), alias="RULES_DIR")
     templates_dir: Path = Field(default=Path("templates"), alias="TEMPLATES_DIR")
 
-    embedding_provider: str = Field(default="dashscope", alias="EMBEDDING_PROVIDER")
-    embedding_model: str = Field(default="text-embedding-v3", alias="EMBEDDING_MODEL")
+    embedding_provider: str = Field(default="local", alias="EMBEDDING_PROVIDER")
+    embedding_model: str = Field(default="deterministic-v1", alias="EMBEDDING_MODEL")
+    embedding_base_url: str | None = Field(default=None, alias="EMBEDDING_BASE_URL")
+    embedding_api_key: str | None = Field(
+        default=None,
+        alias="EMBEDDING_API_KEY",
+        validation_alias=AliasChoices("EMBEDDING_API_KEY", "OPENAI_API_KEY"),
+    )
+    embedding_timeout_seconds: int = Field(default=60, alias="EMBEDDING_TIMEOUT_SECONDS")
     rerank_enabled: bool = Field(default=True, alias="RERANK_ENABLED")
     rerank_provider: str = Field(default="dashscope", alias="RERANK_PROVIDER")
     rerank_model: str = Field(default="default", alias="RERANK_MODEL")
-    llm_provider: str = Field(default="qwen", alias="LLM_PROVIDER")
-    llm_model: str = Field(default="qwen-max", alias="LLM_MODEL")
+    rerank_base_url: str | None = Field(default=None, alias="RERANK_BASE_URL")
+    rerank_api_key: str | None = Field(
+        default=None,
+        alias="RERANK_API_KEY",
+        validation_alias=AliasChoices("RERANK_API_KEY", "DASHSCOPE_API_KEY", "OPENAI_API_KEY"),
+    )
+    rerank_timeout_seconds: int = Field(default=60, alias="RERANK_TIMEOUT_SECONDS")
+    llm_provider: str = Field(default="disabled", alias="LLM_PROVIDER")
+    llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
+    llm_api_key: str | None = Field(
+        default=None,
+        alias="LLM_API_KEY",
+        validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"),
+    )
+    llm_model: str = Field(default="disabled", alias="LLM_MODEL")
     llm_timeout_seconds: int = Field(default=60, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_tokens: int = Field(default=1024, alias="LLM_MAX_TOKENS")
+    llm_temperature: float = Field(default=0.0, alias="LLM_TEMPERATURE")
+    llm_top_p: float = Field(default=1.0, alias="LLM_TOP_P")
+    llm_enable_thinking: bool = Field(default=False, alias="LLM_ENABLE_THINKING")
+    anthropic_api_version: str = Field(default="2023-06-01", alias="ANTHROPIC_API_VERSION")
 
     dashscope_api_key: str | None = Field(default=None, alias="DASHSCOPE_API_KEY")
 

@@ -51,4 +51,26 @@
 - [x] 为 JSON 输入增加最小兼容读取、元数据提取与校验错误处理
 - [x] 扩展 JSON 专用元数据映射（作者、来源、标签等）
 - [x] 为旧版 SQLite `documents` 表增加幂等补列迁移
-- [ ] 扩展 UI 检索结果展示更多文档元信息（author/source_name/tags）
+- [x] 修复质检 `doc_uid` 证据范围收敛
+- [x] 为 `quality_claims` 增加 `risk_level` 持久化与兼容迁移
+- [x] 为质检接口增加 `2000` 字输入限制
+- [x] 将 LLM 做成 `.env` 可配置 API，兼容 `openai` 与 `anthropic`
+- [x] 为 Embedding 增加 provider 抽象，支持 `local` 回退与 `openai` 在线模式
+- [x] 将质检流程接入可注入 LLM 客户端并保留启发式回退
+- [x] 增加模型连通性自检模块与 `.aipython` 一键脚本
+- [x] 将质检 Prompt 做成可切换模板，并提供内置预设模板
+- [x] 让质检模板联动规则标签与检索策略，并补齐模板 YAML 预设文件
+- [x] 为模板策略化补充回归测试并同步 README / API 文档
+- [x] 扩展 UI 检索结果展示更多文档元信息（author/source_name/tags）
+- [x] 为混合检索接入可配置 rerank 客户端，并支持 `dashscope/openai` 两类协议
+- [x] 为 `/search/hybrid` 接入 `use_rerank` 开关，并在结果中补充 `matched_sources/rerank_score`
+- [x] 为 rerank 增加单元测试、文档同步与全量回归验证
+- [x] 为模型自检脚本增加 `rerank` 连通性检查
+- [x] 优化 UI 检索结果视图，展示 `matched_sources/rerank_score`
+- [x] 让质检模板支持配置 `use_rerank`
+- [x] 为质检结果补充证据级 `matched_sources/rerank_score/context_mode` 解释字段
+- [x] 为审核页增加当前 Claim 证据详情联动展示
+- [x] 优化审核页展示结构，拆分为 claim 摘要区和证据表
+- [x] 审核提交后自动刷新 claim 状态、最近质检结果与最近审核记录
+- [x] 支持从最近审核记录定位回对应 claim
+- [x] 修复 Embedding 批量入库时 400 导致的向量索引写入失败

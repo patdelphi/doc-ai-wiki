@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import gradio as gr
 
+from src.ai.embedding import build_embedding_client
+from src.ai.llm import DisabledLLMClient, build_llm_client
+from src.ai.rerank import build_reranker
 from src.common.config import AppSettings, get_settings
 from src.db.connection import initialize_database
 from src.ingest.service import IngestService
@@ -18,16 +21,24 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     """创建 Gradio UI 实例。"""
 
     settings = settings_override or get_settings()
+    settings.ensure_runtime_directories()
     initialize_database(settings.sqlite_db_path)
 
-    vector_store = VectorStore(settings.chroma_persist_dir)
+    embedding_client = build_embedding_client(settings)
+    llm_client = build_llm_client(settings)
+    reranker = build_reranker(settings)
+    vector_store = VectorStore(settings.chroma_persist_dir, embedding_client=embedding_client)
     ingest_service = IngestService(settings)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
     retrieval_service.set_vector_store(vector_store)
+    retrieval_service.set_reranker(reranker)
     quality_service = QualityService(
         settings.sqlite_db_path,
         rules_dir=settings.rules_dir,
+        templates_dir=settings.templates_dir,
         vector_store=vector_store,
+        reranker=reranker,
+        llm_client=None if isinstance(llm_client, DisabledLLMClient) else llm_client,
     )
     review_service = ReviewService(settings.sqlite_db_path)
 

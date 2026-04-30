@@ -55,3 +55,15 @@ class NotFoundAppError(AppError):
             details=details,
             status_code=404,
         )
+
+
+class ExternalServiceAppError(AppError):
+    """外部服务调用异常。"""
+
+    def __init__(self, message: str, *, details: dict | None = None) -> None:
+        super().__init__(
+            message,
+            error_code="EXTERNAL_SERVICE_ERROR",
+            details=details,
+            status_code=502,
+        )

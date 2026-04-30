@@ -84,3 +84,4 @@ class QualityCheckRequest(BaseModel):
 
     input_text: str
     doc_uid: str | None = None
+    template_id: str | None = None

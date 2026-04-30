@@ -352,8 +352,12 @@
         "chunk_id": "zhongguo_wenxue_v1_0008",
         "doc_uid": "zhongguo_wenxue_v1",
         "doc_title": "中国文学史纲要",
+        "author": "张三",
+        "source_name": "古籍整理库",
+        "tags": ["古文", "文学"],
         "source_span": "第二章 第一节",
         "score": 0.952,
+        "rerank_score": 0.981,
         "content": "战国时期的思想文献出现了更强的论辩性......",
         "retrieval_source": "hybrid",
         "matched_sources": ["fulltext", "vector"]
@@ -364,60 +368,59 @@
 }
 ```
 
+说明：
+
+- `use_rerank=true` 且已配置可用重排服务时，结果会按重排分数重新排序
+- 启用重排后，每条结果会额外返回 `rerank_score`
+- 同一片段同时命中全文与向量召回时，`retrieval_source` 会标记为 `hybrid`
+
 ---
 
 ## 七、质检接口
 
-## 7.1 提交质检
+## 7.1 查询质检模板
 
-- 方法：`POST`
-- 路径：`/quality/check`
-- 说明：输入一段文本，执行 claim 拆分、规则校验、检索和结构化判断
-
-### 请求体
-
-```json
-{
-  "template_id": "general_fact_check",
-  "input_text": "《论语》成书于春秋战国之际，并由孔子弟子编纂。",
-  "doc_filters": {
-    "doc_uids": ["zhongguo_wenxue_v1"]
-  },
-  "use_rerank": true
-}
-```
-
-### 字段说明
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `template_id` | 是 | 质检模板，如 `general_fact_check` |
-| `input_text` | 是 | 待质检文本 |
-| `doc_filters` | 否 | 文档过滤条件 |
-| `use_rerank` | 否 | 是否启用重排 |
+- 方法：`GET`
+- 路径：`/quality/templates`
+- 说明：返回当前可选的质检模板列表，以及模板对应的规则标签和检索策略
 
 ### 成功响应
 
 ```json
 {
   "success": true,
-  "message": "quality check completed",
+  "message": "ok",
   "data": {
-    "check_id": "chk_20260430_0001",
-    "status": "completed",
-    "claims": [
+    "items": [
       {
-        "claim_no": 1,
-        "claim_text": "《论语》成书于春秋战国之际",
-        "verdict": "verified",
-        "confidence": 0.93,
-        "reason": "知识库中存在明确原文支持",
-        "evidence": "《论语》由孔子弟子及再传弟子编纂而成，约成书于春秋战国之际......",
-        "source_doc": "中国哲学史",
-        "source_span": "第一章",
-        "retrieval_refs": ["zhongguo_wenxue_v1_0008"],
-        "review_required": false,
-        "rule_hits": []
+        "template_id": "general_fact_check",
+        "template_name": "通用事实核验",
+        "description": "适合大多数知识库文本质检，平衡证据核验、规则命中与人工复核。",
+        "rule_tags": ["general"],
+        "retrieval_policy": {
+          "fulltext_top_k": 3,
+          "vector_top_k": 3,
+          "final_top_k": 3,
+          "use_rerank": false,
+          "neighbor_window": 0,
+          "include_section_context": false,
+          "section_max_chars": 400
+        }
+      },
+      {
+        "template_id": "strict_evidence_check",
+        "template_name": "严格证据核验",
+        "description": "更强调证据充分性，证据不足时优先给出 needs_review，不轻易放行。",
+        "rule_tags": ["general", "strict"],
+        "retrieval_policy": {
+          "fulltext_top_k": 5,
+          "vector_top_k": 5,
+          "final_top_k": 5,
+          "use_rerank": true,
+          "neighbor_window": 1,
+          "include_section_context": false,
+          "section_max_chars": 500
+        }
       }
     ]
   },
@@ -425,7 +428,106 @@
 }
 ```
 
-## 7.2 查询质检结果
+## 7.2 提交质检
+
+- 方法：`POST`
+- 路径：`/quality/check`
+- 说明：输入一段文本，执行 claim 拆分、规则校验、检索和结构化判断
+- 约束：`input_text` 不能为空，且长度不超过 `2000` 字；传入 `doc_uid` 时，证据检索仅在目标文档内进行
+
+### 请求体
+
+```json
+{
+  "input_text": "《论语》成书于春秋战国之际，并由孔子弟子编纂。",
+  "doc_uid": "zhongguo_wenxue_v1",
+  "template_id": "strict_evidence_check"
+}
+```
+
+### 字段说明
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `input_text` | 是 | 待质检文本 |
+| `doc_uid` | 否 | 限定证据检索范围的文档 ID |
+| `template_id` | 否 | 质检 Prompt 模板 ID，不传时默认 `general_fact_check` |
+
+模板策略说明：
+
+- `template_id` 不只决定 Prompt 文案，还会决定当前启用的 `rule_tags`
+- 模板中的 `retrieval_policy` 会控制全文候选数、向量候选数、最终证据数
+- `retrieval_policy.use_rerank` 控制当前模板在质检时是否启用重排
+- `neighbor_window` 和 `include_section_context` 会影响证据上下文扩展方式
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "message": "ok",
+  "data": {
+    "check": {
+      "check_id": "chk_20260430_0001",
+      "template_id": "strict_evidence_check",
+      "template_name": "严格证据核验",
+      "active_rule_tags": ["general", "strict"],
+      "retrieval_policy": {
+        "fulltext_top_k": 5,
+        "vector_top_k": 5,
+        "final_top_k": 5,
+        "use_rerank": true,
+        "neighbor_window": 1,
+        "include_section_context": false,
+        "section_max_chars": 500
+      },
+      "overall_verdict": "needs_review",
+      "risk_level": "medium",
+      "summary": "共 1 条 claim，verified 0 条，needs_review 1 条，rejected 0 条，命中规则 1 条。"
+    },
+    "claims": [
+      {
+        "claim_id": "claim_20260430_0001",
+        "claim_text": "《论语》成书于春秋战国之际",
+        "verdict": "needs_review",
+        "risk_level": "medium",
+        "confidence": 0.55,
+        "evidence": "《论语》由孔子弟子及再传弟子编纂而成，约成书于春秋战国之际......",
+        "evidence_details": [
+          {
+            "chunk_id": "zhongguo_wenxue_v1_0008",
+            "doc_uid": "zhongguo_wenxue_v1",
+            "doc_title": "中国文学史纲要",
+            "source_span": "第一章",
+            "retrieval_source": "hybrid",
+            "matched_sources": ["fulltext", "vector"],
+            "rerank_score": 0.98,
+            "context_mode": "section_context",
+            "section_title": "第一章",
+            "content_preview": "《论语》由孔子弟子及再传弟子编纂而成......"
+          }
+        ],
+        "source_doc": "zhongguo_wenxue_v1",
+        "source_span": "第一章",
+        "review_status": "pending"
+      }
+    ],
+    "rule_hits": []
+  },
+  "request_id": "req_20260430_0007"
+}
+```
+
+说明：
+
+- `evidence_details` 为证据级解释字段，供 UI 审核页直接展示
+- `matched_sources` 表示该证据来自全文、向量或混合召回
+- `rerank_score` 表示重排分数；未启用重排时可为空
+- `context_mode` 表示证据上下文构造方式，如 `chunk`、`neighbor_chunks`、`section_context`
+- UI 当前会将这些字段整理为“claim 摘要 + 证据表”两块审核视图
+- UI 提交审核后会自动刷新当前 claim 的 `review_status`，并同步刷新最近质检结果与最近审核记录
+
+## 7.3 查询质检结果
 
 - 方法：`GET`
 - 路径：`/quality/result/{check_id}`
@@ -468,7 +570,7 @@
 }
 ```
 
-## 7.3 查询质检历史
+## 7.4 查询质检历史
 
 - 方法：`GET`
 - 路径：`/quality/history`
@@ -539,6 +641,7 @@
 - 方法：`GET`
 - 路径：`/review/list`
 - 说明：查询审核历史
+- 返回项包含 `claim_text`、`check_id`、`template_name`、`review_status`，可直接用于 UI 定位联动
 
 ### 查询参数
 

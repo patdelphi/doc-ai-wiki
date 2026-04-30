@@ -8,17 +8,29 @@ from src.ui.viewmodels import (
     build_doc_uid_choices,
     build_document_management_state,
     build_document_choices,
+    build_recent_claim_navigation,
+    format_claim_detail_for_review,
+    format_review_history,
+    format_search_results,
+    build_template_choices,
     format_quality_result,
     format_recent_quality_checks,
+    get_review_target_claim_id,
     parse_claim_choice,
     parse_doc_uid_choice,
     parse_document_choice,
+    parse_review_choice,
+    parse_template_choice,
     scan_input_documents,
 )
 
 
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service) -> gr.Blocks:
     """构建最小可用界面。"""
+
+    template_items = quality_service.list_templates()
+    template_choices = build_template_choices(template_items)
+    default_template_choice = template_choices[0] if template_choices else None
 
     def load_document_management_state() -> tuple[gr.Dropdown, dict, list[dict], gr.Dropdown]:
         documents = scan_input_documents(ingest_service.settings.input_root)
@@ -80,15 +92,57 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return {"success": True, "accepted": accepted}, status_items, dropdown
 
     def run_search(query: str, top_k: int) -> list[dict]:
-        return retrieval_service.hybrid_search(query, top_k=top_k)
+        items = retrieval_service.hybrid_search(query, top_k=top_k, use_rerank=True)
+        return format_search_results(items)
 
-    def run_quality_check(input_text: str) -> tuple[dict, gr.Dropdown]:
-        result = quality_service.run_check(input_text)
+    def run_quality_check(input_text: str, template_choice: str) -> tuple[dict, gr.Dropdown, dict, dict, dict, list[dict]]:
+        result = quality_service.run_check(
+            input_text,
+            template_id=parse_template_choice(template_choice),
+        )
         formatted = format_quality_result(result)
-        default_choice = formatted["claim_choices"][0] if formatted["claim_choices"] else None
-        return formatted, gr.Dropdown(choices=formatted["claim_choices"], value=default_choice)
+        navigation = build_recent_claim_navigation(
+            [
+                {
+                    "check_id": formatted["check"].get("check_id"),
+                    "template_name": formatted["check"].get("template_name"),
+                    "created_at": formatted["check"].get("created_at"),
+                    "claims": formatted["claims"],
+                }
+            ]
+        )
+        return (
+            formatted,
+            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["claim_detail_map"],
+            navigation["selected_detail"],
+            navigation["selected_detail"],
+            [
+                {
+                    "check_id": formatted["check"].get("check_id"),
+                    "template_name": formatted["check"].get("template_name"),
+                    "created_at": formatted["check"].get("created_at"),
+                    "overall_verdict": formatted["check"].get("overall_verdict"),
+                    "claims": formatted["claims"],
+                }
+            ],
+        )
 
-    def submit_review_action(claim_choice: str, review_action: str, review_note: str) -> tuple[dict, list[dict]]:
+    def list_review_history() -> tuple[dict, gr.Dropdown, dict]:
+        review_items, _ = review_service.list_reviews(page=1, page_size=20)
+        formatted = format_review_history(review_items)
+        default_choice = formatted["review_choices"][0] if formatted["review_choices"] else None
+        return (
+            formatted,
+            gr.Dropdown(choices=formatted["review_choices"], value=default_choice),
+            formatted["review_map"],
+        )
+
+    def submit_review_action(
+        claim_choice: str,
+        review_action: str,
+        review_note: str,
+    ) -> tuple[dict, dict, gr.Dropdown, dict, list[dict], list[dict], gr.Dropdown, dict, dict, dict]:
         claim_id = parse_claim_choice(claim_choice)
         result = review_service.submit_review(
             claim_id=claim_id,
@@ -98,13 +152,56 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             reviewer="ui_user",
         )
         review_items, _ = review_service.list_reviews(page=1, page_size=20)
-        return result, review_items
+        review_history_payload = format_review_history(review_items)
+        recent_results = quality_service.list_recent_results(limit=10)
+        recent_quality_payload = format_recent_quality_checks(recent_results)
+        navigation = build_recent_claim_navigation(recent_results, preferred_claim_id=claim_id)
+        return (
+            {
+                **result,
+                "linked_claim_id": claim_id,
+                "linked_check_id": navigation["selected_detail"].get("summary", {}).get("check_id"),
+            },
+            review_history_payload,
+            gr.Dropdown(
+                choices=review_history_payload["review_choices"],
+                value=review_history_payload["review_choices"][0] if review_history_payload["review_choices"] else None,
+            ),
+            review_history_payload["review_map"],
+            recent_quality_payload,
+            recent_results,
+            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["claim_detail_map"],
+            navigation["selected_detail"],
+            navigation["selected_detail"],
+        )
 
-    def list_recent_quality_results() -> tuple[list[dict], gr.Dropdown]:
+    def list_recent_quality_results() -> tuple[list[dict], gr.Dropdown, dict, dict, dict, list[dict]]:
         results = quality_service.list_recent_results(limit=10)
         formatted = format_recent_quality_checks(results)
-        choices = formatted[0]["claim_choices"] if formatted else []
-        return formatted, gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+        navigation = build_recent_claim_navigation(results)
+        return (
+            formatted,
+            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["claim_detail_map"],
+            navigation["selected_detail"],
+            navigation["selected_detail"],
+            results,
+        )
+
+    def focus_review_record(
+        review_choice: str,
+        review_history_state: dict,
+        recent_quality_state: list[dict],
+    ) -> tuple[gr.Dropdown, dict, dict, dict]:
+        claim_id = get_review_target_claim_id(review_choice, review_history_state)
+        navigation = build_recent_claim_navigation(recent_quality_state, preferred_claim_id=claim_id)
+        return (
+            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["claim_detail_map"],
+            navigation["selected_detail"],
+            navigation["selected_detail"],
+        )
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -120,49 +217,29 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             rebuild_result = gr.JSON(label="重建结果")
             status_button = gr.Button("刷新入库状态")
             status_table = gr.JSON(label="文档状态")
-            scan_button.click(
-                fn=load_document_management_state,
-                outputs=[document_choices, register_result, status_table, rebuild_doc_choice],
-            )
-            register_button.click(
-                fn=register_selected_document,
-                inputs=document_choices,
-                outputs=[register_result, status_table, rebuild_doc_choice],
-            )
-            register_all_button.click(
-                fn=register_all_documents,
-                outputs=[register_result, status_table, rebuild_doc_choice],
-            )
-            status_button.click(fn=query_ingest_status, outputs=[status_table, rebuild_doc_choice])
-            rebuild_button.click(
-                fn=rebuild_selected_document,
-                inputs=rebuild_doc_choice,
-                outputs=[rebuild_result, status_table, rebuild_doc_choice],
-            )
 
         with gr.Tab("文档检索"):
             search_query = gr.Textbox(label="检索内容")
             search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=10, step=1, value=5)
             search_button = gr.Button("执行检索")
             search_result = gr.JSON(label="检索结果")
-            search_button.click(fn=run_search, inputs=[search_query, search_top_k], outputs=search_result)
 
         with gr.Tab("AI 质检"):
             quality_input = gr.Textbox(label="待质检文本", lines=8)
+            quality_template = gr.Dropdown(
+                label="质检模板",
+                choices=template_choices,
+                value=default_template_choice,
+                interactive=True,
+            )
             quality_button = gr.Button("开始质检")
             quality_result = gr.JSON(label="质检结果")
             review_claim_selector = gr.Dropdown(label="可审核 Claim", choices=[], interactive=True)
+            claim_detail_state = gr.State({})
+            recent_quality_state = gr.State([])
+            claim_detail_view = gr.JSON(label="当前 Claim 证据详情")
             recent_quality_button = gr.Button("加载最近质检结果")
             recent_quality_checks = gr.JSON(label="最近质检结果")
-            quality_button.click(
-                fn=run_quality_check,
-                inputs=quality_input,
-                outputs=[quality_result, review_claim_selector],
-            )
-            recent_quality_button.click(
-                fn=list_recent_quality_results,
-                outputs=[recent_quality_checks, review_claim_selector],
-            )
 
         with gr.Tab("人工审核"):
             review_action_input = gr.Dropdown(
@@ -170,13 +247,85 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 value="approved",
                 label="审核动作",
             )
+            review_claim_detail = gr.JSON(label="待审核 Claim 详情")
             review_note_input = gr.Textbox(label="审核备注", lines=3)
             review_button = gr.Button("提交审核")
+            review_history_button = gr.Button("加载最近审核记录")
+            review_history_selector = gr.Dropdown(label="最近审核定位", choices=[], interactive=True)
+            review_history_state = gr.State({})
             review_result = gr.JSON(label="审核结果")
             review_history = gr.JSON(label="最近审核记录")
-            review_button.click(
-                fn=submit_review_action,
-                inputs=[review_claim_selector, review_action_input, review_note_input],
-                outputs=[review_result, review_history],
-            )
+        scan_button.click(
+            fn=load_document_management_state,
+            outputs=[document_choices, register_result, status_table, rebuild_doc_choice],
+        )
+        register_button.click(
+            fn=register_selected_document,
+            inputs=document_choices,
+            outputs=[register_result, status_table, rebuild_doc_choice],
+        )
+        register_all_button.click(
+            fn=register_all_documents,
+            outputs=[register_result, status_table, rebuild_doc_choice],
+        )
+        status_button.click(fn=query_ingest_status, outputs=[status_table, rebuild_doc_choice])
+        rebuild_button.click(
+            fn=rebuild_selected_document,
+            inputs=rebuild_doc_choice,
+            outputs=[rebuild_result, status_table, rebuild_doc_choice],
+        )
+        search_button.click(fn=run_search, inputs=[search_query, search_top_k], outputs=search_result)
+        quality_button.click(
+            fn=run_quality_check,
+            inputs=[quality_input, quality_template],
+            outputs=[
+                quality_result,
+                review_claim_selector,
+                claim_detail_state,
+                claim_detail_view,
+                review_claim_detail,
+                recent_quality_state,
+            ],
+        )
+        recent_quality_button.click(
+            fn=list_recent_quality_results,
+            outputs=[
+                recent_quality_checks,
+                review_claim_selector,
+                claim_detail_state,
+                claim_detail_view,
+                review_claim_detail,
+                recent_quality_state,
+            ],
+        )
+        review_claim_selector.change(
+            fn=format_claim_detail_for_review,
+            inputs=[review_claim_selector, claim_detail_state],
+            outputs=[claim_detail_view, review_claim_detail],
+        )
+        review_history_button.click(
+            fn=list_review_history,
+            outputs=[review_history, review_history_selector, review_history_state],
+        )
+        review_history_selector.change(
+            fn=focus_review_record,
+            inputs=[review_history_selector, review_history_state, recent_quality_state],
+            outputs=[review_claim_selector, claim_detail_state, claim_detail_view, review_claim_detail],
+        )
+        review_button.click(
+            fn=submit_review_action,
+            inputs=[review_claim_selector, review_action_input, review_note_input],
+            outputs=[
+                review_result,
+                review_history,
+                review_history_selector,
+                review_history_state,
+                recent_quality_checks,
+                recent_quality_state,
+                review_claim_selector,
+                claim_detail_state,
+                claim_detail_view,
+                review_claim_detail,
+            ],
+        )
     return demo

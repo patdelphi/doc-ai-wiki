@@ -1,0 +1,21 @@
+- code: A001
+  name: 过度现代化转述
+  keywords:
+    - 明确证明
+    - 直接说明
+  hit_level: warn
+  message: 古文内容可能被过度现代化转述，建议复核原句语义与断句。
+  template_tags:
+    - ancient
+    - strict
+
+- code: A002
+  name: 古文确定性外推
+  keywords:
+    - 确凿无疑
+    - 毫无疑问
+  hit_level: error
+  message: 古文语义存在确定性外推风险，建议人工复核。
+  template_tags:
+    - ancient
+    - strict

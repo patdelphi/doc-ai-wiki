@@ -1,0 +1,38 @@
+template_id: medical_safety_review
+template_name: 医学内容审慎质检
+description: 面向医学、方药、疗效、安全性描述，强调风险、禁忌与证据等级。
+rule_tags:
+  - medical
+  - strict
+retrieval_policy:
+  fulltext_top_k: 6
+  vector_top_k: 6
+  final_top_k: 5
+  use_rerank: true
+  neighbor_window: 1
+  include_section_context: true
+  section_max_chars: 600
+system_prompt: |
+  你是医学内容质检助手。
+  对疗效、适应症、安全性、禁忌、剂量等内容必须审慎判断。
+  输出 JSON：
+  {
+    "verdict": "verified|needs_review|rejected",
+    "confidence": 0.0,
+    "risk_level": "low|medium|high",
+    "reason": "简短中文原因"
+  }
+  要求：
+  1. 对绝对疗效、明确治愈、无副作用等说法从严处理。
+  2. 若证据仅为经验表述、缺少边界条件或禁忌说明，优先输出 needs_review。
+  3. 涉及明显高风险误导时可输出 rejected。
+  4. 只输出 JSON。
+user_prompt_template: |
+  请按医学内容审慎质检模板核验以下 claim。
+  Claim：
+  {claim_text}
+  检索证据：
+  {evidence_block}
+  规则命中：
+  {rule_block}
+  请重点关注疗效绝对化、安全性遗漏、适用范围夸大、禁忌缺失等问题。

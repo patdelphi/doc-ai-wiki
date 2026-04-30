@@ -142,7 +142,7 @@ def test_vector_and_hybrid_search_should_return_results_after_ingest(tmp_path: P
     assert hybrid_payload["success"] is True
     assert hybrid_payload["data"]["items"]
     assert hybrid_payload["data"]["items"][0]["doc_title"] == "检索测试文档"
-    assert hybrid_payload["data"]["items"][0]["retrieval_source"] in {"fulltext", "vector"}
+    assert hybrid_payload["data"]["items"][0]["retrieval_source"] in {"fulltext", "vector", "hybrid"}
 
 
 def test_register_json_document_should_work(tmp_path: Path) -> None:
@@ -175,8 +175,8 @@ def test_register_json_document_should_work(tmp_path: Path) -> None:
     assert search_response.json()["data"]["items"][0]["retrieval_source"] == "fulltext"
 
 
-def test_register_json_document_should_expose_extended_metadata_in_status(tmp_path: Path) -> None:
-    """JSON 输入的扩展元数据应能在状态接口中返回。"""
+def test_register_json_document_should_expose_extended_metadata_in_status_and_search(tmp_path: Path) -> None:
+    """JSON 输入的扩展元数据应能在状态接口和检索结果中返回。"""
 
     input_root = tmp_path / "Input"
     input_root.mkdir(parents=True, exist_ok=True)
@@ -199,6 +199,7 @@ def test_register_json_document_should_expose_extended_metadata_in_status(tmp_pa
             },
         )
         status_response = client.get("/ingest/status")
+        search_response = client.get("/search/hybrid", params={"query": "更多", "top_k": 3})
 
     assert register_response.status_code == 200
     assert status_response.status_code == 200
@@ -208,6 +209,12 @@ def test_register_json_document_should_expose_extended_metadata_in_status(tmp_pa
     assert item["author"] == "张三"
     assert item["source_name"] == "古籍整理库"
     assert item["tags"] == ["古文", "医学"]
+    assert search_response.status_code == 200
+    search_item = search_response.json()["data"]["items"][0]
+    assert search_item["doc_title"] == "扩展元数据文档"
+    assert search_item["author"] == "张三"
+    assert search_item["source_name"] == "古籍整理库"
+    assert search_item["tags"] == ["古文", "医学"]
 
 
 def test_register_invalid_json_document_should_return_validation_error(tmp_path: Path) -> None:
@@ -304,8 +311,12 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
         )
         quality_response = client.post(
             "/quality/check",
-            json={"input_text": "中文知识库系统一定支持全文检索和 AI 质检。"},
+            json={
+                "input_text": "中文知识库系统一定支持全文检索和 AI 质检。",
+                "template_id": "strict_evidence_check",
+            },
         )
+        templates_response = client.get("/quality/templates")
 
         quality_payload = quality_response.json()
         first_claim = quality_payload["data"]["claims"][0]
@@ -327,18 +338,191 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
     assert quality_payload["success"] is True
     assert quality_payload["data"]["claims"]
     assert quality_payload["data"]["rule_hits"]
+    assert quality_payload["data"]["check"]["template_id"] == "strict_evidence_check"
+    assert quality_payload["data"]["check"]["template_name"] == "严格证据核验"
     assert quality_payload["data"]["claims"][0]["verdict"] == "needs_review"
     assert quality_payload["data"]["check"]["risk_level"] == "medium"
+    assert templates_response.status_code == 200
+    strict_template = next(
+        item
+        for item in templates_response.json()["data"]["items"]
+        if item["template_id"] == "strict_evidence_check"
+    )
+    assert strict_template["rule_tags"] == ["general", "strict"]
+    assert strict_template["retrieval_policy"]["neighbor_window"] == 1
+    assert strict_template["retrieval_policy"]["use_rerank"] is True
 
     assert review_response.status_code == 200
     assert review_response.json()["success"] is True
 
     assert review_list_response.status_code == 200
-    assert review_list_response.json()["data"]["items"]
+    review_item = review_list_response.json()["data"]["items"][0]
+    assert review_item["claim_text"]
+    assert review_item["template_name"] == "严格证据核验"
+    assert review_item["review_status"] == "approved"
 
-    assert quality_result_response.status_code == 200
     persisted_claims = quality_result_response.json()["data"]["claims"]
     assert persisted_claims[0]["review_status"] == "approved"
+    assert persisted_claims[0]["risk_level"] == "medium"
+    assert quality_payload["data"]["claims"][0]["evidence_details"]
+
+
+def test_quality_check_should_limit_evidence_with_doc_uid(tmp_path: Path) -> None:
+    """指定 doc_uid 时，质检检索应限制在目标文档范围内。"""
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    doc_a = input_root / "doc_a.MD"
+    doc_b = input_root / "doc_b.MD"
+    doc_a.write_text("# 文档A\n\n这里只讨论甲主题。", encoding="utf-8")
+    doc_b.write_text("# 文档B\n\n乙方结论只存在于这个文档。", encoding="utf-8")
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        register_response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [
+                    {"file_path": str(doc_a), "doc_title": "文档A"},
+                    {"file_path": str(doc_b), "doc_title": "文档B"},
+                ],
+                "rebuild_if_exists": False,
+            },
+        )
+        doc_uid = register_response.json()["data"]["jobs"][0]["doc_uid"]
+        quality_response = client.post(
+            "/quality/check",
+            json={"input_text": "乙方结论只存在于这个文档。", "doc_uid": doc_uid},
+        )
+
+    assert quality_response.status_code == 200
+    claim = quality_response.json()["data"]["claims"][0]
+    assert claim["source_doc"] == doc_uid
+    assert claim["source_doc"] != register_response.json()["data"]["jobs"][1]["doc_uid"]
+
+
+def test_quality_check_should_reject_input_longer_than_2000_characters(tmp_path: Path) -> None:
+    """质检输入超过 2000 字时应返回校验错误。"""
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/quality/check",
+            json={"input_text": "甲" * 2001},
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error_code"] == "VALIDATION_ERROR"
+
+
+def test_quality_check_should_return_not_found_for_unknown_template(tmp_path: Path) -> None:
+    """不存在的质检模板应返回明确错误。"""
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/quality/check",
+            json={"input_text": "测试内容", "template_id": "not_exists"},
+        )
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error_code"] == "NOT_FOUND"
+
+
+def test_initialize_database_should_add_missing_quality_claim_risk_level_column(tmp_path: Path) -> None:
+    """旧版 quality_claims 表初始化后应自动补齐 risk_level 列。"""
+
+    database_path = tmp_path / "legacy_quality.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE quality_claims (
+            claim_id TEXT PRIMARY KEY,
+            check_id TEXT NOT NULL,
+            claim_text TEXT NOT NULL,
+            verdict TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            evidence TEXT NOT NULL,
+            source_doc TEXT,
+            source_span TEXT,
+            review_status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    app = create_app(
+        AppSettings(
+            APP_ENV="test",
+            INPUT_ROOT=tmp_path / "Input",
+            SQLITE_DB_PATH=database_path,
+            CHROMA_PERSIST_DIR=tmp_path / "chroma",
+            RULES_DIR=tmp_path / "rules",
+            TEMPLATES_DIR=tmp_path / "templates",
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    connection = sqlite3.connect(database_path)
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(quality_claims)").fetchall()
+    }
+    connection.close()
+    assert "risk_level" in columns
+
+
+def test_initialize_database_should_add_missing_quality_check_template_columns(tmp_path: Path) -> None:
+    """旧版 quality_checks 表初始化后应自动补齐模板列。"""
+
+    database_path = tmp_path / "legacy_quality_check.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE quality_checks (
+            check_id TEXT PRIMARY KEY,
+            input_text TEXT NOT NULL,
+            overall_verdict TEXT NOT NULL,
+            risk_level TEXT NOT NULL,
+            summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    app = create_app(
+        AppSettings(
+            APP_ENV="test",
+            INPUT_ROOT=tmp_path / "Input",
+            SQLITE_DB_PATH=database_path,
+            CHROMA_PERSIST_DIR=tmp_path / "chroma",
+            RULES_DIR=tmp_path / "rules",
+            TEMPLATES_DIR=tmp_path / "templates",
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    connection = sqlite3.connect(database_path)
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(quality_checks)").fetchall()
+    }
+    connection.close()
+    assert {"template_id", "template_name"}.issubset(columns)
 
 
 def test_rebuild_should_support_fulltext_and_vector_separately(tmp_path: Path) -> None:

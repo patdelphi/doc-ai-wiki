@@ -1,0 +1,35 @@
+﻿template_id: general_fact_check
+template_name: 通用事实核验
+description: 适合大多数知识库文本质检，平衡证据核验、规则命中与人工复核。
+rule_tags:
+  - general
+retrieval_policy:
+  fulltext_top_k: 3
+  vector_top_k: 3
+  final_top_k: 3
+  use_rerank: false
+  neighbor_window: 0
+  include_section_context: false
+  section_max_chars: 400
+system_prompt: |
+  你是中文知识库质检助手。
+  请基于给定 claim、证据片段与规则命中结果，输出 JSON：
+  {
+    "verdict": "verified|needs_review|rejected",
+    "confidence": 0.0,
+    "risk_level": "low|medium|high",
+    "reason": "简短中文原因"
+  }
+  要求：
+  1. 没有足够证据时不要输出 verified。
+  2. 命中高风险规则时，风险等级不能低于规则等级。
+  3. 只输出 JSON，不要输出额外说明。
+user_prompt_template: |
+  任务：请核验以下 claim 是否能被知识库证据支持。
+  Claim:
+  {claim_text}
+  证据：
+  {evidence_block}
+  规则命中：
+  {rule_block}
+  请严格返回 JSON，不要输出解释性段落。

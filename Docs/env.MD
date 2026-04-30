@@ -63,14 +63,27 @@
 
 | 变量名 | 必填 | 默认值 | 说明 |
 |------|------|------|------|
-| `EMBEDDING_PROVIDER` | 否 | `dashscope` | Embedding 提供方 |
-| `EMBEDDING_MODEL` | 否 | `text-embedding-v3` | Embedding 模型名 |
+| `EMBEDDING_PROVIDER` | 否 | `local` | Embedding 提供方，支持 `local` / `openai` |
+| `EMBEDDING_MODEL` | 否 | `deterministic-v1` | Embedding 模型名 |
+| `EMBEDDING_BASE_URL` | 否 | 空 | OpenAI 兼容 Embedding 地址 |
+| `EMBEDDING_API_KEY` | 条件必填 | 空 | 在线 Embedding 密钥 |
+| `EMBEDDING_TIMEOUT_SECONDS` | 否 | `60` | Embedding 超时秒数 |
 | `RERANK_ENABLED` | 否 | `true` | 是否启用重排 |
-| `RERANK_PROVIDER` | 否 | `dashscope` | 重排提供方 |
+| `RERANK_PROVIDER` | 否 | `dashscope` | 重排提供方，支持 `dashscope` / `openai` |
 | `RERANK_MODEL` | 否 | `default` | 重排模型名 |
-| `LLM_PROVIDER` | 否 | `qwen` | 主 LLM 提供方 |
-| `LLM_MODEL` | 否 | `qwen-max` | 主 LLM 模型名 |
+| `RERANK_BASE_URL` | 否 | 空 | 自定义重排服务地址 |
+| `RERANK_API_KEY` | 条件必填 | 空 | 重排密钥；为空时自动降级为关闭 |
+| `RERANK_TIMEOUT_SECONDS` | 否 | `60` | 重排超时秒数 |
+| `LLM_PROVIDER` | 否 | `disabled` | 主 LLM 提供方，支持 `disabled` / `openai` / `anthropic` |
+| `LLM_BASE_URL` | 否 | 空 | OpenAI 兼容或 Anthropic 自定义地址 |
+| `LLM_API_KEY` | 条件必填 | 空 | LLM 统一密钥入口 |
+| `LLM_MODEL` | 否 | `disabled` | 主 LLM 模型名 |
 | `LLM_TIMEOUT_SECONDS` | 否 | `60` | LLM 超时秒数 |
+| `LLM_MAX_TOKENS` | 否 | `1024` | LLM 最大输出 token |
+| `LLM_TEMPERATURE` | 否 | `0` | LLM 温度 |
+| `LLM_TOP_P` | 否 | `1` | LLM top_p |
+| `LLM_ENABLE_THINKING` | 否 | `false` | OpenAI 兼容推理模型是否开启 thinking |
+| `ANTHROPIC_API_VERSION` | 否 | `2023-06-01` | Anthropic API 版本头 |
 
 ### 3.4 密钥配置
 
@@ -132,14 +145,27 @@ SQLITE_DB_PATH=index/app.db
 CHROMA_PERSIST_DIR=index/chroma
 RULES_DIR=rules
 TEMPLATES_DIR=templates
-EMBEDDING_PROVIDER=dashscope
-EMBEDDING_MODEL=text-embedding-v3
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-large
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=your_embedding_api_key
+EMBEDDING_TIMEOUT_SECONDS=60
 RERANK_ENABLED=true
 RERANK_PROVIDER=dashscope
-LLM_PROVIDER=qwen
-LLM_MODEL=qwen-max
+RERANK_MODEL=default
+RERANK_BASE_URL=
+RERANK_API_KEY=your_rerank_api_key
+RERANK_TIMEOUT_SECONDS=60
+LLM_PROVIDER=openai
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your_llm_api_key
+LLM_MODEL=gpt-4.1-mini
 LLM_TIMEOUT_SECONDS=60
-DASHSCOPE_API_KEY=your_api_key_here
+LLM_MAX_TOKENS=1024
+LLM_TEMPERATURE=0
+LLM_TOP_P=1
+LLM_ENABLE_THINKING=false
+ANTHROPIC_API_VERSION=2023-06-01
 ```
 
 ---
@@ -151,6 +177,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 - 路径优先从环境变量或配置文件读取
 - 所有外部服务调用都必须加异常处理和超时
 - 数据库路径变更后必须可通过配置切换
+- 可通过 `python ".aipython/check_model_connectivity.py"` 同时检查 `LLM/Embedding/Rerank` 连通性
 
 ---
 
@@ -206,7 +233,8 @@ DASHSCOPE_API_KEY=your_api_key_here
 开始编码前，建议至少确认以下内容：
 
 - 已准备好 Markdown 样本文档
-- 已准备好 DashScope 或等价模型密钥
+- 已准备好 OpenAI 兼容或 Anthropic LLM 密钥
+- 已确认 Embedding 使用在线模型还是本地回退
 - 已确认 SQLite 和 Chroma 持久化目录
 - 已确认默认模板与规则目录
 - 已确定测试数据目录

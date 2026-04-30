@@ -1,0 +1,24 @@
+- code: G001
+  name: 绝对化表述
+  keywords:
+    - 一定
+    - 必然
+    - 完全
+  hit_level: warn
+  message: 存在绝对化表述，建议人工复核证据边界。
+  template_tags:
+    - general
+    - strict
+    - medical
+
+- code: G002
+  name: 唯一正确结论
+  keywords:
+    - 唯一正确
+    - 毫无争议
+  hit_level: error
+  message: 存在唯一化或无争议断言，需更严格核验。
+  template_tags:
+    - general
+    - strict
+    - ancient

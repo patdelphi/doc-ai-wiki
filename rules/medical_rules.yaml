@@ -1,0 +1,32 @@
+- code: M001
+  name: 绝对疗效表述
+  keywords:
+    - 治愈
+    - 根治
+    - 包治
+  hit_level: error
+  message: 医学内容存在绝对疗效表述，需严格核验证据。
+  template_tags:
+    - medical
+    - strict
+
+- code: M002
+  name: 安全性绝对化
+  keywords:
+    - 无副作用
+    - 绝对安全
+  hit_level: block
+  message: 医学内容存在高风险安全性绝对化表述。
+  template_tags:
+    - medical
+    - strict
+
+- code: M003
+  name: 适用范围过宽
+  keywords:
+    - 人人适用
+    - 所有人都适合
+  hit_level: warn
+  message: 医学内容可能夸大适用范围，建议补充禁忌与适用条件。
+  template_tags:
+    - medical

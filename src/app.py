@@ -8,6 +8,9 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
+from src.ai.embedding import build_embedding_client
+from src.ai.llm import DisabledLLMClient, build_llm_client
+from src.ai.rerank import build_reranker
 from src.common.config import AppSettings, get_settings
 from src.common.errors import AppError, NotFoundAppError, ValidationAppError
 from src.common.logger import configure_logging, get_logger
@@ -37,19 +40,27 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI):
         """应用启动时初始化数据库。"""
 
+        settings.ensure_runtime_directories()
         initialize_database(settings.sqlite_db_path)
         logger.info("数据库初始化完成")
         yield
 
     app = FastAPI(title="中文知识库系统 MVP", version="0.1.0", lifespan=lifespan)
-    vector_store = VectorStore(settings.chroma_persist_dir)
+    embedding_client = build_embedding_client(settings)
+    llm_client = build_llm_client(settings)
+    reranker = build_reranker(settings)
+    vector_store = VectorStore(settings.chroma_persist_dir, embedding_client=embedding_client)
     ingest_service = IngestService(settings)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
     retrieval_service.set_vector_store(vector_store)
+    retrieval_service.set_reranker(reranker)
     quality_service = QualityService(
         settings.sqlite_db_path,
         rules_dir=settings.rules_dir,
+        templates_dir=settings.templates_dir,
         vector_store=vector_store,
+        reranker=reranker,
+        llm_client=None if isinstance(llm_client, DisabledLLMClient) else llm_client,
     )
     review_service = ReviewService(settings.sqlite_db_path)
 
@@ -140,10 +151,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     def search_hybrid(
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=5, ge=1, le=20),
+        use_rerank: bool = Query(default=True),
     ) -> ApiResponse:
         """执行混合检索。"""
 
-        items = retrieval_service.hybrid_search(query, top_k=top_k)
+        items = retrieval_service.hybrid_search(query, top_k=top_k, use_rerank=use_rerank)
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.post("/quality/check", response_model=ApiResponse)
@@ -152,8 +164,20 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
 
         if not request.input_text.strip():
             raise ValidationAppError("input_text 不能为空")
-        result = quality_service.run_check(request.input_text, doc_uid=request.doc_uid)
+        if len(request.input_text) > 2000:
+            raise ValidationAppError("input_text 不能超过 2000 字", details={"max_length": 2000})
+        result = quality_service.run_check(
+            request.input_text,
+            doc_uid=request.doc_uid,
+            template_id=request.template_id,
+        )
         return ApiResponse(success=True, message="ok", data=result)
+
+    @app.get("/quality/templates", response_model=ApiResponse)
+    def list_quality_templates() -> ApiResponse:
+        """列出可用的质检模板。"""
+
+        return ApiResponse(success=True, message="ok", data={"items": quality_service.list_templates()})
 
     @app.get("/quality/result/{check_id}", response_model=ApiResponse)
     def get_quality_result(check_id: str) -> ApiResponse:

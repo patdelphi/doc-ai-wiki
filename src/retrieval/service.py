@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+from src.ai.rerank import BaseReranker, DisabledReranker
 from src.db.connection import create_connection
 from src.retrieval.vector_store import VectorStore
 
@@ -12,80 +15,261 @@ class RetrievalService:
     def __init__(self, database_path) -> None:
         self.database_path = database_path
         self.vector_store = None
+        self.reranker: BaseReranker = DisabledReranker()
 
     def set_vector_store(self, vector_store: VectorStore) -> None:
         """注入向量存储实例。"""
 
         self.vector_store = vector_store
 
-    def fulltext_search(self, query: str, top_k: int = 5) -> list[dict]:
+    def set_reranker(self, reranker: BaseReranker) -> None:
+        """注入重排客户端。"""
+
+        self.reranker = reranker
+
+    def fulltext_search(self, query: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
         """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
+
+        doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
+        like_doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
+        params: tuple = (query, top_k) if not doc_uid else (query, doc_uid, top_k)
+        like_params: tuple = (f"%{query}%", top_k) if not doc_uid else (f"%{query}%", doc_uid, top_k)
 
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
-                """
-                SELECT c.chunk_id, c.doc_uid, d.doc_title, c.source_span, c.content
+                f"""
+                SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
                 FROM chunk_fts f
                 JOIN chunks c ON c.chunk_id = f.chunk_id
                 JOIN documents d ON d.doc_uid = c.doc_uid
                 WHERE chunk_fts MATCH ?
+                {doc_uid_filter}
                 LIMIT ?
                 """,
-                (query, top_k),
+                params,
             ).fetchall()
             if not rows:
                 rows = connection.execute(
-                    """
-                    SELECT c.chunk_id, c.doc_uid, d.doc_title, c.source_span, c.content
+                    f"""
+                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
                     FROM chunks c
                     JOIN documents d ON d.doc_uid = c.doc_uid
                     WHERE content LIKE ?
+                    {like_doc_uid_filter}
                     ORDER BY c.updated_at DESC
                     LIMIT ?
                     """,
-                    (f"%{query}%", top_k),
+                    like_params,
                 ).fetchall()
-        return [self._with_source(dict(row), "fulltext") for row in rows]
+        return [self._with_source(self._normalize_metadata_fields(dict(row)), "fulltext") for row in rows]
 
-    def vector_search(self, query: str, top_k: int = 5) -> list[dict]:
+    def vector_search(self, query: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
         """当前阶段先以简单相似替代向量检索占位。"""
 
         if self.vector_store is None:
             return []
-        items = self.vector_store.query(query, top_k=top_k)
-        return self._attach_document_titles(items, retrieval_source="vector")
+        items = self.vector_store.query(query, top_k=top_k, doc_uid=doc_uid)
+        return self._attach_document_metadata(items, retrieval_source="vector")
 
-    def hybrid_search(self, query: str, top_k: int = 5) -> list[dict]:
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int = 5,
+        doc_uid: str | None = None,
+        *,
+        fulltext_top_k: int | None = None,
+        vector_top_k: int | None = None,
+        use_rerank: bool | None = None,
+    ) -> list[dict]:
         """合并全文与向量检索结果，并按 chunk_id 去重。"""
 
         merged: dict[str, dict] = {}
-        for item in self.fulltext_search(query, top_k=top_k):
-            merged[item["chunk_id"]] = item
-        for item in self.vector_search(query, top_k=top_k):
-            merged.setdefault(item["chunk_id"], item)
-        return list(merged.values())[:top_k]
+        for item in self.fulltext_search(query, top_k=fulltext_top_k or top_k, doc_uid=doc_uid):
+            merged[item["chunk_id"]] = {
+                **item,
+                "matched_sources": ["fulltext"],
+            }
+        for item in self.vector_search(query, top_k=vector_top_k or top_k, doc_uid=doc_uid):
+            existing = merged.get(item["chunk_id"])
+            if existing:
+                matched_sources = set(existing.get("matched_sources", []))
+                matched_sources.add("vector")
+                existing["matched_sources"] = sorted(matched_sources)
+                existing["score"] = max(float(existing.get("score", 0.0)), float(item.get("score", 0.0)))
+                if len(existing["matched_sources"]) > 1:
+                    existing["retrieval_source"] = "hybrid"
+                continue
+            merged[item["chunk_id"]] = {
+                **item,
+                "matched_sources": ["vector"],
+            }
+        items = list(merged.values())
+        should_rerank = self.reranker.enabled if use_rerank is None else use_rerank and self.reranker.enabled
+        if should_rerank:
+            return self.reranker.rerank(query=query, items=items, top_k=top_k)
+        return items[:top_k]
 
-    def _attach_document_titles(self, items: list[dict], *, retrieval_source: str) -> list[dict]:
-        """为检索结果补全文档标题与来源字段。"""
+    def expand_evidence_context(
+        self,
+        items: list[dict],
+        *,
+        neighbor_window: int = 0,
+        include_section_context: bool = False,
+        section_max_chars: int = 500,
+    ) -> list[dict]:
+        """按模板策略为证据补充邻接片段或章节级上下文。"""
+
+        if not items:
+            return []
+
+        expanded_items: list[dict] = []
+        with create_connection(self.database_path) as connection:
+            for item in items:
+                expanded_items.append(
+                    self._build_expanded_item(
+                        connection,
+                        item,
+                        neighbor_window=neighbor_window,
+                        include_section_context=include_section_context,
+                        section_max_chars=section_max_chars,
+                    )
+                )
+        return expanded_items
+
+    def _build_expanded_item(
+        self,
+        connection,
+        item: dict,
+        *,
+        neighbor_window: int,
+        include_section_context: bool,
+        section_max_chars: int,
+    ) -> dict:
+        """为单条证据构建扩展上下文。"""
+
+        chunk_id = item.get("chunk_id")
+        if not chunk_id:
+            return item
+
+        chunk_row = connection.execute(
+            """
+            SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span, c.content,
+                   d.doc_title, s.section_title, s.content AS section_content
+            FROM chunks c
+            JOIN documents d ON d.doc_uid = c.doc_uid
+            LEFT JOIN document_sections s ON s.section_id = c.section_id
+            WHERE c.chunk_id = ?
+            """,
+            (chunk_id,),
+        ).fetchone()
+        if not chunk_row:
+            return item
+
+        row = dict(chunk_row)
+        expanded_content = row["content"]
+        context_mode = "chunk"
+        if neighbor_window > 0:
+            if row.get("section_id"):
+                neighbor_rows = connection.execute(
+                    """
+                    SELECT chunk_index, source_span, content
+                    FROM chunks
+                    WHERE section_id = ? AND chunk_index BETWEEN ? AND ?
+                    ORDER BY chunk_index ASC
+                    """,
+                    (
+                        row["section_id"],
+                        max(int(row["chunk_index"]) - neighbor_window, 0),
+                        int(row["chunk_index"]) + neighbor_window,
+                    ),
+                ).fetchall()
+            else:
+                neighbor_rows = connection.execute(
+                    """
+                    SELECT chunk_index, source_span, content
+                    FROM chunks
+                    WHERE doc_uid = ? AND chunk_index BETWEEN ? AND ?
+                    ORDER BY chunk_index ASC
+                    """,
+                    (
+                        row["doc_uid"],
+                        max(int(row["chunk_index"]) - neighbor_window, 0),
+                        int(row["chunk_index"]) + neighbor_window,
+                    ),
+                ).fetchall()
+            expanded_content = "\n".join(
+                f'[{neighbor["source_span"]}] {neighbor["content"]}'
+                for neighbor in neighbor_rows
+            )
+            context_mode = "neighbor_chunks"
+
+        if include_section_context and row.get("section_content"):
+            section_excerpt = str(row["section_content"])[:section_max_chars]
+            expanded_content = f"{expanded_content}\n\n[章节上下文] {section_excerpt}".strip()
+            context_mode = "section_context"
+
+        return self._with_source(
+            {
+                **item,
+                "doc_title": row.get("doc_title", item.get("doc_title", "")),
+                "section_title": row.get("section_title") or "",
+                "expanded_content": expanded_content,
+                "context_mode": context_mode,
+            },
+            item.get("retrieval_source", ""),
+        )
+
+    def _attach_document_metadata(self, items: list[dict], *, retrieval_source: str) -> list[dict]:
+        """为检索结果补全文档元数据与来源字段。"""
 
         if not items:
             return []
 
         doc_uids = sorted({item["doc_uid"] for item in items if item.get("doc_uid")})
-        titles: dict[str, str] = {}
+        metadata_map: dict[str, dict] = {}
         with create_connection(self.database_path) as connection:
             placeholders = ",".join("?" for _ in doc_uids)
             rows = connection.execute(
                 f"""
-                SELECT doc_uid, doc_title
+                SELECT doc_uid, doc_title, author, source_name, tags_json
                 FROM documents
                 WHERE doc_uid IN ({placeholders})
                 """,
                 tuple(doc_uids),
             ).fetchall()
-            titles = {row["doc_uid"]: row["doc_title"] for row in rows}
+            metadata_map = {
+                row["doc_uid"]: self._normalize_metadata_fields(dict(row))
+                for row in rows
+            }
 
-        return [self._with_source({**item, "doc_title": titles.get(item.get("doc_uid"), "")}, retrieval_source) for item in items]
+        return [
+            self._with_source(
+                {
+                    **item,
+                    **metadata_map.get(item.get("doc_uid"), {}),
+                },
+                retrieval_source,
+            )
+            for item in items
+        ]
+
+    @staticmethod
+    def _normalize_metadata_fields(item: dict) -> dict:
+        """将 tags_json 等字段转换为前端友好的展示结构。"""
+
+        raw_tags = item.pop("tags_json", None)
+        if raw_tags:
+            try:
+                item["tags"] = json.loads(raw_tags)
+            except json.JSONDecodeError:
+                item["tags"] = []
+        else:
+            item["tags"] = item.get("tags", [])
+
+        item["author"] = item.get("author") or ""
+        item["source_name"] = item.get("source_name") or ""
+        item["doc_title"] = item.get("doc_title") or ""
+        return item
 
     @staticmethod
     def _with_source(item: dict, retrieval_source: str) -> dict:
@@ -94,5 +278,8 @@ class RetrievalService:
         return {
             **item,
             "doc_title": item.get("doc_title", ""),
+            "author": item.get("author", ""),
+            "source_name": item.get("source_name", ""),
+            "tags": item.get("tags", []),
             "retrieval_source": retrieval_source,
         }

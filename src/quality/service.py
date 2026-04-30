@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from src.ai.llm import BaseLLMClient
+from src.ai.rerank import BaseReranker
+from src.common.errors import ExternalServiceAppError, ValidationAppError
 from src.common.utils import utc_now_iso
 from src.db.repositories import QualityRepository
+from src.quality.templates import QualityTemplateService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
 from src.rules.service import RuleService
@@ -19,33 +23,76 @@ class QualityService:
         database_path,
         *,
         rules_dir=None,
+        templates_dir=None,
         vector_store: VectorStore | None = None,
+        reranker: BaseReranker | None = None,
+        llm_client: BaseLLMClient | None = None,
     ) -> None:
         self.database_path = database_path
         self.repository = QualityRepository(database_path)
         self.retrieval_service = RetrievalService(database_path)
         self.rule_service = RuleService(rules_dir) if rules_dir is not None else None
+        self.template_service = QualityTemplateService(templates_dir)
+        self.llm_client = llm_client
         if vector_store is not None:
             self.retrieval_service.set_vector_store(vector_store)
+        if reranker is not None:
+            self.retrieval_service.set_reranker(reranker)
 
-    def run_check(self, input_text: str, doc_uid: str | None = None) -> dict:
+    def list_templates(self) -> list[dict]:
+        """列出可选质检模板。"""
+
+        return self.template_service.list_templates()
+
+    def run_check(
+        self,
+        input_text: str,
+        doc_uid: str | None = None,
+        template_id: str | None = None,
+    ) -> dict:
         """执行最小 claim 质检。"""
 
         claims = self._split_claims(input_text)
+        selected_template = self.template_service.get_template(template_id)
+        retrieval_policy = self._build_retrieval_policy(selected_template)
+        active_rule_tags = selected_template.get("rule_tags", [])
         check_id = f"chkres_{uuid4().hex[:12]}"
         now = utc_now_iso()
         claim_items: list[dict] = []
         rule_hits: list[dict] = []
         for claim_text in claims:
             claim_id = f"claim_{uuid4().hex[:12]}"
-            matched_rules = self.rule_service.match_claim(claim_text) if self.rule_service else []
-            evidence_list = self.retrieval_service.hybrid_search(claim_text, top_k=3)
-            evaluation = self._evaluate_claim(evidence_list=evidence_list, matched_rules=matched_rules)
+            matched_rules = (
+                self.rule_service.match_claim(claim_text, active_tags=active_rule_tags)
+                if self.rule_service
+                else []
+            )
+            evidence_list = self.retrieval_service.hybrid_search(
+                claim_text,
+                top_k=retrieval_policy["final_top_k"],
+                doc_uid=doc_uid,
+                fulltext_top_k=retrieval_policy["fulltext_top_k"],
+                vector_top_k=retrieval_policy["vector_top_k"],
+                use_rerank=retrieval_policy["use_rerank"],
+            )
+            evidence_list = self.retrieval_service.expand_evidence_context(
+                evidence_list,
+                neighbor_window=retrieval_policy["neighbor_window"],
+                include_section_context=retrieval_policy["include_section_context"],
+                section_max_chars=retrieval_policy["section_max_chars"],
+            )
+            evaluation = self._evaluate_claim_with_fallback(
+                claim_text=claim_text,
+                evidence_list=evidence_list,
+                matched_rules=matched_rules,
+                prompt_template=selected_template,
+            )
             evidence_text = (
-                evidence_list[0]["content"][:200]
+                (evidence_list[0].get("expanded_content") or evidence_list[0]["content"])[:200]
                 if evaluation["has_evidence"]
                 else "未检索到足够证据，需人工复核"
             )
+            evidence_details = self._build_evidence_details(evidence_list)
             claim_items.append(
                 {
                     "claim_id": claim_id,
@@ -55,6 +102,8 @@ class QualityService:
                     "confidence": evaluation["confidence"],
                     "risk_level": evaluation["risk_level"],
                     "evidence": evidence_text,
+                    "evidence_details": evidence_details,
+                    "evidence_reason": evaluation.get("reason", ""),
                     "source_doc": evidence_list[0]["doc_uid"] if evaluation["has_evidence"] else doc_uid,
                     "source_span": evidence_list[0]["source_span"] if evaluation["has_evidence"] else None,
                     "review_status": "pending",
@@ -81,6 +130,10 @@ class QualityService:
             "check": {
                 "check_id": check_id,
                 "input_text": input_text,
+                "template_id": selected_template["template_id"],
+                "template_name": selected_template["template_name"],
+                "active_rule_tags": active_rule_tags,
+                "retrieval_policy": retrieval_policy,
                 "overall_verdict": overall_verdict,
                 "risk_level": self._build_overall_risk_level(claim_items),
                 "summary": self._build_summary(claim_items, rule_hits),
@@ -96,6 +149,38 @@ class QualityService:
             rule_hits=result["rule_hits"],
         )
         return result
+
+    def _evaluate_claim_with_fallback(
+        self,
+        *,
+        claim_text: str,
+        evidence_list: list[dict],
+        matched_rules: list[dict],
+        prompt_template: dict | None = None,
+    ) -> dict:
+        """优先使用 LLM 判定，失败时回退到启发式逻辑。"""
+
+        heuristic = self._evaluate_claim(evidence_list=evidence_list, matched_rules=matched_rules)
+        heuristic["reason"] = "heuristic"
+        if self.llm_client is None:
+            return heuristic
+
+        try:
+            llm_result = self.llm_client.evaluate_claim(
+                claim_text=claim_text,
+                evidence_list=evidence_list,
+                matched_rules=matched_rules,
+                prompt_template=prompt_template,
+            )
+            return {
+                "verdict": llm_result.get("verdict", heuristic["verdict"]),
+                "confidence": float(llm_result.get("confidence", heuristic["confidence"])),
+                "risk_level": llm_result.get("risk_level", heuristic["risk_level"]),
+                "has_evidence": bool(evidence_list),
+                "reason": llm_result.get("reason", ""),
+            }
+        except (ExternalServiceAppError, ValidationAppError):
+            return heuristic
 
     def get_result(self, check_id: str) -> dict | None:
         """读取质检结果。"""
@@ -184,3 +269,38 @@ class QualityService:
         )
         claims = [item.strip() for item in normalized.split("。") if item.strip()]
         return claims or [input_text.strip()]
+
+    @staticmethod
+    def _build_retrieval_policy(template: dict) -> dict:
+        """基于模板读取检索策略，并补齐默认值。"""
+
+        policy = template.get("retrieval_policy", {}) if isinstance(template.get("retrieval_policy", {}), dict) else {}
+        return {
+            "fulltext_top_k": int(policy.get("fulltext_top_k", 3)),
+            "vector_top_k": int(policy.get("vector_top_k", 3)),
+            "final_top_k": int(policy.get("final_top_k", 3)),
+            "use_rerank": bool(policy.get("use_rerank", False)),
+            "neighbor_window": int(policy.get("neighbor_window", 0)),
+            "include_section_context": bool(policy.get("include_section_context", False)),
+            "section_max_chars": int(policy.get("section_max_chars", 400)),
+        }
+
+    @staticmethod
+    def _build_evidence_details(evidence_list: list[dict]) -> list[dict]:
+        """提取证据级解释字段，便于接口和 UI 展示。"""
+
+        return [
+            {
+                "chunk_id": item.get("chunk_id"),
+                "doc_uid": item.get("doc_uid"),
+                "doc_title": item.get("doc_title", ""),
+                "source_span": item.get("source_span"),
+                "retrieval_source": item.get("retrieval_source", ""),
+                "matched_sources": item.get("matched_sources", []),
+                "rerank_score": item.get("rerank_score"),
+                "context_mode": item.get("context_mode", "chunk"),
+                "section_title": item.get("section_title", ""),
+                "content_preview": str(item.get("expanded_content") or item.get("content", ""))[:300],
+            }
+            for item in evidence_list
+        ]

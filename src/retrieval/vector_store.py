@@ -2,46 +2,23 @@
 
 from __future__ import annotations
 
-from hashlib import md5
-
 import chromadb
 
-
-class DeterministicEmbedding:
-    """基于字符哈希的确定性嵌入，便于本地开发与测试。"""
-
-    def __init__(self, dimension: int = 64) -> None:
-        self.dimension = dimension
-
-    def embed_text(self, text: str) -> list[float]:
-        """将文本映射为固定维度向量。"""
-
-        vector = [0.0] * self.dimension
-        normalized = text.strip()
-        if not normalized:
-            return vector
-
-        for char in normalized:
-            digest = md5(char.encode("utf-8"), usedforsecurity=False).digest()
-            index = digest[0] % self.dimension
-            vector[index] += ((digest[1] % 17) + 1) / 17.0
-
-        scale = float(len(normalized))
-        return [value / scale for value in vector]
-
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """批量嵌入文本。"""
-
-        return [self.embed_text(text) for text in texts]
+from src.ai.embedding import BaseEmbeddingClient, DeterministicEmbeddingClient
 
 
 class VectorStore:
     """ChromaDB 向量集合封装。"""
 
-    def __init__(self, persist_directory, collection_name: str = "knowledge_chunks") -> None:
+    def __init__(
+        self,
+        persist_directory,
+        collection_name: str = "knowledge_chunks",
+        embedding_client: BaseEmbeddingClient | None = None,
+    ) -> None:
         self.client = chromadb.PersistentClient(path=str(persist_directory))
         self.collection = self.client.get_or_create_collection(name=collection_name)
-        self.embedding = DeterministicEmbedding()
+        self.embedding = embedding_client or DeterministicEmbeddingClient()
 
     def upsert_chunks(self, items: list[dict]) -> None:
         """批量写入 chunk 向量记录。"""
@@ -70,13 +47,19 @@ class VectorStore:
 
         self.collection.delete(where={"doc_uid": doc_uid})
 
-    def query(self, query_text: str, top_k: int = 5) -> list[dict]:
+    def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
         """执行向量检索。"""
 
+        query_kwargs = {
+            "query_embeddings": self.embedding.embed_texts([query_text]),
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if doc_uid:
+            query_kwargs["where"] = {"doc_uid": doc_uid}
+
         result = self.collection.query(
-            query_embeddings=[self.embedding.embed_text(query_text)],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"],
+            **query_kwargs,
         )
 
         documents = result.get("documents", [[]])[0]

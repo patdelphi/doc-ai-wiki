@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 CREATE TABLE IF NOT EXISTS quality_checks (
     check_id TEXT PRIMARY KEY,
     input_text TEXT NOT NULL,
+    template_id TEXT,
+    template_name TEXT,
     overall_verdict TEXT NOT NULL,
     risk_level TEXT NOT NULL,
     summary TEXT,
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS quality_claims (
     check_id TEXT NOT NULL,
     claim_text TEXT NOT NULL,
     verdict TEXT NOT NULL,
+    risk_level TEXT NOT NULL DEFAULT 'medium',
     confidence REAL NOT NULL,
     evidence TEXT NOT NULL,
     source_doc TEXT,

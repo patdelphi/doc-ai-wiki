@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from src.ai.embedding import build_embedding_client
 from src.chunking.splitter import split_text
 from src.common.config import AppSettings
 from src.common.errors import DatabaseAppError, NotFoundAppError, ValidationAppError
@@ -24,7 +25,10 @@ class IngestService:
         self.settings = settings
         self.document_repository = DocumentRepository(settings.sqlite_db_path)
         self.job_repository = IngestJobRepository(settings.sqlite_db_path)
-        self.vector_store = VectorStore(settings.chroma_persist_dir)
+        self.vector_store = VectorStore(
+            settings.chroma_persist_dir,
+            embedding_client=build_embedding_client(settings),
+        )
 
     def register_documents(self, documents: list[dict], rebuild_if_exists: bool = False) -> list[dict]:
         """注册文档，并完成最小可用入库流程。"""
