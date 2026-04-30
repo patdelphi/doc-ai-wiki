@@ -1,0 +1,25 @@
+"""程序说明：规则服务入口，负责加载规则并执行匹配。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from src.rules.loader import load_rule_files
+from src.rules.matcher import match_rules
+
+
+class RuleService:
+    """规则服务。"""
+
+    def __init__(self, rules_dir: Path) -> None:
+        self.rules_dir = rules_dir
+
+    def list_rules(self) -> list[dict]:
+        """返回当前可用规则。"""
+
+        return load_rule_files(self.rules_dir)
+
+    def match_claim(self, claim_text: str) -> list[dict]:
+        """对 claim 执行规则匹配。"""
+
+        return match_rules(claim_text, self.list_rules())

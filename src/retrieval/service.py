@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.db.connection import create_connection
+from src.retrieval.vector_store import VectorStore
 
 
 class RetrievalService:
@@ -10,9 +11,15 @@ class RetrievalService:
 
     def __init__(self, database_path) -> None:
         self.database_path = database_path
+        self.vector_store = None
+
+    def set_vector_store(self, vector_store: VectorStore) -> None:
+        """注入向量存储实例。"""
+
+        self.vector_store = vector_store
 
     def fulltext_search(self, query: str, top_k: int = 5) -> list[dict]:
-        """执行 FTS5 全文检索。"""
+        """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
 
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
@@ -25,13 +32,25 @@ class RetrievalService:
                 """,
                 (query, top_k),
             ).fetchall()
+            if not rows:
+                rows = connection.execute(
+                    """
+                    SELECT chunk_id, doc_uid, source_span, content
+                    FROM chunks
+                    WHERE content LIKE ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", top_k),
+                ).fetchall()
         return [dict(row) for row in rows]
 
     def vector_search(self, query: str, top_k: int = 5) -> list[dict]:
         """当前阶段先以简单相似替代向量检索占位。"""
 
-        # 说明：MVP 第一阶段先保留接口形状，后续接入 ChromaDB 时替换此实现。
-        return self.fulltext_search(query, top_k=top_k)
+        if self.vector_store is None:
+            return []
+        return self.vector_store.query(query, top_k=top_k)
 
     def hybrid_search(self, query: str, top_k: int = 5) -> list[dict]:
         """合并全文与向量检索结果，并按 chunk_id 去重。"""

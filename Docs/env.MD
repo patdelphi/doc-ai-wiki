@@ -26,7 +26,7 @@
 
 建议默认路径：
 
-- 文档目录：`data/docs`
+- 文档目录：`Input`
 - SQLite 数据库：`index/app.db`
 - ChromaDB 目录：`index/chroma`
 - 规则目录：`rules`
@@ -53,7 +53,7 @@
 
 | 变量名 | 必填 | 默认值 | 说明 |
 |------|------|------|------|
-| `DOCS_ROOT` | 否 | `data/docs` | Markdown 文档根目录 |
+| `INPUT_ROOT` | 否 | `Input` | 知识库输入目录 |
 | `SQLITE_DB_PATH` | 否 | `index/app.db` | SQLite 文件路径 |
 | `CHROMA_PERSIST_DIR` | 否 | `index/chroma` | ChromaDB 持久化目录 |
 | `RULES_DIR` | 否 | `rules` | 规则目录 |
@@ -127,7 +127,7 @@ APP_HOST=127.0.0.1
 APP_PORT=8000
 GRADIO_PORT=7860
 LOG_LEVEL=INFO
-DOCS_ROOT=data/docs
+INPUT_ROOT=Input
 SQLITE_DB_PATH=index/app.db
 CHROMA_PERSIST_DIR=index/chroma
 RULES_DIR=rules
@@ -160,7 +160,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 - 测试数据库：`index/test_app.db`
 - 测试 Chroma 目录：`index/test_chroma`
-- 测试文档目录：`tests/fixtures/docs`
+- 测试输入目录：`tests/fixtures/docs`
 - 测试规则目录：`tests/fixtures/rules`
 
 建议增加以下环境变量：
@@ -169,7 +169,7 @@ DASHSCOPE_API_KEY=your_api_key_here
 |------|------|
 | `TEST_SQLITE_DB_PATH` | 测试数据库路径 |
 | `TEST_CHROMA_PERSIST_DIR` | 测试向量目录 |
-| `TEST_DOCS_ROOT` | 测试文档目录 |
+| `TEST_INPUT_ROOT` | 测试输入目录 |
 
 ---
 

@@ -7,15 +7,26 @@ from uuid import uuid4
 from src.common.utils import utc_now_iso
 from src.db.repositories import QualityRepository
 from src.retrieval.service import RetrievalService
+from src.retrieval.vector_store import VectorStore
+from src.rules.service import RuleService
 
 
 class QualityService:
     """质检服务。"""
 
-    def __init__(self, database_path) -> None:
+    def __init__(
+        self,
+        database_path,
+        *,
+        rules_dir=None,
+        vector_store: VectorStore | None = None,
+    ) -> None:
         self.database_path = database_path
         self.repository = QualityRepository(database_path)
         self.retrieval_service = RetrievalService(database_path)
+        self.rule_service = RuleService(rules_dir) if rules_dir is not None else None
+        if vector_store is not None:
+            self.retrieval_service.set_vector_store(vector_store)
 
     def run_check(self, input_text: str, doc_uid: str | None = None) -> dict:
         """执行最小 claim 质检。"""
@@ -24,11 +35,17 @@ class QualityService:
         check_id = f"chkres_{uuid4().hex[:12]}"
         now = utc_now_iso()
         claim_items: list[dict] = []
+        rule_hits: list[dict] = []
         for claim_text in claims:
+            claim_id = f"claim_{uuid4().hex[:12]}"
+            matched_rules = self.rule_service.match_claim(claim_text) if self.rule_service else []
             evidence_list = self.retrieval_service.hybrid_search(claim_text, top_k=3)
             has_evidence = bool(evidence_list)
+            has_rule_hits = bool(matched_rules)
             verdict = "verified" if has_evidence else "needs_review"
-            confidence = 0.8 if has_evidence else 0.2
+            if has_rule_hits:
+                verdict = "needs_review"
+            confidence = 0.6 if has_rule_hits else (0.8 if has_evidence else 0.2)
             evidence_text = (
                 evidence_list[0]["content"][:200]
                 if has_evidence
@@ -36,7 +53,7 @@ class QualityService:
             )
             claim_items.append(
                 {
-                    "claim_id": f"claim_{uuid4().hex[:12]}",
+                    "claim_id": claim_id,
                     "check_id": check_id,
                     "claim_text": claim_text,
                     "verdict": verdict,
@@ -49,6 +66,19 @@ class QualityService:
                     "updated_at": now,
                 }
             )
+            for matched_rule in matched_rules:
+                rule_hits.append(
+                    {
+                        "rule_hit_id": f"rhit_{uuid4().hex[:12]}",
+                        "check_id": check_id,
+                        "claim_id": claim_id,
+                        "rule_code": matched_rule["rule_code"],
+                        "rule_name": matched_rule["rule_name"],
+                        "hit_level": matched_rule["hit_level"],
+                        "hit_message": matched_rule["hit_message"],
+                        "created_at": now,
+                    }
+                )
 
         overall_verdict = "passed" if all(item["verdict"] == "verified" for item in claim_items) else "needs_review"
         result = {
@@ -62,10 +92,12 @@ class QualityService:
                 "updated_at": now,
             },
             "claims": claim_items,
+            "rule_hits": rule_hits,
         }
         self.repository.create_quality_result(
             quality_check=result["check"],
             claims=result["claims"],
+            rule_hits=result["rule_hits"],
         )
         return result
 

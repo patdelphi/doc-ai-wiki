@@ -7,3 +7,4 @@ chunk_overlap: 100
 enable_cache: false
 quality_template: "default"
 retry_count: 1
+input_root: "Input"

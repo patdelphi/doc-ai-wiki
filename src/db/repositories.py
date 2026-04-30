@@ -30,6 +30,20 @@ class DocumentRepository:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_by_doc_uid(self, doc_uid: str) -> dict[str, Any] | None:
+        """按文档唯一标识查询文档。"""
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM documents
+                WHERE doc_uid = ?
+                """,
+                (doc_uid,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def upsert_document(self, payload: dict[str, Any]) -> None:
         """插入或更新文档。"""
 
@@ -65,6 +79,25 @@ class DocumentRepository:
                     payload.get("created_at", now),
                     now,
                 ),
+            )
+
+    def update_index_status(
+        self,
+        *,
+        doc_uid: str,
+        index_status: str,
+        error_message: str | None = None,
+    ) -> None:
+        """更新文档索引状态。"""
+
+        with transaction(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET index_status = ?, error_message = ?, updated_at = ?
+                WHERE doc_uid = ?
+                """,
+                (index_status, error_message, utc_now_iso(), doc_uid),
             )
 
     def list_documents(
@@ -148,6 +181,7 @@ class QualityRepository:
         *,
         quality_check: dict[str, Any],
         claims: list[dict[str, Any]],
+        rule_hits: list[dict[str, Any]] | None = None,
     ) -> None:
         """保存质检主记录与 claim 明细。"""
 
@@ -192,6 +226,28 @@ class QualityRepository:
                     for claim in claims
                 ],
             )
+            if rule_hits:
+                connection.executemany(
+                    """
+                    INSERT INTO rule_hits (
+                        rule_hit_id, check_id, claim_id, rule_code, rule_name,
+                        hit_level, hit_message, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            hit["rule_hit_id"],
+                            hit["check_id"],
+                            hit.get("claim_id"),
+                            hit["rule_code"],
+                            hit["rule_name"],
+                            hit["hit_level"],
+                            hit["hit_message"],
+                            hit["created_at"],
+                        )
+                        for hit in rule_hits
+                    ],
+                )
 
     def get_quality_result(self, check_id: str) -> dict[str, Any] | None:
         """读取质检结果。"""
@@ -212,10 +268,20 @@ class QualityRepository:
                 """,
                 (check_id,),
             ).fetchall()
+            rule_hit_rows = connection.execute(
+                """
+                SELECT *
+                FROM rule_hits
+                WHERE check_id = ?
+                ORDER BY created_at ASC
+                """,
+                (check_id,),
+            ).fetchall()
 
         return {
             "check": dict(check_row),
             "claims": [dict(row) for row in claim_rows],
+            "rule_hits": [dict(row) for row in rule_hit_rows],
         }
 
     def insert_review_record(self, payload: dict[str, Any]) -> None:

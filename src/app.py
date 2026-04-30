@@ -23,6 +23,7 @@ from src.ingest.service import IngestService
 from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
+from src.retrieval.vector_store import VectorStore
 
 
 def create_app(settings_override: AppSettings | None = None) -> FastAPI:
@@ -41,9 +42,15 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         yield
 
     app = FastAPI(title="中文知识库系统 MVP", version="0.1.0", lifespan=lifespan)
+    vector_store = VectorStore(settings.chroma_persist_dir)
     ingest_service = IngestService(settings)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
-    quality_service = QualityService(settings.sqlite_db_path)
+    retrieval_service.set_vector_store(vector_store)
+    quality_service = QualityService(
+        settings.sqlite_db_path,
+        rules_dir=settings.rules_dir,
+        vector_store=vector_store,
+    )
     review_service = ReviewService(settings.sqlite_db_path)
 
     @app.exception_handler(AppError)

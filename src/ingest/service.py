@@ -7,12 +7,13 @@ from uuid import uuid4
 
 from src.chunking.splitter import split_text
 from src.common.config import AppSettings
-from src.common.errors import NotFoundAppError, ValidationAppError
+from src.common.errors import DatabaseAppError, NotFoundAppError, ValidationAppError
 from src.common.utils import read_text_file, sha256_of_text, utc_now_iso
-from src.db.connection import create_connection
 from src.db.repositories import DocumentRepository, IngestJobRepository
 from src.db.transaction import transaction
 from src.metadata.extractor import extract_basic_metadata
+from src.metadata.sections import parse_markdown_sections
+from src.retrieval.vector_store import VectorStore
 
 
 class IngestService:
@@ -22,6 +23,7 @@ class IngestService:
         self.settings = settings
         self.document_repository = DocumentRepository(settings.sqlite_db_path)
         self.job_repository = IngestJobRepository(settings.sqlite_db_path)
+        self.vector_store = VectorStore(settings.chroma_persist_dir)
 
     def register_documents(self, documents: list[dict], rebuild_if_exists: bool = False) -> list[dict]:
         """注册文档，并完成最小可用入库流程。"""
@@ -55,7 +57,7 @@ class IngestService:
                 )
                 continue
 
-            self._save_document_and_chunks(
+            chunk_items = self._save_document_and_chunks(
                 doc_uid=doc_uid,
                 doc_id=doc_id,
                 doc_title=document.get("doc_title") or metadata["doc_title"],
@@ -64,6 +66,7 @@ class IngestService:
                 source_hash=source_hash,
                 content=content,
             )
+            self._sync_vector_index(doc_uid=doc_uid, chunk_items=chunk_items)
 
             job_id = f"job_{uuid4().hex[:12]}"
             now = utc_now_iso()
@@ -92,11 +95,35 @@ class IngestService:
         )
 
     def rebuild_documents(self, doc_uids: list[str]) -> list[str]:
-        """最小重建逻辑：当前版本仅接受请求并回传 accepted 列表。"""
+        """根据现有文档记录重新构建 SQLite 索引与向量索引。"""
 
         if not doc_uids:
             raise ValidationAppError("doc_uids 不能为空")
-        return doc_uids
+
+        accepted: list[str] = []
+        for doc_uid in doc_uids:
+            document = self.document_repository.get_by_doc_uid(doc_uid)
+            if not document:
+                raise NotFoundAppError("文档不存在", details={"doc_uid": doc_uid})
+
+            file_path = Path(document["source_path"])
+            if not file_path.exists():
+                raise NotFoundAppError("源文档不存在", details={"doc_uid": doc_uid, "file_path": str(file_path)})
+
+            content = read_text_file(file_path)
+            chunk_items = self._save_document_and_chunks(
+                doc_uid=document["doc_uid"],
+                doc_id=document["doc_id"],
+                doc_title=document["doc_title"],
+                edition=document.get("edition") or "default",
+                file_path=file_path,
+                source_hash=sha256_of_text(content),
+                content=content,
+            )
+            self._sync_vector_index(doc_uid=doc_uid, chunk_items=chunk_items)
+            accepted.append(doc_uid)
+
+        return accepted
 
     def _save_document_and_chunks(
         self,
@@ -108,11 +135,12 @@ class IngestService:
         file_path: Path,
         source_hash: str,
         content: str,
-    ) -> None:
+    ) -> list[dict]:
         """保存文档主记录并构建最小 chunk 与 FTS 数据。"""
 
         now = utc_now_iso()
-        chunks = split_text(content)
+        sections = parse_markdown_sections(content, fallback_title=doc_title)
+        chunk_items: list[dict] = []
         with transaction(self.settings.sqlite_db_path) as connection:
             connection.execute(
                 """
@@ -148,50 +176,81 @@ class IngestService:
             connection.execute("DELETE FROM document_sections WHERE doc_uid = ?", (doc_uid,))
             connection.execute("DELETE FROM chunks WHERE doc_uid = ?", (doc_uid,))
             connection.execute("DELETE FROM chunk_fts WHERE doc_uid = ?", (doc_uid,))
-            connection.execute(
-                """
-                INSERT INTO document_sections (
-                    section_id, doc_uid, section_title, section_level, source_span,
-                    content, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    f"sec_{uuid4().hex[:12]}",
-                    doc_uid,
-                    doc_title,
-                    1,
-                    "全文",
-                    content,
-                    now,
-                    now,
-                ),
-            )
-            for chunk_index, chunk_content in enumerate(chunks):
-                chunk_id = f"chk_{uuid4().hex[:12]}"
-                source_span = f"chunk-{chunk_index}"
+            chunk_index = 0
+            for section in sections:
+                section_id = f"sec_{uuid4().hex[:12]}"
                 connection.execute(
                     """
-                    INSERT INTO chunks (
-                        chunk_id, doc_uid, section_id, chunk_index, content, source_span,
-                        token_count, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO document_sections (
+                        section_id, doc_uid, section_title, section_level, source_span,
+                        content, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        chunk_id,
+                        section_id,
                         doc_uid,
-                        None,
-                        chunk_index,
-                        chunk_content,
-                        source_span,
-                        len(chunk_content),
+                        section["section_title"],
+                        section["section_level"],
+                        section["source_span"],
+                        section["content"],
                         now,
                         now,
                     ),
                 )
-                connection.execute(
-                    """
-                    INSERT INTO chunk_fts (chunk_id, doc_uid, content)
-                    VALUES (?, ?, ?)
-                    """,
-                    (chunk_id, doc_uid, chunk_content),
-                )
+
+                for chunk_content in split_text(section["content"]):
+                    chunk_id = f"chk_{uuid4().hex[:12]}"
+                    source_span = f"{section['source_span']}:chunk-{chunk_index}"
+                    chunk_item = {
+                        "chunk_id": chunk_id,
+                        "doc_uid": doc_uid,
+                        "section_id": section_id,
+                        "source_span": source_span,
+                        "content": chunk_content,
+                    }
+                    chunk_items.append(chunk_item)
+                    connection.execute(
+                        """
+                        INSERT INTO chunks (
+                            chunk_id, doc_uid, section_id, chunk_index, content, source_span,
+                            token_count, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            chunk_id,
+                            doc_uid,
+                            section_id,
+                            chunk_index,
+                            chunk_content,
+                            source_span,
+                            len(chunk_content),
+                            now,
+                            now,
+                        ),
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO chunk_fts (chunk_id, doc_uid, content)
+                        VALUES (?, ?, ?)
+                        """,
+                        (chunk_id, doc_uid, chunk_content),
+                    )
+                    chunk_index += 1
+        return chunk_items
+
+    def _sync_vector_index(self, *, doc_uid: str, chunk_items: list[dict]) -> None:
+        """同步写入 ChromaDB，失败时标记部分失败状态。"""
+
+        try:
+            self.vector_store.delete_by_doc_uid(doc_uid)
+            self.vector_store.upsert_chunks(chunk_items)
+        except Exception as exc:  # noqa: BLE001
+            self.document_repository.update_index_status(
+                doc_uid=doc_uid,
+                index_status="partial_failed",
+                error_message=f"vector_index: {exc}",
+            )
+            raise DatabaseAppError(
+                "向量索引写入失败",
+                details={"doc_uid": doc_uid, "stage": "vector_index"},
+            ) from exc

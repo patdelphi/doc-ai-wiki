@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.coverage
+*.pyc
+index/*.db
+index/chroma/
+index/test_*.db
+.env

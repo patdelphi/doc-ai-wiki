@@ -1,4 +1,4 @@
-# 中文知识库系统详细设计
+﻿# 中文知识库系统详细设计
 
 > **版本**：v1.0
 > **日期**：2026-04-30
@@ -383,7 +383,7 @@ wiki-donge/
   "doc_id": "zhongguo_wenxue",
   "doc_title": "中国文学史纲要",
   "edition": "第一版",
-  "source_path": "data/docs/中国文学史纲要/中国文学史纲要_v1.MD",
+  "source_path": "Input/中国文学史纲要/中国文学史纲要_v1.MD",
   "source_hash": "sha256_xxx",
   "status": "indexed",
   "created_at": "2026-04-30T10:00:00",

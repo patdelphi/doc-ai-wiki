@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +24,12 @@ class AppSettings(BaseSettings):
     gradio_port: int = Field(default=7860, alias="GRADIO_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    docs_root: Path = Field(default=Path("data/docs"), alias="DOCS_ROOT")
+    # 兼容旧的 DOCS_ROOT，同时明确新语义为知识库输入目录。
+    input_root: Path = Field(
+        default=Path("Input"),
+        alias="INPUT_ROOT",
+        validation_alias=AliasChoices("INPUT_ROOT", "DOCS_ROOT"),
+    )
     sqlite_db_path: Path = Field(default=Path("index/app.db"), alias="SQLITE_DB_PATH")
     chroma_persist_dir: Path = Field(default=Path("index/chroma"), alias="CHROMA_PERSIST_DIR")
     rules_dir: Path = Field(default=Path("rules"), alias="RULES_DIR")
@@ -44,7 +49,7 @@ class AppSettings(BaseSettings):
     def ensure_runtime_directories(self) -> None:
         """确保运行期依赖目录存在。"""
 
-        self.docs_root.mkdir(parents=True, exist_ok=True)
+        self.input_root.mkdir(parents=True, exist_ok=True)
         self.sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self.rules_dir.mkdir(parents=True, exist_ok=True)
