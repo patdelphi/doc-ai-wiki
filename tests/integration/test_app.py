@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from src.app import create_app
 from src.common.config import AppSettings
+from src.db.connection import initialize_database
 
 
 def build_test_settings(tmp_path: Path) -> AppSettings:
@@ -365,6 +366,29 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
     assert persisted_claims[0]["review_status"] == "approved"
     assert persisted_claims[0]["risk_level"] == "medium"
     assert quality_payload["data"]["claims"][0]["evidence_details"]
+
+
+def test_register_document_should_only_mark_indexed_after_vector_success(tmp_path: Path) -> None:
+    """向量写入成功后才应标记 indexed。"""
+
+    from src.ingest.service import IngestService
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    sample_file = input_root / "sample_doc.MD"
+    sample_file.write_text("# 测试文档\n\n这是一篇用于索引状态测试的文档。", encoding="utf-8")
+
+    settings = build_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    service = IngestService(settings)
+    service.vector_store.upsert_chunks = lambda items, **kwargs: None  # type: ignore[method-assign]
+
+    result = service.register_document({"file_path": str(sample_file)})
+    items, _ = service.list_status(doc_uid=None, status=None, page=1, page_size=10)
+
+    assert result["status"] == "completed"
+    assert result["progress_events"][-1]["percent"] == 100
+    assert items[0]["index_status"] == "indexed"
 
 
 def test_quality_check_should_limit_evidence_with_doc_uid(tmp_path: Path) -> None:

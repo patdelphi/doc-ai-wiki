@@ -43,7 +43,7 @@ class AppSettings(BaseSettings):
         alias="EMBEDDING_API_KEY",
         validation_alias=AliasChoices("EMBEDDING_API_KEY", "OPENAI_API_KEY"),
     )
-    embedding_timeout_seconds: int = Field(default=60, alias="EMBEDDING_TIMEOUT_SECONDS")
+    embedding_timeout_seconds: int = Field(default=180, alias="EMBEDDING_TIMEOUT_SECONDS")
     rerank_enabled: bool = Field(default=True, alias="RERANK_ENABLED")
     rerank_provider: str = Field(default="dashscope", alias="RERANK_PROVIDER")
     rerank_model: str = Field(default="default", alias="RERANK_MODEL")

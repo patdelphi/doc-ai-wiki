@@ -187,7 +187,7 @@ def test_openai_embedding_client_should_fallback_to_single_input_when_batch_reje
             payload={"data": [{"embedding": [float(len(input_value[0]))]}]},
         )
 
-    monkeypatch.setattr("src.ai.embedding.httpx.post", fake_post)
+    monkeypatch.setattr("src.ai.embedding.httpx.Client.post", fake_post)
     client = OpenAICompatibleEmbeddingClient(
         base_url="https://example.com/v1",
         api_key="test-key",

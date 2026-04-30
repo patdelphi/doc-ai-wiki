@@ -107,6 +107,26 @@ class DocumentRepository:
                 (index_status, error_message, utc_now_iso(), doc_uid),
             )
 
+    def update_ingest_state(
+        self,
+        *,
+        doc_uid: str,
+        ingest_status: str,
+        index_status: str,
+        error_message: str | None = None,
+    ) -> None:
+        """统一更新文档入库与索引状态。"""
+
+        with transaction(self.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET ingest_status = ?, index_status = ?, error_message = ?, updated_at = ?
+                WHERE doc_uid = ?
+                """,
+                (ingest_status, index_status, error_message, utc_now_iso(), doc_uid),
+            )
+
     def list_documents(
         self,
         *,

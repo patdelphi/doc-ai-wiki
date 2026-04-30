@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import gradio as gr
 
+from src.common.errors import AppError
 from src.ui.viewmodels import (
+    build_document_action_updates,
     build_doc_uid_choices,
     build_document_management_state,
     build_document_choices,
     build_recent_claim_navigation,
+    format_ingest_result,
     format_claim_detail_for_review,
     format_review_history,
     format_search_results,
     build_template_choices,
     format_quality_result,
     format_recent_quality_checks,
+    get_document_detail,
     get_review_target_claim_id,
     parse_claim_choice,
     parse_doc_uid_choice,
@@ -32,64 +36,158 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     template_choices = build_template_choices(template_items)
     default_template_choice = template_choices[0] if template_choices else None
 
-    def load_document_management_state() -> tuple[gr.Dropdown, dict, list[dict], gr.Dropdown]:
+    def load_document_management_state() -> tuple[dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
         documents = scan_input_documents(ingest_service.settings.input_root)
         status_items, _ = ingest_service.list_status(doc_uid=None, status=None, page=1, page_size=50)
         state = build_document_management_state(documents, status_items)
+        register_button_state, rebuild_button_state = build_document_action_updates(state["selected_detail"])
         return (
+            state["scan_summary"],
+            state["table_rows"],
             gr.Dropdown(
                 choices=state["document_choices"],
-                value=state["document_choices"][0] if state["document_choices"] else None,
+                value=state["default_choice"],
             ),
-            state["scan_summary"],
-            state["status_items"],
-            gr.Dropdown(
-                choices=state["rebuild_choices"],
-                value=state["rebuild_choices"][0] if state["rebuild_choices"] else None,
-            ),
+            state["selected_detail"],
+            gr.Button(interactive=register_button_state["interactive"]),
+            gr.Button(interactive=rebuild_button_state["interactive"]),
         )
 
-    def register_selected_document(choice: str) -> tuple[dict, list[dict], gr.Dropdown]:
+    def refresh_document_management_state(selected_choice: str | None = None) -> tuple[dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
+        documents = scan_input_documents(ingest_service.settings.input_root)
+        status_items, _ = ingest_service.list_status(doc_uid=None, status=None, page=1, page_size=50)
+        state = build_document_management_state(documents, status_items)
+        active_choice = selected_choice if selected_choice in state["document_choices"] else state["default_choice"]
+        selected_detail = get_document_detail(active_choice, state["document_detail_map"])
+        register_button_state, rebuild_button_state = build_document_action_updates(selected_detail)
+        return (
+            state["scan_summary"],
+            state["table_rows"],
+            gr.Dropdown(
+                choices=state["document_choices"],
+                value=active_choice,
+            ),
+            selected_detail,
+            gr.Button(interactive=register_button_state["interactive"]),
+            gr.Button(interactive=rebuild_button_state["interactive"]),
+        )
+
+    def inspect_document(choice: str) -> tuple[dict, gr.Button, gr.Button]:
+        documents = scan_input_documents(ingest_service.settings.input_root)
+        status_items, _ = ingest_service.list_status(doc_uid=None, status=None, page=1, page_size=50)
+        state = build_document_management_state(documents, status_items)
+        detail = get_document_detail(choice, state["document_detail_map"])
+        register_button_state, rebuild_button_state = build_document_action_updates(detail)
+        return detail, gr.Button(interactive=register_button_state["interactive"]), gr.Button(interactive=rebuild_button_state["interactive"])
+
+    def register_selected_document(
+        choice: str,
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple[dict, dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
         file_path = parse_document_choice(choice)
         if not file_path:
-            status_items, dropdown = query_ingest_status()
-            return {"success": False, "message": "请选择文档"}, status_items, dropdown
-        jobs = ingest_service.register_documents(
-            [{"file_path": file_path}],
-            rebuild_if_exists=False,
-        )
-        status_items, dropdown = query_ingest_status()
-        return {"success": True, "jobs": jobs}, status_items, dropdown
+            summary, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state(choice)
+            return (
+                {"success": False, "message": "请选择文档"},
+                summary,
+                table_rows,
+                dropdown,
+                detail,
+                register_state,
+                rebuild_state,
+            )
+        progress(0, desc="准备执行当前文档注册")
+        try:
+            job = ingest_service.register_document(
+                {"file_path": file_path},
+                rebuild_if_exists=False,
+                progress_callback=lambda info: progress(
+                    info["percent"] / 100,
+                    desc=f'{info["message"]}（{info["percent"]}%）',
+                ),
+            )
+            payload = format_ingest_result({"success": True, "job": job}, job.get("progress_events", []))
+        except AppError as exc:
+            payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
+        summary, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state(choice)
+        return (payload, summary, table_rows, dropdown, detail, register_state, rebuild_state)
 
-    def register_all_documents() -> tuple[dict, list[dict], gr.Dropdown]:
+    def register_all_documents(
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple[dict, dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
         documents = scan_input_documents(ingest_service.settings.input_root)
         if not documents:
-            status_items, dropdown = query_ingest_status()
-            return {"success": False, "message": "Input 目录下没有可注册文档"}, status_items, dropdown
-        jobs = ingest_service.register_documents(
-            [{"file_path": item["file_path"]} for item in documents],
-            rebuild_if_exists=False,
-        )
-        status_items, dropdown = query_ingest_status()
-        return {"success": True, "jobs": jobs}, status_items, dropdown
+            summary, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state()
+            return (
+                {"success": False, "message": "Input 目录下没有可注册文档"},
+                summary,
+                table_rows,
+                dropdown,
+                detail,
+                register_state,
+                rebuild_state,
+            )
+        progress(0, desc="准备批量注册文档")
+        try:
+            jobs = ingest_service.register_documents(
+                [{"file_path": item["file_path"]} for item in documents],
+                rebuild_if_exists=False,
+                progress_callback=lambda info: progress(
+                    info["overall_percent"] / 100,
+                    desc=(
+                        f'第 {info["current_document"]}/{info["total_documents"]} 篇：'
+                        f'{info["message"]}（总进度 {info["overall_percent"]}%）'
+                    ),
+                ),
+            )
+            merged_progress: list[dict] = []
+            for job in jobs:
+                merged_progress.extend(job.get("progress_events", []))
+            payload = format_ingest_result({"success": True, "jobs": jobs}, merged_progress)
+        except AppError as exc:
+            payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
+        summary, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state()
+        return (payload, summary, table_rows, dropdown, detail, register_state, rebuild_state)
 
-    def query_ingest_status() -> tuple[list[dict], gr.Dropdown]:
+    def query_ingest_status() -> tuple[dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
         items, _ = ingest_service.list_status(doc_uid=None, status=None, page=1, page_size=50)
         choices = build_doc_uid_choices(items)
-        return items, gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+        summary, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state()
+        return summary, table_rows, dropdown, detail, register_state, rebuild_state
 
-    def rebuild_selected_document(doc_choice: str) -> tuple[dict, list[dict], gr.Dropdown]:
-        doc_uid = parse_doc_uid_choice(doc_choice)
+    def rebuild_selected_document(
+        choice: str,
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple[dict, dict, list[list[str]], gr.Dropdown, dict, gr.Button, gr.Button]:
+        detail = inspect_document(choice)[0]
+        doc_uid = detail.get("doc_uid")
         if not doc_uid:
-            status_items, dropdown = query_ingest_status()
-            return {"success": False, "message": "请选择待重建文档"}, status_items, dropdown
-        accepted = ingest_service.rebuild_documents(
-            [doc_uid],
-            rebuild_fulltext=True,
-            rebuild_vector=True,
-        )
-        status_items, dropdown = query_ingest_status()
-        return {"success": True, "accepted": accepted}, status_items, dropdown
+            summary, table_rows, dropdown, current_detail, register_state, rebuild_state = refresh_document_management_state(choice)
+            return (
+                {"success": False, "message": "当前文档尚未入库，无法重建"},
+                summary,
+                table_rows,
+                dropdown,
+                current_detail,
+                register_state,
+                rebuild_state,
+            )
+        progress(0, desc="准备执行索引重建")
+        try:
+            accepted = ingest_service.rebuild_documents(
+                [doc_uid],
+                rebuild_fulltext=True,
+                rebuild_vector=True,
+                progress_callback=lambda info: progress(
+                    info["overall_percent"] / 100,
+                    desc=f'{info["message"]}（{info["overall_percent"]}%）',
+                ),
+            )
+            payload = {"success": True, "accepted": accepted}
+        except AppError as exc:
+            payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
+        summary, table_rows, dropdown, current_detail, register_state, rebuild_state = refresh_document_management_state(choice)
+        return (payload, summary, table_rows, dropdown, current_detail, register_state, rebuild_state)
 
     def run_search(query: str, top_k: int) -> list[dict]:
         items = retrieval_service.hybrid_search(query, top_k=top_k, use_rerank=True)
@@ -207,16 +305,34 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         gr.Markdown("# 中文知识库系统 MVP")
 
         with gr.Tab("文档管理"):
-            scan_button = gr.Button("扫描 Input 文档")
-            document_choices = gr.Dropdown(label="可注册文档", choices=[], interactive=True)
-            register_button = gr.Button("注册选中文档")
-            register_all_button = gr.Button("注册全部文档")
-            register_result = gr.JSON(label="注册结果")
-            rebuild_doc_choice = gr.Dropdown(label="可重建文档", choices=[], interactive=True)
-            rebuild_button = gr.Button("重建选中文档索引")
-            rebuild_result = gr.JSON(label="重建结果")
-            status_button = gr.Button("刷新入库状态")
-            status_table = gr.JSON(label="文档状态")
+            gr.Markdown(
+                """
+### 功能说明
+- 左侧用于查看和选择当前 `"Input"` 目录中的文档，并自动展示是否已入库、是否需要重建。
+- 右侧用于执行注册、批量注册、重建索引，并实时查看当前步骤、完成数量和进度摘要。
+                """
+            )
+            with gr.Row():
+                with gr.Column(scale=7):
+                    scan_button = gr.Button("刷新文档列表")
+                    document_summary = gr.JSON(label="文档概览")
+                    document_table = gr.Dataframe(
+                        headers=["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+                        datatype=["str"] * 9,
+                        interactive=False,
+                        row_count=0,
+                        column_count=9,
+                        label="现有文档列表",
+                    )
+                    document_choices = gr.Dropdown(label="当前选中文档", choices=[], interactive=True)
+                    document_detail = gr.JSON(label="文档详情")
+                with gr.Column(scale=5):
+                    register_button = gr.Button("注册当前文档", interactive=False)
+                    register_all_button = gr.Button("注册全部待处理文档")
+                    rebuild_button = gr.Button("重建当前文档索引", interactive=False)
+                    status_button = gr.Button("刷新状态")
+                    register_result = gr.JSON(label="执行结果 / 进度")
+                    rebuild_result = gr.JSON(label="重建结果")
 
         with gr.Tab("文档检索"):
             search_query = gr.Textbox(label="检索内容")
@@ -257,22 +373,30 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             review_history = gr.JSON(label="最近审核记录")
         scan_button.click(
             fn=load_document_management_state,
-            outputs=[document_choices, register_result, status_table, rebuild_doc_choice],
+            outputs=[document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
+        )
+        document_choices.change(
+            fn=inspect_document,
+            inputs=document_choices,
+            outputs=[document_detail, register_button, rebuild_button],
         )
         register_button.click(
             fn=register_selected_document,
             inputs=document_choices,
-            outputs=[register_result, status_table, rebuild_doc_choice],
+            outputs=[register_result, document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
         )
         register_all_button.click(
             fn=register_all_documents,
-            outputs=[register_result, status_table, rebuild_doc_choice],
+            outputs=[register_result, document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
         )
-        status_button.click(fn=query_ingest_status, outputs=[status_table, rebuild_doc_choice])
+        status_button.click(
+            fn=query_ingest_status,
+            outputs=[document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
+        )
         rebuild_button.click(
             fn=rebuild_selected_document,
-            inputs=rebuild_doc_choice,
-            outputs=[rebuild_result, status_table, rebuild_doc_choice],
+            inputs=document_choices,
+            outputs=[rebuild_result, document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
         )
         search_button.click(fn=run_search, inputs=[search_query, search_top_k], outputs=search_result)
         quality_button.click(
@@ -327,5 +451,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 claim_detail_view,
                 review_claim_detail,
             ],
+        )
+        demo.load(
+            fn=load_document_management_state,
+            outputs=[document_summary, document_table, document_choices, document_detail, register_button, rebuild_button],
         )
     return demo

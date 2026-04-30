@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import md5
+import time
 
 import httpx
 
@@ -55,6 +56,13 @@ class OpenAICompatibleEmbeddingClient(BaseEmbeddingClient):
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self._client = httpx.Client(
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=self.timeout_seconds,
+        )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """调用 OpenAI 兼容接口生成向量。"""
@@ -63,14 +71,16 @@ class OpenAICompatibleEmbeddingClient(BaseEmbeddingClient):
             return []
 
         try:
-            return self._request_embeddings(texts)
+            return self._embed_with_fallback(texts)
         except httpx.HTTPStatusError as exc:
-            # 某些 OpenAI 兼容服务只支持单条 input，不支持批量数组输入。
-            if len(texts) > 1:
-                return [self._request_embeddings([text])[0] for text in texts]
             raise ExternalServiceAppError(
                 "Embedding 服务调用失败",
                 details=self._build_error_details(exc, input_count=len(texts)),
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise ExternalServiceAppError(
+                "Embedding 服务调用超时",
+                details={"provider": "openai", "model": self.model, "input_count": len(texts)},
             ) from exc
         except Exception as exc:  # noqa: BLE001
             raise ExternalServiceAppError(
@@ -78,21 +88,34 @@ class OpenAICompatibleEmbeddingClient(BaseEmbeddingClient):
                 details={"provider": "openai", "model": self.model, "input_count": len(texts)},
             ) from exc
 
+    def _embed_with_fallback(self, texts: list[str]) -> list[list[float]]:
+        """批量失败时自动拆分为更小批次，以兼容不同服务的上限。"""
+
+        try:
+            return self._request_embeddings(texts)
+        except (httpx.HTTPStatusError, httpx.TimeoutException):
+            if len(texts) == 1:
+                raise
+            middle = max(1, len(texts) // 2)
+            return self._embed_with_fallback(texts[:middle]) + self._embed_with_fallback(texts[middle:])
+
     def _request_embeddings(self, texts: list[str]) -> list[list[float]]:
         """向兼容接口发起一次 embedding 请求。"""
 
-        response = httpx.post(
-            f"{self.base_url}/embeddings",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"model": self.model, "input": texts},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return [item["embedding"] for item in payload.get("data", [])]
+        for attempt in range(3):
+            try:
+                response = self._client.post(
+                    f"{self.base_url}/embeddings",
+                    json={"model": self.model, "input": texts},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return [item["embedding"] for item in payload.get("data", [])]
+            except httpx.TimeoutException:
+                if attempt == 2:
+                    raise
+                time.sleep(1 + attempt)
+        raise RuntimeError("Embedding 重试流程异常结束")
 
     def _build_error_details(self, exc: httpx.HTTPStatusError, *, input_count: int) -> dict:
         """提取兼容接口错误上下文，便于快速排查配置或协议问题。"""

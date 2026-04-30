@@ -22,15 +22,29 @@ def scan_input_documents(input_root: Path) -> list[dict]:
                 "file_name": file_path.name,
                 "file_path": str(file_path),
                 "file_type": file_path.suffix.lower().lstrip("."),
+                "size_bytes": file_path.stat().st_size,
+                "size_display": format_file_size(file_path.stat().st_size),
             }
         )
     return items
 
 
+def format_file_size(size_bytes: int) -> str:
+    """将文件字节数格式化为更易读的大小文本。"""
+
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
 def build_document_choices(documents: list[dict]) -> list[str]:
     """构建下拉框可用的文档选项。"""
 
-    return [f'{item["file_name"]} | {item["file_type"]} | {item["file_path"]}' for item in documents]
+    return [build_document_choice(item) for item in documents]
 
 
 def build_doc_uid_choices(documents: list[dict]) -> list[str]:
@@ -74,10 +88,57 @@ def format_search_results(items: list[dict]) -> dict:
 
 def build_document_management_state(input_documents: list[dict], status_items: list[dict]) -> dict:
     """构建文档管理页所需的扫描、状态与重建选项数据。"""
+    status_by_path = {
+        str(item.get("source_path")): item
+        for item in status_items
+        if item.get("source_path")
+    }
+    rows: list[dict] = []
+    seen_paths: set[str] = set()
 
+    for document in input_documents:
+        source_path = str(document["file_path"])
+        seen_paths.add(source_path)
+        status_item = status_by_path.get(source_path)
+        rows.append(_build_document_row(document, status_item))
+
+    for status_item in status_items:
+        source_path = str(status_item.get("source_path") or "")
+        if not source_path or source_path in seen_paths:
+            continue
+        rows.append(_build_document_row(None, status_item))
+
+    rows.sort(key=lambda item: (item["registered_sort"], item["file_name"].lower()))
+    table_rows = [
+        [
+            item["file_name"],
+            item["doc_title"],
+            item["size_display"],
+            item["ingested_at"],
+            item["registered_label"],
+            item["index_status"],
+            item["needs_rebuild_label"],
+            item["action_hint"],
+            item["error_message"],
+        ]
+        for item in rows
+    ]
+    detail_map = {item["source_path"]: item for item in rows if item.get("source_path")}
+    choices = [build_document_choice(item) for item in rows if item.get("source_path")]
+    default_choice = choices[0] if choices else None
     return {
-        "scan_summary": {"documents": input_documents, "count": len(input_documents)},
-        "document_choices": build_document_choices(input_documents),
+        "scan_summary": {
+            "total_files": len(input_documents),
+            "registered_files": sum(1 for item in rows if item["is_registered"]),
+            "pending_register_files": sum(1 for item in rows if not item["is_registered"] and item["source_exists"]),
+            "needs_rebuild_files": sum(1 for item in rows if item["needs_rebuild"]),
+        },
+        "table_headers": ["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+        "table_rows": table_rows,
+        "document_choices": choices,
+        "default_choice": default_choice,
+        "document_detail_map": detail_map,
+        "selected_detail": get_document_detail(default_choice, detail_map),
         "status_items": status_items,
         "rebuild_choices": build_doc_uid_choices(status_items),
     }
@@ -89,6 +150,101 @@ def parse_document_choice(choice: str) -> str:
     if not choice:
         return ""
     return choice.split(" | ", maxsplit=2)[-1]
+
+
+def build_document_choice(document: dict) -> str:
+    """构建文档管理页的文档选择项。"""
+
+    return (
+        f'{document.get("file_name", "")} | {document.get("action_hint", "")} | '
+        f'{document.get("source_path") or document.get("file_path", "")}'
+    )
+
+
+def get_document_detail(choice: str, document_detail_map: dict | None) -> dict:
+    """根据文档选择项读取详情。"""
+
+    source_path = parse_document_choice(choice)
+    if not source_path or not document_detail_map:
+        return {"message": "请选择文档"}
+    return document_detail_map.get(source_path, {"message": "未找到对应文档"})
+
+
+def build_document_action_updates(detail: dict | None) -> tuple[dict, dict]:
+    """根据当前文档详情决定按钮是否可操作。"""
+
+    resolved = detail or {}
+    if "source_path" not in resolved:
+        return {"interactive": False}, {"interactive": False}
+    return (
+        {"interactive": bool(resolved.get("can_register"))},
+        {"interactive": bool(resolved.get("can_rebuild"))},
+    )
+
+
+def _build_document_row(input_document: dict | None, status_item: dict | None) -> dict:
+    """合并 Input 扫描结果和数据库状态，构造成文档管理行。"""
+
+    source_path = str(
+        (input_document or {}).get("file_path")
+        or (status_item or {}).get("source_path")
+        or ""
+    )
+    file_name = (input_document or {}).get("file_name") or Path(source_path).name
+    size_bytes = int((input_document or {}).get("size_bytes") or 0)
+    size_display = (input_document or {}).get("size_display") or ("-" if not size_bytes else format_file_size(size_bytes))
+    is_registered = bool(status_item)
+    source_exists = bool(input_document)
+    index_status = (status_item or {}).get("index_status") or "not_registered"
+    error_message = str((status_item or {}).get("error_message") or "")
+    needs_rebuild = bool(status_item) and index_status != "indexed"
+    action_hint = "可注册"
+    if is_registered and needs_rebuild:
+        action_hint = "建议重建"
+    elif is_registered and not needs_rebuild:
+        action_hint = "已就绪"
+    elif not source_exists:
+        action_hint = "源文件缺失"
+    doc_title = (
+        (status_item or {}).get("doc_title")
+        or Path(file_name).stem
+    )
+    return {
+        "source_path": source_path,
+        "file_name": file_name,
+        "doc_title": doc_title,
+        "doc_uid": (status_item or {}).get("doc_uid", ""),
+        "file_type": (input_document or {}).get("file_type") or Path(file_name).suffix.lstrip("."),
+        "size_bytes": size_bytes,
+        "size_display": size_display,
+        "is_registered": is_registered,
+        "registered_label": "是" if is_registered else "否",
+        "registered_sort": 0 if is_registered else 1,
+        "source_exists": source_exists,
+        "ingested_at": str((status_item or {}).get("created_at") or "-"),
+        "ingest_status": str((status_item or {}).get("ingest_status") or "not_registered"),
+        "index_status": index_status,
+        "needs_rebuild": needs_rebuild,
+        "needs_rebuild_label": "是" if needs_rebuild else "否",
+        "action_hint": action_hint,
+        "error_message": error_message[:120],
+        "can_register": source_exists and not is_registered,
+        "can_rebuild": source_exists and is_registered,
+    }
+
+
+def format_ingest_result(payload: dict, progress_events: list[dict]) -> dict:
+    """整理文档管理操作结果与进度快照。"""
+
+    return {
+        **payload,
+        "progress_summary": {
+            "steps": progress_events,
+            "step_count": len(progress_events),
+            "last_stage": progress_events[-1]["stage"] if progress_events else None,
+            "last_percent": progress_events[-1]["percent"] if progress_events else 0,
+        },
+    }
 
 
 def format_quality_result(result: dict) -> dict:

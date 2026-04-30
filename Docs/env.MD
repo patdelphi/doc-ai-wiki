@@ -67,7 +67,7 @@
 | `EMBEDDING_MODEL` | 否 | `deterministic-v1` | Embedding 模型名 |
 | `EMBEDDING_BASE_URL` | 否 | 空 | OpenAI 兼容 Embedding 地址 |
 | `EMBEDDING_API_KEY` | 条件必填 | 空 | 在线 Embedding 密钥 |
-| `EMBEDDING_TIMEOUT_SECONDS` | 否 | `60` | Embedding 超时秒数 |
+| `EMBEDDING_TIMEOUT_SECONDS` | 否 | `180` | Embedding 超时秒数，大文档向量重建建议保持较高值 |
 | `RERANK_ENABLED` | 否 | `true` | 是否启用重排 |
 | `RERANK_PROVIDER` | 否 | `dashscope` | 重排提供方，支持 `dashscope` / `openai` |
 | `RERANK_MODEL` | 否 | `default` | 重排模型名 |
@@ -149,7 +149,7 @@ EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-large
 EMBEDDING_BASE_URL=https://api.openai.com/v1
 EMBEDDING_API_KEY=your_embedding_api_key
-EMBEDDING_TIMEOUT_SECONDS=60
+EMBEDDING_TIMEOUT_SECONDS=180
 RERANK_ENABLED=true
 RERANK_PROVIDER=dashscope
 RERANK_MODEL=default

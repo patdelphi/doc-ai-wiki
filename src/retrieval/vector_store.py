@@ -20,27 +20,38 @@ class VectorStore:
         self.collection = self.client.get_or_create_collection(name=collection_name)
         self.embedding = embedding_client or DeterministicEmbeddingClient()
 
-    def upsert_chunks(self, items: list[dict]) -> None:
+    def upsert_chunks(self, items: list[dict], *, batch_size: int = 8, progress_callback=None) -> None:
         """批量写入 chunk 向量记录。"""
 
         if not items:
             return
 
-        documents = [item["content"] for item in items]
-        metadatas = [
-            {
-                "doc_uid": item["doc_uid"],
-                "chunk_id": item["chunk_id"],
-                "source_span": item.get("source_span") or "",
-            }
-            for item in items
-        ]
-        self.collection.upsert(
-            ids=[item["chunk_id"] for item in items],
-            documents=documents,
-            metadatas=metadatas,
-            embeddings=self.embedding.embed_texts(documents),
-        )
+        total = len(items)
+        for start in range(0, total, batch_size):
+            batch = items[start : start + batch_size]
+            documents = [item["content"] for item in batch]
+            metadatas = [
+                {
+                    "doc_uid": item["doc_uid"],
+                    "chunk_id": item["chunk_id"],
+                    "source_span": item.get("source_span") or "",
+                }
+                for item in batch
+            ]
+            self.collection.upsert(
+                ids=[item["chunk_id"] for item in batch],
+                documents=documents,
+                metadatas=metadatas,
+                embeddings=self.embedding.embed_texts(documents),
+            )
+            if progress_callback:
+                progress_callback(
+                    {
+                        "completed_chunks": min(start + len(batch), total),
+                        "total_chunks": total,
+                        "batch_size": len(batch),
+                    }
+                )
 
     def delete_by_doc_uid(self, doc_uid: str) -> None:
         """按文档标识删除旧向量。"""

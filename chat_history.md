@@ -368,3 +368,15 @@
 - 已定位根因：不是 Chroma 写盘故障，而是 `src/ai/embedding.py` 调用的 `https://ai.gitee.com/v1/embeddings` 在批量 `input` 模式下返回 `400`，进而在 `src/ingest/service.py` 被包装成“向量索引写入失败”。
 - 已修复兼容逻辑：`OpenAICompatibleEmbeddingClient.embed_texts()` 现改为“优先批量、失败后逐条回退”，并补充错误详情字段，便于后续继续排查不同兼容端点。
 - 已补单测 `tests/unit/test_ai_clients.py` 覆盖“批量失败自动逐条回退”，执行 `python -m pytest tests` 后当前 `47 passed`；同时已重启 UI 服务，API 由 `uvicorn --reload` 自动刷新生效。
+
+### 用户
+
+- 先 commit 当前代码，然后优化文档管理：改左右双栏、增加现有文档列表和功能说明、注册时显示更细进度，并修复向量写入失败等错误，完整测试后交付。
+
+### 助手
+
+- 时间戳：`2026-04-30T22:42:55.5517702+08:00`
+- 已完成文档管理页重构：`src/ui/pages.py` 调整为左右双栏，左侧展示现有文档列表、选中文档和详情，右侧展示注册、批量注册、重建和结果区；页面进入时会自动刷新列表。
+- 已完成视图模型扩展：`src/ui/viewmodels.py` 现可合并 `Input` 扫描结果与数据库状态，展示文件名、文档名称、大小、入库时间、是否已注册、索引状态、是否需要重建、推荐动作与错误信息，并驱动单文档按钮可用性。
+- 已完成入库稳定性修复：`src/ingest/service.py`、`src/db/repositories.py`、`src/retrieval/vector_store.py`、`src/ai/embedding.py` 修复状态假成功问题，增加更小批次写入、进度回调、超时重试、递归拆批与连接复用；仅在向量真正写入成功后才标记 `indexed`。
+- 已完成完整验证：执行 `python -m pytest tests`，结果 `50 passed`；新增 `".aipython/inspect_index_status.py"` 只读排查脚本后，确认 SQLite 当前 `2` 篇文档均为 `completed/indexed`，Chroma 总向量数为 `4206`，其中 `阿胶学术论文全集_default=3537`、`阿胶历史文化通典_default=669`，真实向量已成功入库。

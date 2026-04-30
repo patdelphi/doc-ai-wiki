@@ -4,16 +4,19 @@ from pathlib import Path
 
 from src.ui.viewmodels import (
     build_claim_detail_map,
+    build_document_action_updates,
     build_recent_claim_navigation,
     build_doc_uid_choices,
     build_document_management_state,
     build_document_choices,
     build_template_choices,
+    format_ingest_result,
     format_search_results,
     format_quality_result,
     format_recent_quality_checks,
     format_claim_detail_for_review,
     format_review_history,
+    get_document_detail,
     get_claim_detail,
     get_review_target_claim_id,
     parse_claim_choice,
@@ -39,6 +42,7 @@ def test_scan_input_documents_should_only_return_md_and_json(tmp_path: Path) -> 
     assert len(documents) == 2
     assert len(choices) == 2
     assert parse_document_choice(choices[0]).endswith((".md", ".json"))
+    assert documents[0]["size_display"]
 
 
 def test_format_quality_result_should_build_claim_choices() -> None:
@@ -114,14 +118,15 @@ def test_build_document_management_state_should_include_rebuild_choices() -> Non
     """文档管理页状态应同时包含扫描结果与重建选项。"""
 
     state = build_document_management_state(
-        [{"file_name": "a1.md", "file_type": "md", "file_path": "C:/Input/a1.md"}],
-        [{"doc_uid": "doc_1", "doc_title": "标题一"}],
+        [{"file_name": "a1.md", "file_type": "md", "file_path": "C:/Input/a1.md", "size_display": "1.0 KB"}],
+        [{"doc_uid": "doc_1", "doc_title": "标题一", "source_path": "C:/Input/a1.md", "index_status": "indexed"}],
     )
 
-    assert state["scan_summary"]["count"] == 1
-    assert state["document_choices"] == ["a1.md | md | C:/Input/a1.md"]
-    assert state["status_items"] == [{"doc_uid": "doc_1", "doc_title": "标题一"}]
+    assert state["scan_summary"]["total_files"] == 1
+    assert state["document_choices"][0].endswith("C:/Input/a1.md")
+    assert state["status_items"] == [{"doc_uid": "doc_1", "doc_title": "标题一", "source_path": "C:/Input/a1.md", "index_status": "indexed"}]
     assert state["rebuild_choices"] == ["doc_1 | 标题一"]
+    assert state["selected_detail"]["registered_label"] == "是"
 
 
 def test_template_choice_helpers_should_build_and_parse_template_id() -> None:
@@ -265,3 +270,34 @@ def test_review_history_helpers_should_build_choices_and_target_claim() -> None:
     assert formatted["count"] == 1
     assert parse_review_choice(formatted["review_choices"][0]) == "rev_1"
     assert get_review_target_claim_id(formatted["review_choices"][0], formatted["review_map"]) == "claim_1"
+
+
+def test_document_management_helpers_should_return_detail_and_button_states() -> None:
+    """文档管理辅助函数应能返回详情与按钮状态。"""
+
+    state = build_document_management_state(
+        [{"file_name": "a1.md", "file_type": "md", "file_path": "C:/Input/a1.md", "size_display": "1.0 KB"}],
+        [],
+    )
+
+    detail = get_document_detail(state["document_choices"][0], state["document_detail_map"])
+    register_state, rebuild_state = build_document_action_updates(detail)
+
+    assert detail["registered_label"] == "否"
+    assert register_state["interactive"] is True
+    assert rebuild_state["interactive"] is False
+
+
+def test_format_ingest_result_should_include_progress_summary() -> None:
+    """入库结果应附带进度摘要。"""
+
+    result = format_ingest_result(
+        {"success": True},
+        [
+            {"stage": "prepare", "percent": 5},
+            {"stage": "completed", "percent": 100},
+        ],
+    )
+
+    assert result["progress_summary"]["step_count"] == 2
+    assert result["progress_summary"]["last_percent"] == 100
