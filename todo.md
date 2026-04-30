@@ -34,6 +34,21 @@
 - [x] 细化 Markdown 章节抽取，完善 `document_sections` 与 `chunks` 之间的关联
 - [x] 补充文档重建逻辑，使 `rebuild` 真正触发 FTS 与向量重建
 - [x] 设计并实现第一版规则引擎骨架
-- [ ] 区分 `rebuild_fulltext` 与 `rebuild_vector` 的重建行为
-- [ ] 搭建最小 UI 页面：文档管理、检索、质检、审核
-- [ ] 为本轮提交后的继续开发追加 `chat_history.md`
+- [x] 区分 `rebuild_fulltext` 与 `rebuild_vector` 的重建行为
+- [x] 搭建最小 UI 页面：文档管理、检索、质检、审核
+- [x] 为本轮提交后的继续开发追加 `chat_history.md`
+- [x] 将 Gradio UI 与启动入口真正接起来
+- [x] 细化规则等级、命中原因与 verdict 映射
+- [x] 为 UI 和规则细化补充测试
+- [x] 将 UI 页面接入真实文档注册入口与结果刷新
+- [x] 为 claim 与 review 增加更友好的展示字段
+- [x] 整理 README/启动说明，补充 FastAPI 与 Gradio 启动方式
+- [x] 为 UI 增加文档重建入口与状态联动刷新
+- [x] 为审核页增加最近 claim/最近质检结果联动
+- [x] 继续收敛开发文档与 README 的一致性
+- [x] 为 UI 增加文档注册后的自动状态刷新
+- [x] 为检索结果增加来源文档标题与更友好的展示结构
+- [x] 为 JSON 输入增加最小兼容读取、元数据提取与校验错误处理
+- [x] 扩展 JSON 专用元数据映射（作者、来源、标签等）
+- [x] 为旧版 SQLite `documents` 表增加幂等补列迁移
+- [ ] 扩展 UI 检索结果展示更多文档元信息（author/source_name/tags）

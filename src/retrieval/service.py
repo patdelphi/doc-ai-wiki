@@ -24,9 +24,10 @@ class RetrievalService:
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
                 """
-                SELECT c.chunk_id, c.doc_uid, c.source_span, c.content
+                SELECT c.chunk_id, c.doc_uid, d.doc_title, c.source_span, c.content
                 FROM chunk_fts f
                 JOIN chunks c ON c.chunk_id = f.chunk_id
+                JOIN documents d ON d.doc_uid = c.doc_uid
                 WHERE chunk_fts MATCH ?
                 LIMIT ?
                 """,
@@ -35,22 +36,24 @@ class RetrievalService:
             if not rows:
                 rows = connection.execute(
                     """
-                    SELECT chunk_id, doc_uid, source_span, content
-                    FROM chunks
+                    SELECT c.chunk_id, c.doc_uid, d.doc_title, c.source_span, c.content
+                    FROM chunks c
+                    JOIN documents d ON d.doc_uid = c.doc_uid
                     WHERE content LIKE ?
-                    ORDER BY updated_at DESC
+                    ORDER BY c.updated_at DESC
                     LIMIT ?
                     """,
                     (f"%{query}%", top_k),
                 ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._with_source(dict(row), "fulltext") for row in rows]
 
     def vector_search(self, query: str, top_k: int = 5) -> list[dict]:
         """当前阶段先以简单相似替代向量检索占位。"""
 
         if self.vector_store is None:
             return []
-        return self.vector_store.query(query, top_k=top_k)
+        items = self.vector_store.query(query, top_k=top_k)
+        return self._attach_document_titles(items, retrieval_source="vector")
 
     def hybrid_search(self, query: str, top_k: int = 5) -> list[dict]:
         """合并全文与向量检索结果，并按 chunk_id 去重。"""
@@ -61,3 +64,35 @@ class RetrievalService:
         for item in self.vector_search(query, top_k=top_k):
             merged.setdefault(item["chunk_id"], item)
         return list(merged.values())[:top_k]
+
+    def _attach_document_titles(self, items: list[dict], *, retrieval_source: str) -> list[dict]:
+        """为检索结果补全文档标题与来源字段。"""
+
+        if not items:
+            return []
+
+        doc_uids = sorted({item["doc_uid"] for item in items if item.get("doc_uid")})
+        titles: dict[str, str] = {}
+        with create_connection(self.database_path) as connection:
+            placeholders = ",".join("?" for _ in doc_uids)
+            rows = connection.execute(
+                f"""
+                SELECT doc_uid, doc_title
+                FROM documents
+                WHERE doc_uid IN ({placeholders})
+                """,
+                tuple(doc_uids),
+            ).fetchall()
+            titles = {row["doc_uid"]: row["doc_title"] for row in rows}
+
+        return [self._with_source({**item, "doc_title": titles.get(item.get("doc_uid"), "")}, retrieval_source) for item in items]
+
+    @staticmethod
+    def _with_source(item: dict, retrieval_source: str) -> dict:
+        """补齐统一展示字段。"""
+
+        return {
+            **item,
+            "doc_title": item.get("doc_title", ""),
+            "retrieval_source": retrieval_source,
+        }

@@ -6,3 +6,4 @@ index/*.db
 index/chroma/
 index/test_*.db
 .env
+Input/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -39,8 +40,14 @@ class IngestService:
             if not file_path.exists():
                 raise NotFoundAppError("文档文件不存在", details={"file_path": str(file_path)})
 
-            content = read_text_file(file_path)
-            metadata = extract_basic_metadata(file_path, content)
+            try:
+                content = read_text_file(file_path)
+                metadata = extract_basic_metadata(file_path, content)
+            except ValueError as exc:
+                raise ValidationAppError(
+                    "输入文档格式无效",
+                    details={"file_path": str(file_path), "reason": str(exc)},
+                ) from exc
             source_hash = sha256_of_text(content)
             doc_id = metadata["doc_id"]
             edition = document.get("edition") or metadata.get("edition") or "default"
@@ -62,6 +69,9 @@ class IngestService:
                 doc_id=doc_id,
                 doc_title=document.get("doc_title") or metadata["doc_title"],
                 edition=edition,
+                author=document.get("author") or metadata.get("author"),
+                source_name=document.get("source_name") or metadata.get("source_name"),
+                tags=document.get("tags") or metadata.get("tags", []),
                 file_path=file_path,
                 source_hash=source_hash,
                 content=content,
@@ -94,11 +104,19 @@ class IngestService:
             page_size=page_size,
         )
 
-    def rebuild_documents(self, doc_uids: list[str]) -> list[str]:
+    def rebuild_documents(
+        self,
+        doc_uids: list[str],
+        *,
+        rebuild_fulltext: bool = True,
+        rebuild_vector: bool = True,
+    ) -> list[str]:
         """根据现有文档记录重新构建 SQLite 索引与向量索引。"""
 
         if not doc_uids:
             raise ValidationAppError("doc_uids 不能为空")
+        if not rebuild_fulltext and not rebuild_vector:
+            raise ValidationAppError("至少选择一种重建类型")
 
         accepted: list[str] = []
         for doc_uid in doc_uids:
@@ -110,17 +128,32 @@ class IngestService:
             if not file_path.exists():
                 raise NotFoundAppError("源文档不存在", details={"doc_uid": doc_uid, "file_path": str(file_path)})
 
-            content = read_text_file(file_path)
-            chunk_items = self._save_document_and_chunks(
-                doc_uid=document["doc_uid"],
-                doc_id=document["doc_id"],
-                doc_title=document["doc_title"],
-                edition=document.get("edition") or "default",
-                file_path=file_path,
-                source_hash=sha256_of_text(content),
-                content=content,
-            )
-            self._sync_vector_index(doc_uid=doc_uid, chunk_items=chunk_items)
+            chunk_items: list[dict] = []
+            if rebuild_fulltext:
+                try:
+                    content = read_text_file(file_path)
+                except ValueError as exc:
+                    raise ValidationAppError(
+                        "输入文档格式无效",
+                        details={"file_path": str(file_path), "reason": str(exc)},
+                    ) from exc
+                chunk_items = self._save_document_and_chunks(
+                    doc_uid=document["doc_uid"],
+                    doc_id=document["doc_id"],
+                    doc_title=document["doc_title"],
+                    edition=document.get("edition") or "default",
+                    author=document.get("author"),
+                    source_name=document.get("source_name"),
+                    tags=document.get("tags", []),
+                    file_path=file_path,
+                    source_hash=sha256_of_text(content),
+                    content=content,
+                )
+
+            if rebuild_vector:
+                if not chunk_items:
+                    chunk_items = self.document_repository.list_chunks_by_doc_uid(doc_uid)
+                self._sync_vector_index(doc_uid=doc_uid, chunk_items=chunk_items)
             accepted.append(doc_uid)
 
         return accepted
@@ -132,6 +165,9 @@ class IngestService:
         doc_id: str,
         doc_title: str,
         edition: str,
+        author: str | None,
+        source_name: str | None,
+        tags: list[str],
         file_path: Path,
         source_hash: str,
         content: str,
@@ -145,13 +181,16 @@ class IngestService:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    doc_uid, doc_id, doc_title, edition, source_path, source_hash,
+                    doc_uid, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
                     ingest_status, index_status, error_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_uid) DO UPDATE SET
                     doc_id = excluded.doc_id,
                     doc_title = excluded.doc_title,
                     edition = excluded.edition,
+                    author = excluded.author,
+                    source_name = excluded.source_name,
+                    tags_json = excluded.tags_json,
                     source_path = excluded.source_path,
                     source_hash = excluded.source_hash,
                     ingest_status = excluded.ingest_status,
@@ -164,6 +203,9 @@ class IngestService:
                     doc_id,
                     doc_title,
                     edition,
+                    author,
+                    source_name,
+                    json.dumps(tags, ensure_ascii=False),
                     str(file_path),
                     source_hash,
                     "completed",

@@ -181,17 +181,23 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 - FastAPI 提供接口服务
 - 默认端口 `8000`
+- 启动命令：`python -m uvicorn src.app:app --host 127.0.0.1 --port 8000 --reload`
 
 ### 8.2 前端工具界面
 
 - Gradio 提供操作界面
 - 默认端口 `7860`
+- 启动命令：`python -m src.ui.app`
 
 说明：
 
 - 前后端可分开运行
 - 也可以由一个主进程统一启动
-- 具体启动方式后续由代码骨架决定
+- 当前最小 UI 已支持：
+- 扫描 `Input` 目录中的 `md/json`
+- 注册选中文档或全部文档
+- 查看入库状态与重建索引
+- 执行检索、质检与人工审核
 
 ---
 

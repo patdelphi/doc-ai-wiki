@@ -85,7 +85,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     def rebuild_documents(request: IngestRebuildRequest) -> ApiResponse:
         """接受文档重建请求。"""
 
-        accepted = ingest_service.rebuild_documents(request.doc_uids)
+        accepted = ingest_service.rebuild_documents(
+            request.doc_uids,
+            rebuild_fulltext=request.rebuild_fulltext,
+            rebuild_vector=request.rebuild_vector,
+        )
         return ApiResponse(success=True, message="rebuild started", data={"accepted": accepted})
 
     @app.get("/ingest/status", response_model=ApiResponse)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,7 @@ class DocumentRepository:
                 """,
                 (source_path,),
             ).fetchone()
-        return dict(row) if row else None
+        return self._normalize_document_row(row)
 
     def get_by_doc_uid(self, doc_uid: str) -> dict[str, Any] | None:
         """按文档唯一标识查询文档。"""
@@ -42,7 +43,7 @@ class DocumentRepository:
                 """,
                 (doc_uid,),
             ).fetchone()
-        return dict(row) if row else None
+        return self._normalize_document_row(row)
 
     def upsert_document(self, payload: dict[str, Any]) -> None:
         """插入或更新文档。"""
@@ -52,13 +53,16 @@ class DocumentRepository:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    doc_uid, doc_id, doc_title, edition, source_path, source_hash,
+                    doc_uid, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
                     ingest_status, index_status, error_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_uid) DO UPDATE SET
                     doc_id = excluded.doc_id,
                     doc_title = excluded.doc_title,
                     edition = excluded.edition,
+                    author = excluded.author,
+                    source_name = excluded.source_name,
+                    tags_json = excluded.tags_json,
                     source_path = excluded.source_path,
                     source_hash = excluded.source_hash,
                     ingest_status = excluded.ingest_status,
@@ -71,6 +75,9 @@ class DocumentRepository:
                     payload["doc_id"],
                     payload["doc_title"],
                     payload.get("edition"),
+                    payload.get("author"),
+                    payload.get("source_name"),
+                    json.dumps(payload.get("tags", []), ensure_ascii=False),
                     payload["source_path"],
                     payload["source_hash"],
                     payload["ingest_status"],
@@ -139,7 +146,40 @@ class DocumentRepository:
                 (*params, page_size, offset),
             ).fetchall()
 
-        return [dict(row) for row in rows], int(total_row["total"])
+        return [self._normalize_document_row(row) for row in rows], int(total_row["total"])
+
+    def list_chunks_by_doc_uid(self, doc_uid: str) -> list[dict[str, Any]]:
+        """读取指定文档的全部 chunk，用于向量重建。"""
+
+        with create_connection(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT chunk_id, doc_uid, section_id, source_span, content
+                FROM chunks
+                WHERE doc_uid = ?
+                ORDER BY chunk_index ASC
+                """,
+                (doc_uid,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _normalize_document_row(row: Any) -> dict[str, Any] | None:
+        """将 documents 表记录转换为接口友好的结构。"""
+
+        if not row:
+            return None
+        item = dict(row)
+        raw_tags = item.get("tags_json")
+        if raw_tags:
+            try:
+                item["tags"] = json.loads(raw_tags)
+            except json.JSONDecodeError:
+                item["tags"] = []
+        else:
+            item["tags"] = []
+        item.pop("tags_json", None)
+        return item
 
 
 class IngestJobRepository:
@@ -283,6 +323,44 @@ class QualityRepository:
             "claims": [dict(row) for row in claim_rows],
             "rule_hits": [dict(row) for row in rule_hit_rows],
         }
+
+    def list_recent_quality_results(self, limit: int = 10) -> list[dict[str, Any]]:
+        """读取最近质检结果及其 claim 列表。"""
+
+        with create_connection(self.database_path) as connection:
+            check_rows = connection.execute(
+                """
+                SELECT *
+                FROM quality_checks
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+            results: list[dict[str, Any]] = []
+            for check_row in check_rows:
+                claim_rows = connection.execute(
+                    """
+                    SELECT *
+                    FROM quality_claims
+                    WHERE check_id = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (check_row["check_id"],),
+                ).fetchall()
+                results.append(
+                    {
+                        "check_id": check_row["check_id"],
+                        "input_text": check_row["input_text"],
+                        "overall_verdict": check_row["overall_verdict"],
+                        "risk_level": check_row["risk_level"],
+                        "created_at": check_row["created_at"],
+                        "claims": [dict(row) for row in claim_rows],
+                    }
+                )
+
+        return results
 
     def insert_review_record(self, payload: dict[str, Any]) -> None:
         """保存审核记录并同步 claim 审核状态。"""

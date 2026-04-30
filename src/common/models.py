@@ -40,6 +40,9 @@ class DocumentRegisterItem(BaseModel):
     file_path: str
     doc_title: str | None = None
     edition: str | None = None
+    author: str | None = None
+    source_name: str | None = None
+    tags: list[str] | None = None
 
 
 class DocumentRegisterRequest(BaseModel):

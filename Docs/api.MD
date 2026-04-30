@@ -85,6 +85,9 @@
 | `doc_id` | string | 文献逻辑 ID |
 | `doc_title` | string | 文档标题 |
 | `edition` | string | 版本 |
+| `author` | string | 作者或整理者 |
+| `source_name` | string | 来源名称 |
+| `tags` | string[] | 标签列表 |
 | `section_id` | string | 章节 ID |
 | `chunk_id` | string | 分块 ID |
 | `source_span` | string | 原文位置 |
@@ -99,7 +102,7 @@
 
 - 方法：`POST`
 - 路径：`/ingest/register`
-- 说明：注册一个或多个 Markdown 文档，并触发元数据抽取、分块、索引流程
+- 说明：注册一个或多个 Markdown / JSON 文档，并触发元数据抽取、分块、索引流程
 
 ### 请求体
 
@@ -109,7 +112,10 @@
     {
       "file_path": "Input/中国文学史纲要/中国文学史纲要_v1.MD",
       "doc_title": "中国文学史纲要",
-      "edition": "第一版"
+      "edition": "第一版",
+      "author": "张三",
+      "source_name": "古籍整理库",
+      "tags": ["古文", "文学"]
     }
   ],
   "rebuild_if_exists": false
@@ -121,10 +127,30 @@
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `documents` | 是 | 待注册文档列表 |
-| `file_path` | 是 | Markdown 文件路径 |
+| `file_path` | 是 | Markdown 或 JSON 文件路径 |
 | `doc_title` | 否 | 可手动指定标题，缺失时自动提取 |
 | `edition` | 否 | 可手动指定版本 |
+| `author` | 否 | 可手动指定作者 |
+| `source_name` | 否 | 可手动指定来源名称 |
+| `tags` | 否 | 可手动指定标签列表 |
 | `rebuild_if_exists` | 否 | 已存在时是否强制重建 |
+
+### JSON 输入最小格式
+
+```json
+{
+  "title": "本草纲目摘录",
+  "content": "这里是正文内容",
+  "edition": "校对版",
+  "author": "李时珍",
+  "source": "整理样本库",
+  "tags": ["古文", "医学"]
+}
+```
+
+- `title`、`content` 为最小推荐字段
+- `source` 与 `source_name` 二选一即可
+- `tags` 支持单个字符串或字符串数组
 
 ### 成功响应
 
@@ -200,6 +226,10 @@
       {
         "doc_uid": "zhongguo_wenxue_v1",
         "doc_title": "中国文学史纲要",
+        "edition": "第一版",
+        "author": "张三",
+        "source_name": "古籍整理库",
+        "tags": ["古文", "文学"],
         "ingest_status": "completed",
         "index_status": "indexed",
         "error_message": null,

@@ -134,11 +134,152 @@ def test_vector_and_hybrid_search_should_return_results_after_ingest(tmp_path: P
     vector_payload = vector_response.json()
     assert vector_payload["success"] is True
     assert vector_payload["data"]["items"]
+    assert vector_payload["data"]["items"][0]["doc_title"] == "检索测试文档"
+    assert vector_payload["data"]["items"][0]["retrieval_source"] == "vector"
 
     assert hybrid_response.status_code == 200
     hybrid_payload = hybrid_response.json()
     assert hybrid_payload["success"] is True
     assert hybrid_payload["data"]["items"]
+    assert hybrid_payload["data"]["items"][0]["doc_title"] == "检索测试文档"
+    assert hybrid_payload["data"]["items"][0]["retrieval_source"] in {"fulltext", "vector"}
+
+
+def test_register_json_document_should_work(tmp_path: Path) -> None:
+    """JSON 输入文件应能完成最小入库。"""
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    sample_file = input_root / "sample_doc.json"
+    sample_file.write_text(
+        '{"title":"JSON测试文档","content":"这是一个 JSON 知识条目，支持检索。","edition":"v1"}',
+        encoding="utf-8",
+    )
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        register_response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [{"file_path": str(sample_file)}],
+                "rebuild_if_exists": False,
+            },
+        )
+        search_response = client.get("/search/fulltext", params={"query": "JSON", "top_k": 3})
+
+    assert register_response.status_code == 200
+    assert register_response.json()["data"]["jobs"][0]["status"] == "completed"
+    assert search_response.status_code == 200
+    assert search_response.json()["data"]["items"]
+    assert search_response.json()["data"]["items"][0]["doc_title"] == "JSON测试文档"
+    assert search_response.json()["data"]["items"][0]["retrieval_source"] == "fulltext"
+
+
+def test_register_json_document_should_expose_extended_metadata_in_status(tmp_path: Path) -> None:
+    """JSON 输入的扩展元数据应能在状态接口中返回。"""
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    sample_file = input_root / "rich_doc.json"
+    sample_file.write_text(
+        (
+            '{"title":"扩展元数据文档","content":"支持更多 JSON 元数据。",'
+            '"edition":"增补版","author":"张三","source":"古籍整理库","tags":["古文","医学"]}'
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        register_response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [{"file_path": str(sample_file)}],
+                "rebuild_if_exists": False,
+            },
+        )
+        status_response = client.get("/ingest/status")
+
+    assert register_response.status_code == 200
+    assert status_response.status_code == 200
+    item = status_response.json()["data"]["items"][0]
+    assert item["doc_title"] == "扩展元数据文档"
+    assert item["edition"] == "增补版"
+    assert item["author"] == "张三"
+    assert item["source_name"] == "古籍整理库"
+    assert item["tags"] == ["古文", "医学"]
+
+
+def test_register_invalid_json_document_should_return_validation_error(tmp_path: Path) -> None:
+    """非法 JSON 输入应返回可识别的校验错误。"""
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    sample_file = input_root / "invalid.json"
+    sample_file.write_text('{"title":"坏文档","content":', encoding="utf-8")
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [{"file_path": str(sample_file)}],
+                "rebuild_if_exists": False,
+            },
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error_code"] == "VALIDATION_ERROR"
+
+
+def test_initialize_database_should_add_missing_document_metadata_columns(tmp_path: Path) -> None:
+    """旧版 documents 表初始化后应自动补齐新增元数据列。"""
+
+    database_path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE documents (
+            doc_uid TEXT PRIMARY KEY,
+            doc_id TEXT NOT NULL,
+            doc_title TEXT NOT NULL,
+            edition TEXT,
+            source_path TEXT NOT NULL,
+            source_hash TEXT NOT NULL,
+            ingest_status TEXT NOT NULL,
+            index_status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    app = create_app(
+        AppSettings(
+            APP_ENV="test",
+            INPUT_ROOT=tmp_path / "Input",
+            SQLITE_DB_PATH=database_path,
+            CHROMA_PERSIST_DIR=tmp_path / "chroma",
+            RULES_DIR=tmp_path / "rules",
+            TEMPLATES_DIR=tmp_path / "templates",
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    connection = sqlite3.connect(database_path)
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+    }
+    connection.close()
+    assert {"author", "source_name", "tags_json"}.issubset(columns)
 
 
 def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
@@ -186,6 +327,8 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
     assert quality_payload["success"] is True
     assert quality_payload["data"]["claims"]
     assert quality_payload["data"]["rule_hits"]
+    assert quality_payload["data"]["claims"][0]["verdict"] == "needs_review"
+    assert quality_payload["data"]["check"]["risk_level"] == "medium"
 
     assert review_response.status_code == 200
     assert review_response.json()["success"] is True
@@ -198,8 +341,8 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
     assert persisted_claims[0]["review_status"] == "approved"
 
 
-def test_rebuild_should_refresh_indexes_after_source_changed(tmp_path: Path) -> None:
-    """修改源文档后，rebuild 应刷新全文与向量检索结果。"""
+def test_rebuild_should_support_fulltext_and_vector_separately(tmp_path: Path) -> None:
+    """重建应支持全文索引和向量索引分开执行。"""
 
     input_root = tmp_path / "Input"
     input_root.mkdir(parents=True, exist_ok=True)
@@ -222,20 +365,34 @@ def test_rebuild_should_refresh_indexes_after_source_changed(tmp_path: Path) -> 
             encoding="utf-8",
         )
 
-        rebuild_response = client.post(
+        rebuild_fulltext_response = client.post(
             "/ingest/rebuild",
             json={
                 "doc_uids": [doc_uid],
                 "rebuild_fulltext": True,
-                "rebuild_vector": True,
+                "rebuild_vector": False,
             },
         )
         fulltext_response = client.get("/search/fulltext", params={"query": "关键词乙", "top_k": 3})
         vector_response = client.get("/search/vector", params={"query": "关键词乙", "top_k": 3})
+        rebuild_vector_response = client.post(
+            "/ingest/rebuild",
+            json={
+                "doc_uids": [doc_uid],
+                "rebuild_fulltext": False,
+                "rebuild_vector": True,
+            },
+        )
+        vector_response_after = client.get("/search/vector", params={"query": "关键词乙", "top_k": 3})
 
-    assert rebuild_response.status_code == 200
-    assert rebuild_response.json()["data"]["accepted"] == [doc_uid]
+    assert rebuild_fulltext_response.status_code == 200
+    assert rebuild_fulltext_response.json()["data"]["accepted"] == [doc_uid]
     assert fulltext_response.status_code == 200
     assert fulltext_response.json()["data"]["items"]
     assert vector_response.status_code == 200
-    assert vector_response.json()["data"]["items"]
+    assert all("关键词乙" not in item["content"] for item in vector_response.json()["data"]["items"])
+    assert rebuild_vector_response.status_code == 200
+    assert rebuild_vector_response.json()["data"]["accepted"] == [doc_uid]
+    assert vector_response_after.status_code == 200
+    assert vector_response_after.json()["data"]["items"]
+    assert any("关键词乙" in item["content"] for item in vector_response_after.json()["data"]["items"])
