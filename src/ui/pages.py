@@ -21,10 +21,14 @@ from src.ui.viewmodels import (
     format_database_summary_html,
     format_document_detail_html,
     format_document_summary_html,
+    format_evidence_detail_html,
     format_ingest_result,
     format_operation_result_html,
+    format_quality_help_html,
+    format_quality_progress_html,
     format_quality_result,
     format_quality_result_html,
+    format_quality_template_html,
     format_recent_quality_checks,
     format_review_history,
     format_search_help_html,
@@ -72,6 +76,121 @@ UI_CSS = """
 }
 #search-input-panel button {
   margin-top: auto;
+}
+#quality-top-row {
+  align-items: stretch !important;
+}
+#quality-top-row > .gradio-column,
+#quality-template-row > .gradio-column,
+#quality-summary-row > .gradio-column,
+#quality-claim-row > .gradio-column,
+#quality-evidence-row > .gradio-column,
+#quality-history-row > .gradio-column {
+  align-self: stretch !important;
+}
+#quality-input-panel {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+#quality-help-panel,
+#quality-template-panel,
+#quality-progress-panel,
+#quality-result-panel,
+#quality-claim-detail,
+#quality-evidence-detail,
+#quality-history-panel {
+  height: 100%;
+}
+#quality-help-panel {
+  min-height: 260px;
+}
+#quality-template-row {
+  align-items: stretch !important;
+}
+#quality-template-panel {
+  width: 100%;
+}
+#quality-claim-row,
+#quality-evidence-row {
+  align-items: stretch !important;
+}
+#quality-history-row {
+  align-items: stretch !important;
+}
+#quality-template-panel > div,
+#quality-help-panel > div,
+#quality-progress-panel > div,
+#quality-result-panel > div,
+#quality-claim-detail > div,
+#quality-evidence-detail > div,
+#quality-history-panel > div {
+  height: 100%;
+}
+#quality-history-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#quality-history-note {
+  font-size: 13px !important;
+  line-height: 1.7 !important;
+  color: var(--body-text-color-subdued) !important;
+  margin: 0 !important;
+}
+#quality-input-panel button {
+  margin-top: 8px;
+}
+#quality-claims-table table td,
+#quality-recent-table table td,
+#quality-evidence-table table td {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.7 !important;
+  vertical-align: top !important;
+}
+#quality-claims-table button[aria-label="Select column"],
+#quality-claims-table button[aria-label="Select row"],
+#quality-evidence-table button[aria-label="Select column"],
+#quality-evidence-table button[aria-label="Select row"],
+#quality-recent-table button[aria-label="Select column"],
+#quality-recent-table button[aria-label="Select row"] {
+  display: none !important;
+}
+#quality-claims-table tr:has(td:focus-within) td,
+#quality-claims-table tr:has(button:focus) td,
+#quality-claims-table tr:has(.selected) td,
+#quality-claims-table td.selected,
+#quality-evidence-table tr:has(td:focus-within) td,
+#quality-evidence-table tr:has(button:focus) td,
+#quality-evidence-table tr:has(.selected) td,
+#quality-evidence-table td.selected,
+#quality-recent-table tr:has(td:focus-within) td,
+#quality-recent-table tr:has(button:focus) td,
+#quality-recent-table tr:has(.selected) td,
+#quality-recent-table td.selected {
+  background: rgba(127, 127, 127, 0.16) !important;
+}
+#quality-claims-table tr:has(td:focus-within) td:first-child,
+#quality-claims-table tr:has(button:focus) td:first-child,
+#quality-claims-table tr:has(.selected) td:first-child,
+#quality-evidence-table tr:has(td:focus-within) td:first-child,
+#quality-evidence-table tr:has(button:focus) td:first-child,
+#quality-evidence-table tr:has(.selected) td:first-child,
+#quality-recent-table tr:has(td:focus-within) td:first-child,
+#quality-recent-table tr:has(button:focus) td:first-child,
+#quality-recent-table tr:has(.selected) td:first-child {
+  box-shadow: inset 5px 0 0 0 rgba(127, 127, 127, 0.62) !important;
+}
+#quality-claims-table tr:has(td:focus-within) td,
+#quality-claims-table tr:has(button:focus) td,
+#quality-evidence-table tr:has(td:focus-within) td,
+#quality-evidence-table tr:has(button:focus) td,
+#quality-recent-table tr:has(td:focus-within) td,
+#quality-recent-table tr:has(button:focus) td {
+  font-weight: 600 !important;
 }
 #search-results-table table th,
 #search-results-table table td {
@@ -131,6 +250,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     template_items = quality_service.list_templates()
     template_choices = build_template_choices(template_items)
     default_template_choice = template_choices[0] if template_choices else None
+    default_template = quality_service.get_template(parse_template_choice(default_template_choice)) if default_template_choice else None
 
     def get_document_management_state(selected_choice: str | None = None) -> dict:
         """统一构建文档管理页的当前视图状态。"""
@@ -392,63 +512,219 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             build_search_result_rows({"table": search_rows}, selected_row_index=row_index),
         )
 
-    def render_claim_views(claim_choice: str, claim_detail_map: dict | None) -> tuple[str, list[list[str]], str]:
+    def render_claim_views(claim_choice: str, claim_detail_map: dict | None) -> tuple[str, list[list[str]], str, list[dict], str]:
         """统一渲染 Claim 摘要与证据表。"""
 
         detail = format_claim_detail_for_review(claim_choice, claim_detail_map)
         detail_html = format_claim_detail_html(detail)
-        return detail_html, build_claim_evidence_rows(detail), detail_html
+        evidence_items = detail.get("evidence_table") or []
+        evidence_detail_html = format_evidence_detail_html(evidence_items[0] if evidence_items else None)
+        return detail_html, build_claim_evidence_rows(detail), detail_html, evidence_items, evidence_detail_html
+
+    def select_quality_claim(
+        claim_rows: list[list[str]],
+        claim_detail_map: dict | None,
+        evt: gr.SelectData,
+    ) -> tuple[str, list[list[str]], str, str, list[dict], str]:
+        """点击 Claim 列表后联动详情与证据区域。"""
+
+        normalized_rows = claim_rows.values.tolist() if hasattr(claim_rows, "values") else claim_rows
+        if not normalized_rows:
+            claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+        if row_index < 0 or row_index >= len(normalized_rows):
+            claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+        selected_claim_id = str(normalized_rows[row_index][0]) if normalized_rows[row_index] else ""
+        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(selected_claim_id, claim_detail_map)
+        return claim_view, evidence_rows, review_view, selected_claim_id, evidence_items, evidence_detail_html
+
+    def select_quality_evidence(
+        evidence_items: list[dict] | None,
+        evt: gr.SelectData,
+    ) -> str:
+        """点击证据列表后联动证据详情。"""
+
+        items = evidence_items or []
+        if not items:
+            return format_evidence_detail_html(None)
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            return format_evidence_detail_html(None)
+        if row_index < 0 or row_index >= len(items):
+            return format_evidence_detail_html(None)
+        return format_evidence_detail_html(items[row_index])
+
+    def render_quality_template(template_choice: str) -> str:
+        """根据当前模板选择展示模板内容。"""
+
+        try:
+            template = quality_service.get_template(parse_template_choice(template_choice))
+        except AppError as exc:
+            return format_operation_result_html(
+                {"success": False, "message": exc.message, "error_code": exc.error_code},
+                title="模板内容",
+            )
+        return format_quality_template_html(template)
+
+    def build_quality_outputs(
+        *,
+        progress_html: str,
+        result_html: str,
+        claim_rows: list[list[str]] | None = None,
+        selected_claim: str | None = None,
+        claim_detail_map: dict | None = None,
+        claim_view: str | None = None,
+        evidence_rows: list[list[str]] | None = None,
+        review_view: str | None = None,
+        evidence_items: list[dict] | None = None,
+        evidence_detail_html: str | None = None,
+        recent_results: list[dict] | None = None,
+        recent_rows: list[list[str]] | None = None,
+    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
+        """统一构建 AI 质检页输出。"""
+
+        empty_claim_view, empty_evidence_rows, empty_review_view, empty_evidence_items, empty_evidence_detail_html = render_claim_views("", {})
+        return (
+            progress_html,
+            result_html,
+            claim_rows or [],
+            selected_claim or "",
+            claim_detail_map or {},
+            claim_view or empty_claim_view,
+            evidence_rows or empty_evidence_rows,
+            review_view or empty_review_view,
+            evidence_items or empty_evidence_items,
+            evidence_detail_html or empty_evidence_detail_html,
+            recent_results or [],
+            recent_rows or [],
+        )
+
+    def build_recent_quality_view_outputs(
+        recent_results: list[dict] | None,
+        *,
+        selected_index: int = 0,
+        preferred_claim_id: str | None = None,
+    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
+        """根据最近质检记录构建当前页面展示状态。"""
+
+        results = recent_results or []
+        recent_payload = format_recent_quality_checks(results)
+        recent_rows = build_recent_quality_rows(recent_payload)
+        if not results:
+            return build_quality_outputs(
+                progress_html=format_quality_progress_html(None),
+                result_html=format_quality_result_html(None),
+                recent_results=[],
+                recent_rows=[],
+            )
+
+        normalized_index = selected_index if 0 <= selected_index < len(results) else 0
+        selected_result = results[normalized_index]
+        selected_formatted = format_quality_result(
+            {
+                "check": selected_result,
+                "claims": selected_result.get("claims", []),
+                "rule_hits": [],
+            }
+        )
+        navigation = build_recent_claim_navigation([selected_result], preferred_claim_id=preferred_claim_id)
+        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(
+            navigation["selected_choice"],
+            navigation["claim_detail_map"],
+        )
+        progress_html = format_quality_progress_html(
+            {
+                "status": "success",
+                "stage": "loaded",
+                "message": "已加载历史质检记录。",
+                "claim_index": len(selected_result.get("claims", [])),
+                "claim_total": len(selected_result.get("claims", [])),
+                "template_name": selected_result.get("template_name"),
+                "model_status": "历史记录",
+            }
+        )
+        return build_quality_outputs(
+            progress_html=progress_html,
+            result_html=format_quality_result_html(selected_formatted),
+            claim_rows=build_quality_claim_rows(selected_formatted),
+            selected_claim=navigation["selected_choice"],
+            claim_detail_map=navigation["claim_detail_map"],
+            claim_view=claim_view,
+            evidence_rows=evidence_rows,
+            review_view=review_view,
+            evidence_items=evidence_items,
+            evidence_detail_html=evidence_detail_html,
+            recent_results=results,
+            recent_rows=recent_rows,
+        )
 
     def run_quality_check(
         input_text: str,
         template_choice: str,
-    ) -> tuple[str, list[list[str]], gr.Dropdown, dict, str, list[list[str]], str, list[dict], list[list[str]]]:
+    ):
+        selected_template_id = parse_template_choice(template_choice)
+        initial_result_html = format_quality_result_html(None)
         try:
-            result = quality_service.run_check(
+            for event in quality_service.run_check_stream(
                 input_text,
-                template_id=parse_template_choice(template_choice),
-            )
+                template_id=selected_template_id,
+            ):
+                if event.get("type") == "progress":
+                    yield build_quality_outputs(
+                        progress_html=format_quality_progress_html(event),
+                        result_html=initial_result_html,
+                    )
+                    continue
+
+                result = event.get("result", {})
+                formatted = format_quality_result(result)
+                recent_results = [
+                    {
+                        "check_id": formatted["check"].get("check_id"),
+                        "template_name": formatted["check"].get("template_name"),
+                        "created_at": formatted["check"].get("created_at"),
+                        "overall_verdict": formatted["check"].get("overall_verdict"),
+                        "input_text": input_text,
+                        "claims": formatted["claims"],
+                    }
+                ]
+                navigation = build_recent_claim_navigation(recent_results)
+                claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
+                yield build_quality_outputs(
+                    progress_html=format_quality_progress_html(event),
+                    result_html=format_quality_result_html(formatted),
+                    claim_rows=build_quality_claim_rows(formatted),
+                    selected_claim=navigation["selected_choice"],
+                    claim_detail_map=navigation["claim_detail_map"],
+                    claim_view=claim_view,
+                    evidence_rows=evidence_rows,
+                    review_view=review_view,
+                    evidence_items=evidence_items,
+                    evidence_detail_html=evidence_detail_html,
+                    recent_results=recent_results,
+                    recent_rows=build_recent_quality_rows(recent_results),
+                )
+                return
         except AppError as exc:
-            empty_claim_view, empty_evidence_rows, empty_review_view = render_claim_views("", {})
-            return (
-                format_operation_result_html(
+            yield build_quality_outputs(
+                progress_html=format_quality_progress_html(
+                    {"status": "error", "stage": "persist", "message": exc.message, "model_status": "-"},
+                ),
+                result_html=format_operation_result_html(
                     {"success": False, "message": exc.message, "error_code": exc.error_code},
                     title="质检结果",
                 ),
-                [],
-                gr.Dropdown(choices=[], value=None),
-                {},
-                empty_claim_view,
-                empty_evidence_rows,
-                empty_review_view,
-                [],
-                [],
             )
-
-        formatted = format_quality_result(result)
-        recent_results = [
-            {
-                "check_id": formatted["check"].get("check_id"),
-                "template_name": formatted["check"].get("template_name"),
-                "created_at": formatted["check"].get("created_at"),
-                "overall_verdict": formatted["check"].get("overall_verdict"),
-                "input_text": input_text,
-                "claims": formatted["claims"],
-            }
-        ]
-        navigation = build_recent_claim_navigation(recent_results)
-        claim_view, evidence_rows, review_view = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
-        return (
-            format_quality_result_html(formatted),
-            build_quality_claim_rows(formatted),
-            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
-            navigation["claim_detail_map"],
-            claim_view,
-            evidence_rows,
-            review_view,
-            recent_results,
-            build_recent_quality_rows(recent_results),
-        )
+            return
 
     def list_review_history() -> tuple[list[list[str]], gr.Dropdown, dict]:
         try:
@@ -467,7 +743,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         claim_choice: str,
         review_action: str,
         review_note: str,
-    ) -> tuple[str, list[list[str]], gr.Dropdown, dict, list[list[str]], list[dict], gr.Dropdown, dict, str, list[list[str]], str]:
+    ) -> tuple[str, list[list[str]], gr.Dropdown, dict, list[list[str]], list[dict], str, dict, str, list[list[str]], str, list[dict], str]:
         claim_id = parse_claim_choice(claim_choice)
         try:
             result = review_service.submit_review(
@@ -480,7 +756,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             review_items, _ = review_service.list_reviews(page=1, page_size=20)
             recent_results = quality_service.list_recent_results(limit=10)
         except AppError as exc:
-            claim_view, evidence_rows, review_view = render_claim_views(claim_choice, {})
+            claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(claim_choice, {})
             return (
                 format_operation_result_html(
                     {"success": False, "message": exc.message, "error_code": exc.error_code},
@@ -491,17 +767,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 {},
                 [],
                 [],
-                gr.Dropdown(choices=[], value=None),
+                "",
                 {},
                 claim_view,
                 evidence_rows,
                 review_view,
+                evidence_items,
+                evidence_detail_html,
             )
 
         review_history_payload = format_review_history(review_items)
         recent_quality_payload = format_recent_quality_checks(recent_results)
         navigation = build_recent_claim_navigation(recent_results, preferred_claim_id=claim_id)
-        claim_view, evidence_rows, review_view = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
+        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
         return (
             format_operation_result_html(
                 {
@@ -519,46 +797,61 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             review_history_payload["review_map"],
             build_recent_quality_rows(recent_quality_payload),
             recent_results,
-            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["selected_choice"] or "",
             navigation["claim_detail_map"],
             claim_view,
             evidence_rows,
             review_view,
+            evidence_items,
+            evidence_detail_html,
         )
 
-    def list_recent_quality_results() -> tuple[list[list[str]], gr.Dropdown, dict, str, list[list[str]], str, list[dict]]:
+    def list_recent_quality_results() -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
         try:
             results = quality_service.list_recent_results(limit=10)
         except AppError:
-            claim_view, evidence_rows, review_view = render_claim_views("", {})
-            return [], gr.Dropdown(choices=[], value=None), {}, claim_view, evidence_rows, review_view, []
-        formatted = format_recent_quality_checks(results)
-        navigation = build_recent_claim_navigation(results)
-        claim_view, evidence_rows, review_view = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
-        return (
-            build_recent_quality_rows(formatted),
-            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
-            navigation["claim_detail_map"],
-            claim_view,
-            evidence_rows,
-            review_view,
-            results,
-        )
+            return build_quality_outputs(
+                progress_html=format_quality_progress_html(None),
+                result_html=format_quality_result_html(None),
+                recent_results=[],
+                recent_rows=[],
+            )
+        return build_recent_quality_view_outputs(results, selected_index=0)
+
+    def select_recent_quality_result(
+        recent_results: list[dict],
+        evt: gr.SelectData,
+    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str]:
+        """点击最近质检记录后回放对应结果。"""
+
+        results = recent_results or []
+        if not results:
+            empty_outputs = build_recent_quality_view_outputs([])
+            return empty_outputs[:10]
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        selected_outputs = build_recent_quality_view_outputs(results, selected_index=row_index)
+        return selected_outputs[:10]
 
     def focus_review_record(
         review_choice: str,
         review_history_state: dict,
         recent_quality_state: list[dict],
-    ) -> tuple[gr.Dropdown, dict, str, list[list[str]], str]:
+    ) -> tuple[str, dict, str, list[list[str]], str, list[dict], str]:
         claim_id = get_review_target_claim_id(review_choice, review_history_state)
         navigation = build_recent_claim_navigation(recent_quality_state, preferred_claim_id=claim_id)
-        claim_view, evidence_rows, review_view = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
+        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
         return (
-            gr.Dropdown(choices=navigation["claim_choices"], value=navigation["selected_choice"]),
+            navigation["selected_choice"] or "",
             navigation["claim_detail_map"],
             claim_view,
             evidence_rows,
             review_view,
+            evidence_items,
+            evidence_detail_html,
         )
 
     initial_document_state = get_document_management_state()
@@ -566,6 +859,24 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     initial_database_summary = format_database_summary_html(initial_document_state["database_summary"])
     initial_database_rows = build_database_summary_rows(initial_document_state["database_summary"])
     initial_document_detail = format_document_detail_html(initial_document_state["selected_detail"])
+    try:
+        initial_recent_results = quality_service.list_recent_results(limit=10)
+    except AppError:
+        initial_recent_results = []
+    (
+        initial_progress_html,
+        initial_result_html,
+        initial_claim_rows,
+        initial_selected_claim,
+        initial_claim_detail_map,
+        initial_claim_view,
+        initial_evidence_rows,
+        initial_review_view,
+        initial_evidence_items,
+        initial_evidence_detail_html,
+        _initial_recent_results_state,
+        initial_recent_rows,
+    ) = build_recent_quality_view_outputs(initial_recent_results, selected_index=0)
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -654,20 +965,35 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
 
             with gr.Tab("AI 质检"):
-                with gr.Row():
+                with gr.Row(elem_id="quality-top-row"):
                     with gr.Column(scale=5):
-                        quality_input = gr.Textbox(label="待质检文本", lines=8)
-                        quality_template = gr.Dropdown(
-                            label="质检模板",
-                            choices=template_choices,
-                            value=default_template_choice,
-                            interactive=True,
-                        )
-                        quality_button = gr.Button("开始质检")
-                        recent_quality_button = gr.Button("加载最近质检结果")
+                        with gr.Group(elem_id="quality-input-panel"):
+                            quality_input = gr.Textbox(
+                                label="待质检文本",
+                                lines=8,
+                                placeholder="建议一行或一句输入一个明确说法，系统会拆成多条 Claim 逐条质检。",
+                            )
+                            quality_template = gr.Dropdown(
+                                label="质检模板",
+                                choices=template_choices,
+                                value=default_template_choice,
+                                interactive=True,
+                            )
+                            quality_button = gr.Button("开始质检")
+                            recent_quality_button = gr.Button("加载最近质检结果")
                     with gr.Column(scale=4):
-                        quality_result = gr.HTML(value=format_quality_result_html(None))
-                with gr.Row():
+                        quality_help = gr.HTML(value=format_quality_help_html(), elem_id="quality-help-panel")
+                with gr.Row(elem_id="quality-template-row"):
+                    quality_template_detail = gr.HTML(
+                        value=format_quality_template_html(default_template),
+                        elem_id="quality-template-panel",
+                    )
+                with gr.Row(elem_id="quality-summary-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
+                    with gr.Column(scale=1):
+                        quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
+                with gr.Row(elem_id="quality-claim-row", equal_height=True):
                     with gr.Column(scale=5):
                         quality_claims = gr.Dataframe(
                             headers=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "来源文档", "来源位置"],
@@ -676,20 +1002,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=7,
                             label="Claim 列表",
-                        )
-                        recent_quality_checks = gr.Dataframe(
-                            headers=["质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
-                            datatype=["str"] * 6,
-                            interactive=False,
-                            row_count=0,
-                            column_count=6,
-                            label="最近质检结果",
+                            elem_id="quality-claims-table",
+                            value=initial_claim_rows,
                         )
                     with gr.Column(scale=4):
-                        review_claim_selector = gr.Dropdown(label="可审核 Claim", choices=[], interactive=True)
-                        claim_detail_state = gr.State({})
-                        recent_quality_state = gr.State([])
-                        claim_detail_view = gr.HTML(value=format_claim_detail_html(None))
+                        selected_claim_state = gr.State(initial_selected_claim)
+                        claim_detail_state = gr.State(initial_claim_detail_map)
+                        recent_quality_state = gr.State(_initial_recent_results_state)
+                        evidence_items_state = gr.State(initial_evidence_items)
+                        claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
+                with gr.Row(elem_id="quality-evidence-row", equal_height=True):
+                    with gr.Column(scale=5):
                         claim_evidence_table = gr.Dataframe(
                             headers=["片段 ID", "文档", "定位", "检索来源", "匹配来源", "重排分", "证据摘要"],
                             datatype=["str"] * 7,
@@ -697,7 +1020,34 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=7,
                             label="证据列表",
+                            elem_id="quality-evidence-table",
+                            value=initial_evidence_rows,
                         )
+                    with gr.Column(scale=4):
+                        claim_evidence_detail = gr.HTML(
+                            value=initial_evidence_detail_html,
+                            elem_id="quality-evidence-detail",
+                        )
+                with gr.Row(elem_id="quality-history-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        with gr.Group(elem_id="quality-history-panel"):
+                            recent_quality_note = gr.HTML(
+                                value=(
+                                    "<div>最近质检记录用于回看历史质检任务。"
+                                    "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
+                                ),
+                                elem_id="quality-history-note",
+                            )
+                            recent_quality_checks = gr.Dataframe(
+                                headers=["质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
+                                datatype=["str"] * 6,
+                                interactive=False,
+                                row_count=0,
+                                column_count=6,
+                                label="最近质检记录",
+                                elem_id="quality-recent-table",
+                                value=initial_recent_rows,
+                            )
 
             with gr.Tab("人工审核"):
                 with gr.Row():
@@ -813,33 +1163,67 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             fn=run_quality_check,
             inputs=[quality_input, quality_template],
             outputs=[
+                quality_progress,
                 quality_result,
                 quality_claims,
-                review_claim_selector,
+                selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
                 review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
                 recent_quality_state,
                 recent_quality_checks,
             ],
+        )
+        quality_template.change(
+            fn=render_quality_template,
+            inputs=quality_template,
+            outputs=quality_template_detail,
         )
         recent_quality_button.click(
             fn=list_recent_quality_results,
             outputs=[
-                recent_quality_checks,
-                review_claim_selector,
+                quality_progress,
+                quality_result,
+                quality_claims,
+                selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
                 review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
+                recent_quality_checks,
                 recent_quality_state,
             ],
         )
-        review_claim_selector.change(
-            fn=render_claim_views,
-            inputs=[review_claim_selector, claim_detail_state],
-            outputs=[claim_detail_view, claim_evidence_table, review_claim_detail],
+        recent_quality_checks.select(
+            fn=select_recent_quality_result,
+            inputs=[recent_quality_state],
+            outputs=[
+                quality_progress,
+                quality_result,
+                quality_claims,
+                selected_claim_state,
+                claim_detail_state,
+                claim_detail_view,
+                claim_evidence_table,
+                review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
+            ],
+        )
+        quality_claims.select(
+            fn=select_quality_claim,
+            inputs=[quality_claims, claim_detail_state],
+            outputs=[claim_detail_view, claim_evidence_table, review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail],
+        )
+        claim_evidence_table.select(
+            fn=select_quality_evidence,
+            inputs=[evidence_items_state],
+            outputs=[claim_evidence_detail],
         )
         review_history_button.click(
             fn=list_review_history,
@@ -848,11 +1232,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         review_history_selector.change(
             fn=focus_review_record,
             inputs=[review_history_selector, review_history_state, recent_quality_state],
-            outputs=[review_claim_selector, claim_detail_state, claim_detail_view, claim_evidence_table, review_claim_detail],
+            outputs=[selected_claim_state, claim_detail_state, claim_detail_view, claim_evidence_table, review_claim_detail, evidence_items_state, claim_evidence_detail],
         )
         review_button.click(
             fn=submit_review_action,
-            inputs=[review_claim_selector, review_action_input, review_note_input],
+            inputs=[selected_claim_state, review_action_input, review_note_input],
             outputs=[
                 review_result,
                 review_history,
@@ -860,11 +1244,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_history_state,
                 recent_quality_checks,
                 recent_quality_state,
-                review_claim_selector,
+                selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
                 review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
             ],
         )
     return demo

@@ -33,6 +33,8 @@ from src.ui.viewmodels import (
     format_document_summary_markdown,
     format_operation_result_html,
     format_operation_result_markdown,
+    format_quality_help_html,
+    format_quality_progress_html,
     format_review_history,
     get_document_detail,
     get_claim_detail,
@@ -41,6 +43,7 @@ from src.ui.viewmodels import (
     parse_review_choice,
     parse_template_choice,
     parse_document_choice,
+    format_quality_template_html,
     normalize_search_query,
     scan_input_documents,
 )
@@ -460,9 +463,11 @@ def test_claim_detail_helpers_should_return_selected_claim_detail() -> None:
     )
 
     detail = get_claim_detail("claim_1 | needs_review | 第一条结论", detail_map)
+    detail_by_id = get_claim_detail("claim_1", detail_map)
 
     assert detail["claim_id"] == "claim_1"
     assert detail["evidence_details"][0]["chunk_id"] == "chk_1"
+    assert detail_by_id["claim_id"] == "claim_1"
 
 
 def test_format_claim_detail_for_review_should_build_summary_and_evidence_table() -> None:
@@ -659,7 +664,7 @@ def test_operation_and_history_display_helpers_should_generate_readable_content(
 
     assert "执行状态：成功" in operation_markdown
     assert "最后进度：100%" in operation_markdown
-    assert quality_rows == [["check_1", "严格证据核验", "needs_review", "2", "2026-04-30T12:00:00Z", "测试输入"]]
+    assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "2026-04-30T12:00:00Z", "测试输入"]]
     assert review_rows == [["rev_1", "claim_1", "approved", "approved", "tester", "2026-04-30T12:30:00Z", "通过", "第一条结论"]]
 
 
@@ -751,4 +756,60 @@ def test_quality_display_helpers_should_build_claim_rows() -> None:
 
     rows = build_quality_claim_rows(formatted)
 
-    assert rows == [["claim_1", "第一条结论", "needs_review", "medium", "0.550", "标题一", "章节1"]]
+    assert rows == [["claim_1", "第一条结论", "需复核", "中级", "0.550", "标题一", "章节1"]]
+
+
+def test_quality_help_and_template_panels_should_be_human_readable() -> None:
+    """AI 质检说明和模板内容应展示给普通用户。"""
+
+    help_html = format_quality_help_html()
+    template_html = format_quality_template_html(
+        {
+            "template_id": "strict_evidence_check",
+            "template_name": "严格证据核验",
+            "description": "适合证据要求更高的场景。",
+            "rule_tags": ["general", "strict"],
+            "retrieval_policy": {
+                "fulltext_top_k": 5,
+                "vector_top_k": 5,
+                "final_top_k": 5,
+                "use_rerank": True,
+                "neighbor_window": 1,
+                "include_section_context": False,
+                "section_max_chars": 500,
+            },
+            "system_prompt": "系统提示词内容",
+            "user_prompt_template": "用户提示模板内容",
+        }
+    )
+
+    assert "AI 质检会把输入内容拆成多条 Claim" in help_html
+    assert "严格证据核验" in template_html
+    assert "系统提示词" in template_html
+    assert "用户提示模板" in template_html
+    assert "全文 5 / 向量 5 / 最终 5 / 启用重排" in template_html
+    assert "display:grid" in template_html
+    assert "grid-template-columns:minmax(260px,1fr) minmax(320px,1.2fr) minmax(320px,1.2fr)" in template_html
+
+
+def test_quality_progress_panel_should_show_stage_and_model_status() -> None:
+    """质检进度面板应显示当前阶段、处理进度和模型状态。"""
+
+    progress_html = format_quality_progress_html(
+        {
+            "status": "running",
+            "stage": "model",
+            "message": "正在调用模型判定：第 2/3 条 Claim",
+            "claim_index": 2,
+            "claim_total": 3,
+            "claim_text": "阿胶可以治疗所有贫血",
+            "template_name": "医学内容审慎质检",
+            "model_status": "正在调用模型",
+        }
+    )
+
+    assert "执行中" in progress_html
+    assert "调用模型" in progress_html
+    assert "2/3" in progress_html
+    assert "正在调用模型" in progress_html
+    assert "阿胶可以治疗所有贫血" in progress_html

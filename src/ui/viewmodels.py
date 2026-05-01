@@ -126,6 +126,122 @@ def format_search_help_html() -> str:
     )
 
 
+def format_quality_help_html() -> str:
+    """构建 AI 质检功能说明面板。"""
+
+    return _build_panel_html(
+        title="功能说明",
+        description="AI 质检会把输入内容拆成多条 Claim，结合规则、知识库证据和模型判定给出初步结论。",
+        cards=[
+            ("适合输入", "多条明确陈述、待核验说法、待复核段落"),
+            ("处理方式", "拆分 Claim -> 检索证据 -> 调用模型/规则判定"),
+            ("结果重点", "总体结论、风险等级、置信度、证据定位"),
+            ("后续动作", "高风险或需复核内容建议转人工审核"),
+        ],
+        notes=[
+            "建议一行或一句表达一个明确结论，便于系统逐条分析。",
+            "医学、古文、绝对化表述请优先选择更严格的模板。",
+            "如果当前未配置模型，系统会回退到规则与启发式判定。",
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
+def format_quality_template_html(template: dict | None) -> str:
+    """构建质检模板内容展示面板。"""
+
+    resolved = template or {}
+    if not resolved:
+        return _build_panel_html(
+            title="模板内容",
+            description="请选择质检模板后查看适用场景、检索策略和提示词内容。",
+            cards=[("当前状态", "未选择模板")],
+            notes=["选择模板后，这里会同步显示模板说明和关键配置。"],
+            tone="neutral",
+        )
+
+    retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+    system_prompt = _display_text(resolved.get("system_prompt"))
+    user_prompt_template = _display_text(resolved.get("user_prompt_template"))
+    summary_html = _build_panel_html(
+        title="模板内容",
+        description=_display_text(resolved.get("description")),
+        cards=[
+            ("模板名称", _display_text(resolved.get("template_name"))),
+            ("模板 ID", _display_text(resolved.get("template_id"))),
+            ("规则标签", "、".join(str(item) for item in resolved.get("rule_tags", []) if item) or "-"),
+            ("检索策略", _format_retrieval_policy_summary(retrieval_policy)),
+        ],
+        notes=[
+            f'全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
+            f'向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
+            f'最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
+            f'上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+        ],
+        tone="neutral",
+    )
+    return f"""
+    <div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(320px,1.2fr) minmax(320px,1.2fr);gap:12px;align-items:stretch;width:100%;box-sizing:border-box;">
+        <div style="min-width:0;display:flex;box-sizing:border-box;">{summary_html}</div>
+        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;box-sizing:border-box;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:var(--body-text-color);margin:0 0 8px 0;">系统提示词</div>
+            <pre style="margin:0;padding:12px 14px;border-radius:12px;background:var(--block-background-fill);border:1px solid var(--border-color-primary);font-size:13px;line-height:1.7;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;min-height:260px;max-height:420px;overflow:auto;">{escape(system_prompt)}</pre>
+        </div>
+        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;box-sizing:border-box;min-width:0;">
+            <div style="font-size:14px;font-weight:700;color:var(--body-text-color);margin:0 0 8px 0;">用户提示模板</div>
+            <pre style="margin:0;padding:12px 14px;border-radius:12px;background:var(--block-background-fill);border:1px solid var(--border-color-primary);font-size:13px;line-height:1.7;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;min-height:260px;max-height:420px;overflow:auto;">{escape(user_prompt_template)}</pre>
+        </div>
+    </div>
+    """
+
+
+def format_quality_progress_html(progress: dict | None) -> str:
+    """构建质检执行进度面板。"""
+
+    resolved = progress or {}
+    if not resolved:
+        return _build_panel_html(
+            title="执行进度",
+            description="开始质检后，这里会显示当前阶段、Claim 进度和模型调用状态。",
+            cards=[
+                ("执行状态", "未开始"),
+                ("当前阶段", "等待执行"),
+                ("处理进度", "-"),
+                ("模型状态", "-"),
+            ],
+            notes=["开始质检后，可在这里看到是否正在检索证据、整理上下文、调用模型和写入结果。"],
+            tone="neutral",
+        )
+
+    status = _display_text(resolved.get("status")) or "running"
+    tone = "success" if status == "success" else "warning" if status == "running" else "neutral"
+    claim_index = int(resolved.get("claim_index") or 0)
+    claim_total = int(resolved.get("claim_total") or 0)
+    if claim_total > 0:
+        progress_text = f"{claim_index}/{claim_total}"
+    else:
+        progress_text = "-"
+    notes = []
+    if resolved.get("claim_text"):
+        notes.append(f'当前 Claim：{_display_text(resolved.get("claim_text"))}')
+    if resolved.get("template_name"):
+        notes.append(f'当前模板：{_display_text(resolved.get("template_name"))}')
+    notes.append(f'阶段说明：{_display_text(resolved.get("message"))}')
+    return _build_panel_html(
+        title="执行进度",
+        description=_display_text(resolved.get("message") or "质检处理中"),
+        cards=[
+            ("执行状态", _format_quality_progress_status(status)),
+            ("当前阶段", _format_quality_progress_stage(resolved.get("stage"))),
+            ("处理进度", progress_text),
+            ("模型状态", _display_text(resolved.get("model_status")) or "-"),
+        ],
+        notes=notes,
+        tone=tone,
+    )
+
+
 def format_search_result_detail_html(item: dict | None, *, query_text: str = "") -> str:
     """构建检索结果原文详情面板。"""
 
@@ -757,7 +873,7 @@ def format_quality_result_markdown(formatted: dict | None) -> str:
     return "\n".join(
         [
             "### 质检结果",
-            f'- 总体结论：{_display_text(check.get("overall_verdict") or resolved.get("summary"))}',
+            f'- 总体结论：{_format_verdict_label(check.get("overall_verdict") or resolved.get("summary"))}',
             f'- 模板名称：{_display_text(check.get("template_name"))}',
             f"- Claim 数量：{len(claims)}",
             f'- 摘要说明：{_display_text(resolved.get("summary"))}',
@@ -771,8 +887,9 @@ def format_quality_result_html(formatted: dict | None) -> str:
     resolved = formatted or {}
     check = resolved.get("check") or {}
     claims = resolved.get("claims") or []
-    overall_verdict = _display_text(check.get("overall_verdict") or resolved.get("summary"))
-    tone = "warning" if "review" in overall_verdict.lower() else "success"
+    raw_overall_verdict = _display_text(check.get("overall_verdict") or resolved.get("summary"))
+    overall_verdict = _format_verdict_label(raw_overall_verdict)
+    tone = "warning" if "review" in raw_overall_verdict.lower() else "success"
     return _build_panel_html(
         title="质检结果",
         description=_display_text(resolved.get("summary")),
@@ -795,8 +912,8 @@ def build_quality_claim_rows(formatted: dict | None) -> list[list[str]]:
         [
             _display_text(item.get("claim_id")),
             _display_text(item.get("claim_text")),
-            _display_text(item.get("verdict")),
-            _display_text(item.get("risk_level")),
+            _format_verdict_label(item.get("verdict")),
+            _format_risk_level_label(item.get("risk_level")),
             _format_score(item.get("confidence")),
             _display_text(item.get("source_doc")),
             _display_text(item.get("source_span")),
@@ -810,6 +927,8 @@ def parse_claim_choice(choice: str) -> str:
 
     if not choice:
         return ""
+    if " | " not in choice:
+        return choice.strip()
     return choice.split(" | ", maxsplit=1)[0]
 
 
@@ -839,7 +958,7 @@ def build_claim_detail_map(claims: list[dict]) -> dict:
 
 
 def get_claim_detail(claim_choice: str, claim_detail_map: dict | None) -> dict:
-    """根据下拉选项读取 claim 详情。"""
+    """根据 claim_id 或下拉选项读取 claim 详情。"""
 
     claim_id = parse_claim_choice(claim_choice)
     if not claim_id or not claim_detail_map:
@@ -903,8 +1022,8 @@ def format_claim_detail_markdown(detail: dict | None) -> str:
             "### Claim 详情",
             f'- Claim ID：{_display_text(summary.get("claim_id"))}',
             f'- Claim 内容：{_display_text(summary.get("claim_text"))}',
-            f'- 当前判定：{_display_text(summary.get("verdict"))}',
-            f'- 风险等级：{_display_text(summary.get("risk_level"))}',
+            f'- 当前判定：{_format_verdict_label(summary.get("verdict"))}',
+            f'- 风险等级：{_format_risk_level_label(summary.get("risk_level"))}',
             f'- 置信度：{_format_score(summary.get("confidence"))}',
             f'- 审核状态：{_display_text(summary.get("review_status"))}',
             f'- 来源文档：{_display_text(summary.get("source_doc"))}',
@@ -928,16 +1047,17 @@ def format_claim_detail_html(detail: dict | None) -> str:
             cards=[("当前状态", "未选择 Claim")],
             tone="neutral",
         )
-    verdict = _display_text(summary.get("verdict"))
+    raw_verdict = _display_text(summary.get("verdict"))
+    verdict = _format_verdict_label(raw_verdict)
     review_status = _display_text(summary.get("review_status"))
-    tone = "warning" if "review" in verdict.lower() or review_status == "pending" else "success"
+    tone = "warning" if "review" in raw_verdict.lower() or review_status == "pending" else "success"
     return _build_panel_html(
         title="Claim 详情",
         description=_display_text(summary.get("claim_text")),
         cards=[
             ("Claim ID", _display_text(summary.get("claim_id"))),
             ("当前判定", verdict),
-            ("风险等级", _display_text(summary.get("risk_level"))),
+            ("风险等级", _format_risk_level_label(summary.get("risk_level"))),
             ("置信度", _format_score(summary.get("confidence"))),
             ("审核状态", review_status),
             ("证据条数", _display_text(resolved.get("evidence_count"))),
@@ -968,6 +1088,37 @@ def build_claim_evidence_rows(detail: dict | None) -> list[list[str]]:
         ]
         for item in evidence_rows
     ]
+
+
+def format_evidence_detail_html(evidence: dict | None) -> str:
+    """将单条证据详情转换为卡片式 HTML。"""
+
+    resolved = evidence or {}
+    if not resolved:
+        return _build_panel_html(
+            title="证据详情",
+            description="请选择证据列表中的条目后查看详情",
+            cards=[("当前状态", "未选择证据")],
+            tone="neutral",
+        )
+    return _build_panel_html(
+        title="证据详情",
+        description=_display_text(resolved.get("content_preview")),
+        cards=[
+            ("片段 ID", _display_text(resolved.get("chunk_id"))),
+            ("文档", _display_text(resolved.get("doc_title") or resolved.get("doc_uid"))),
+            ("定位", _display_text(resolved.get("source_span"))),
+            ("检索来源", _display_text(resolved.get("retrieval_source"))),
+            ("匹配来源", _display_text(resolved.get("matched_sources"))),
+            ("重排分", _format_score(resolved.get("rerank_score"))),
+        ],
+        notes=[
+            f'章节：{_display_text(resolved.get("section_title"))}',
+            f'上下文模式：{_display_text(resolved.get("context_mode"))}',
+            f'证据摘要：{_display_text(resolved.get("content_preview"))}',
+        ],
+        tone="neutral",
+    )
 
 
 def parse_doc_uid_choice(choice: str) -> str:
@@ -1035,7 +1186,7 @@ def build_recent_quality_rows(quality_results: list[dict] | None) -> list[list[s
         [
             _display_text(item.get("check_id")),
             _display_text(item.get("template_name")),
-            _display_text(item.get("overall_verdict")),
+            _format_verdict_label(item.get("overall_verdict")),
             str(len(item.get("claims") or [])),
             _display_text(item.get("created_at")),
             _truncate_text(item.get("input_text")),
@@ -1048,7 +1199,7 @@ def build_claim_choice(claim: dict) -> str:
     """构建 claim 下拉选项。"""
 
     return (
-        f'{claim["claim_id"]} | {claim.get("verdict", "")} | '
+        f'{claim["claim_id"]} | {_format_verdict_label(claim.get("verdict", ""))} | '
         f'{claim.get("review_status", "pending")} | {claim.get("claim_text", "")[:30]}'
     )
 
@@ -1222,6 +1373,83 @@ def _highlight_query_terms(text: str, query_terms: list[str]) -> str:
         escaped_term = escape(term)
         highlighted = highlighted.replace(escaped_term, f"<mark>{escaped_term}</mark>")
     return highlighted
+
+
+def _format_retrieval_policy_summary(policy: dict) -> str:
+    """将模板检索策略压缩为简短摘要。"""
+
+    if not policy:
+        return "-"
+    rerank_text = "启用重排" if policy.get("use_rerank") else "不重排"
+    return (
+        f'全文 {policy.get("fulltext_top_k", "-")} / '
+        f'向量 {policy.get("vector_top_k", "-")} / '
+        f'最终 {policy.get("final_top_k", "-")} / {rerank_text}'
+    )
+
+
+def _format_context_strategy_summary(policy: dict) -> str:
+    """将上下文扩展策略转换为可读文本。"""
+
+    if not policy:
+        return "-"
+    return (
+        f'邻居窗口 {policy.get("neighbor_window", 0)}，'
+        f'{"含章节上下文" if policy.get("include_section_context") else "仅当前片段"}，'
+        f'最长 {policy.get("section_max_chars", "-")} 字'
+    )
+
+
+def _format_quality_progress_stage(stage: object) -> str:
+    """将执行阶段转换为用户可读文本。"""
+
+    mapping = {
+        "prepare": "准备输入",
+        "template": "加载模板",
+        "rules": "规则匹配",
+        "retrieval": "检索证据",
+        "context": "整理上下文",
+        "model": "调用模型",
+        "persist": "写入结果",
+    }
+    return mapping.get(str(stage or ""), _display_text(stage))
+
+
+def _format_quality_progress_status(status: object) -> str:
+    """将执行状态转换为用户可读文本。"""
+
+    mapping = {
+        "running": "执行中",
+        "success": "已完成",
+        "error": "执行失败",
+    }
+    return mapping.get(str(status or ""), _display_text(status) or "未开始")
+
+
+def _format_risk_level_label(level: object) -> str:
+    """将风险等级转换为中文展示。"""
+
+    mapping = {
+        "low": "低级",
+        "medium": "中级",
+        "high": "高级",
+        "critical": "严重",
+    }
+    return mapping.get(str(level or "").lower(), _display_text(level))
+
+
+def _format_verdict_label(verdict: object) -> str:
+    """将判定结果转换为中文展示。"""
+
+    mapping = {
+        "verified": "通过",
+        "approved": "通过",
+        "rejected": "不通过",
+        "needs_review": "需复核",
+        "pending": "待处理",
+        "updated": "已更新",
+    }
+    return mapping.get(str(verdict or "").lower(), _display_text(verdict))
 
 
 def _build_panel_html(
