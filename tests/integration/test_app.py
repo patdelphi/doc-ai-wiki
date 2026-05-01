@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from src.app import create_app
 from src.common.config import AppSettings
 from src.db.connection import initialize_database
+from src.db.repositories import DocumentRepository
+from src.ingest.service import IngestService
 
 
 def build_test_settings(tmp_path: Path) -> AppSettings:
@@ -366,6 +368,56 @@ def test_quality_and_review_flow_should_persist_result(tmp_path: Path) -> None:
     assert persisted_claims[0]["review_status"] == "approved"
     assert persisted_claims[0]["risk_level"] == "medium"
     assert quality_payload["data"]["claims"][0]["evidence_details"]
+
+
+def test_ingest_service_should_return_database_summary(tmp_path: Path) -> None:
+    """数据库状态统计应反映入库、分块、质检与审核数量。"""
+
+    input_root = tmp_path / "Input"
+    input_root.mkdir(parents=True, exist_ok=True)
+    sample_file = input_root / "sample_doc.MD"
+    sample_file.write_text(
+        "# 测试文档\n\n中文知识库系统支持 Markdown 文档入库、全文检索和 AI 质检。",
+        encoding="utf-8",
+    )
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        register_response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [{"file_path": str(sample_file), "doc_title": "测试文档"}],
+                "rebuild_if_exists": False,
+            },
+        )
+        quality_response = client.post(
+            "/quality/check",
+            json={"input_text": "中文知识库系统一定支持全文检索和 AI 质检。"},
+        )
+        claim_id = quality_response.json()["data"]["claims"][0]["claim_id"]
+        client.post(
+            "/review/submit",
+            json={
+                "claim_id": claim_id,
+                "review_action": "approved",
+                "reviewed_verdict": "needs_review",
+                "review_note": "测试通过",
+                "reviewer": "tester",
+            },
+        )
+
+    summary = IngestService(settings).get_database_summary()
+
+    assert register_response.status_code == 200
+    assert summary["document_count"] == 1
+    assert summary["completed_document_count"] == 1
+    assert summary["indexed_document_count"] == 1
+    assert summary["chunk_count"] >= 1
+    assert summary["section_count"] >= 1
+    assert summary["quality_check_count"] == 1
+    assert summary["claim_count"] >= 1
+    assert summary["review_count"] == 1
 
 
 def test_register_document_should_only_mark_indexed_after_vector_success(tmp_path: Path) -> None:

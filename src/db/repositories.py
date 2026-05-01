@@ -183,6 +183,27 @@ class DocumentRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_database_summary(self) -> dict[str, int]:
+        """汇总数据库中的文档、分块、质检与审核统计。"""
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(1) FROM documents) AS document_count,
+                    (SELECT COUNT(1) FROM documents WHERE ingest_status = 'completed') AS completed_document_count,
+                    (SELECT COUNT(1) FROM documents WHERE index_status = 'indexed') AS indexed_document_count,
+                    (SELECT COUNT(1) FROM documents WHERE index_status IN ('pending', 'rebuilding')) AS rebuild_pending_document_count,
+                    (SELECT COUNT(1) FROM documents WHERE index_status = 'partial_failed' OR ingest_status = 'failed') AS failed_document_count,
+                    (SELECT COUNT(1) FROM document_sections) AS section_count,
+                    (SELECT COUNT(1) FROM chunks) AS chunk_count,
+                    (SELECT COUNT(1) FROM quality_checks) AS quality_check_count,
+                    (SELECT COUNT(1) FROM quality_claims) AS claim_count,
+                    (SELECT COUNT(1) FROM review_records) AS review_count
+                """
+            ).fetchone()
+        return {key: int(row[key] or 0) for key in row.keys()}
+
     @staticmethod
     def _normalize_document_row(row: Any) -> dict[str, Any] | None:
         """将 documents 表记录转换为接口友好的结构。"""

@@ -30,3 +30,93 @@ def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
     demo = create_ui_app(settings)
 
     assert isinstance(demo, gr.Blocks)
+
+
+def test_create_ui_app_should_not_register_startup_load_event(tmp_path: Path) -> None:
+    """UI 首屏应直接渲染默认数据，避免依赖启动 load 队列。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    dependencies = demo.config.get("dependencies", [])
+
+    assert all(dep.get("targets") != [(0, "load")] for dep in dependencies)
+
+
+def test_create_ui_app_should_not_render_raw_json_components(tmp_path: Path) -> None:
+    """界面应避免直接向普通用户展示原始 JSON 组件。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+
+    assert all(component.get("type") != "json" for component in components)
+
+
+def test_create_ui_app_should_include_database_status_module(tmp_path: Path) -> None:
+    """文档管理页应包含数据库状态展示模块。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+
+    assert any("数据库状态" in value for value in html_values)
+
+
+def test_create_ui_app_should_use_html_status_panels(tmp_path: Path) -> None:
+    """关键状态模块应通过 HTML 卡片展示。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+
+    assert any("文档概览" in value for value in html_values)
+    assert any("检索结果" in value for value in html_values)
+    assert any("质检结果" in value for value in html_values)
+    assert any("审核结果" in value for value in html_values)
+    assert any("未开始" in value for value in html_values)

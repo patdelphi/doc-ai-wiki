@@ -177,6 +177,11 @@ class IngestService:
             page_size=page_size,
         )
 
+    def get_database_summary(self) -> dict[str, int]:
+        """读取数据库中与文档管理相关的关键统计信息。"""
+
+        return self.document_repository.get_database_summary()
+
     def rebuild_documents(
         self,
         doc_uids: list[str],
