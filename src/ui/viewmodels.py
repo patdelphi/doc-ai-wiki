@@ -61,9 +61,20 @@ def build_template_choices(templates: list[dict]) -> list[str]:
     return [f'{item["template_id"]} | {item.get("template_name", "")}' for item in templates if item.get("template_id")]
 
 
-def format_search_results(items: list[dict]) -> dict:
+def normalize_search_query(query: str) -> str:
+    """将多组关键词输入规范化为单个查询字符串。"""
+
+    raw = str(query or "").replace("\r", " ").replace("\n", " ")
+    for separator in ("，", ",", "；", ";", "、", "|", "\t"):
+        raw = raw.replace(separator, " ")
+    return " ".join(part for part in raw.split(" ") if part.strip())
+
+
+def format_search_results(items: list[dict], *, query_text: str = "") -> dict:
     """将检索结果转换为更适合 UI 展示的结构。"""
 
+    normalized_query = normalize_search_query(query_text)
+    query_terms = _extract_search_terms(normalized_query)
     rows = [
         {
             "chunk_id": item.get("chunk_id"),
@@ -77,15 +88,87 @@ def format_search_results(items: list[dict]) -> dict:
             "matched_sources": item.get("matched_sources", []),
             "score": item.get("score"),
             "rerank_score": item.get("rerank_score"),
+            "section_title": item.get("section_title", ""),
+            "content": str(item.get("content", "")),
             "content_preview": str(item.get("content", ""))[:200],
+            "content_preview_highlighted": _highlight_query_terms(str(item.get("content", ""))[:200], query_terms),
         }
         for item in items
     ]
     return {
         "count": len(rows),
+        "query_text": normalized_query,
+        "query_terms": query_terms,
         "items": items,
         "table": rows,
     }
+
+
+def format_search_help_html() -> str:
+    """构建检索功能说明面板。"""
+
+    return _build_panel_html(
+        title="功能说明",
+        description="当前为混合检索：会综合全文召回、向量召回和重排结果，适合日常知识查询。",
+        cards=[
+            ("支持输入", "支持关键词、短语、整句输入"),
+            ("匹配方式", "混合召回，偏模糊"),
+            ("多组关键词", "支持，建议空格或逗号分隔"),
+            ("正则表达式", "不支持正则表达式"),
+        ],
+        notes=[
+            "检索内容可以输入一个关键词，也可以输入一句完整问题。",
+            "如果输入多组关键词，系统会把它们合并成一次查询并综合排序。",
+            "更适合找相关内容，不保证逐字严格匹配。",
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
+def format_search_result_detail_html(item: dict | None, *, query_text: str = "") -> str:
+    """构建检索结果原文详情面板。"""
+
+    resolved = item or {}
+    if not resolved:
+        return _build_panel_html(
+            title="原文详情",
+            description="点击下方检索结果后，这里会显示对应原文内容和定位信息。",
+            cards=[("当前状态", "未选择结果")],
+            notes=["可查看文档名称、片段 ID、定位、检索来源、命中来源和原文内容"],
+            tone="neutral",
+        )
+
+    query_terms = _extract_search_terms(query_text)
+    content_html = _highlight_query_terms(_display_text(resolved.get("content") or resolved.get("expanded_content")), query_terms)
+    metadata_html = _build_panel_html(
+        title="原文详情",
+        description="当前已定位到所选检索结果的原文片段。",
+        cards=[
+            ("文档名称", _display_text(resolved.get("doc_title") or resolved.get("source_name"))),
+            ("片段 ID", _display_text(resolved.get("chunk_id"))),
+            ("片段序号", _display_text(resolved.get("chunk_index"))),
+            ("定位", _display_text(resolved.get("source_span"))),
+            ("检索来源", _display_text(resolved.get("retrieval_source"))),
+            ("匹配来源", _display_text(resolved.get("matched_sources"))),
+            ("相关度", _format_score(resolved.get("score"))),
+            ("重排分", _format_score(resolved.get("rerank_score"))),
+        ],
+        notes=[
+            f'章节：{_display_text(resolved.get("section_title"))}',
+            f'作者：{_display_text(resolved.get("author"))}',
+        ],
+        tone="neutral",
+    )
+    return (
+        f"{metadata_html}"
+        f"""
+        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;margin:0 0 12px 0;">
+            <div style="font-size:16px;font-weight:700;color:var(--body-text-color);margin:0 0 8px 0;">原文内容</div>
+            <div style="font-size:14px;line-height:1.8;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;">{content_html}</div>
+        </div>
+        """
+    )
 
 
 def format_document_summary_markdown(summary: dict | None) -> str:
@@ -388,21 +471,41 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
     )
 
 
-def build_search_result_rows(formatted: dict | None) -> list[list[str]]:
+def _wrap_search_row_cell(content: str, *, is_selected: bool, is_first: bool = False) -> str:
+    """为选中行单元格添加统一高亮样式。"""
+
+    if not is_selected:
+        return content
+    classes = ["search-result-cell", "search-result-cell-selected"]
+    if is_first:
+        classes.append("search-result-cell-selected-first")
+    return (
+        f'<div class="{" ".join(classes)}">'
+        f"{content}"
+        "</div>"
+    )
+
+
+def build_search_result_rows(formatted: dict | None, *, selected_row_index: int | None = None) -> list[list[str]]:
     """将检索结果转换为表格行。"""
 
     rows = (formatted or {}).get("table") or []
     return [
         [
-            _display_text(item.get("doc_title") or item.get("source_name")),
-            _display_text(item.get("chunk_id")),
-            _display_text(item.get("retrieval_source")),
-            _format_score(item.get("score")),
-            _format_score(item.get("rerank_score")),
-            _display_text(item.get("matched_sources")),
-            _display_text(item.get("content_preview")),
+            _wrap_search_row_cell(str(index + 1), is_selected=index == selected_row_index, is_first=True),
+            _wrap_search_row_cell(_display_text(item.get("doc_title") or item.get("source_name")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_display_text(item.get("source_span")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_display_text(item.get("chunk_id")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_display_text(item.get("retrieval_source")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_format_score(item.get("score")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_format_score(item.get("rerank_score")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(_display_text(item.get("matched_sources")), is_selected=index == selected_row_index),
+            _wrap_search_row_cell(
+                _display_text(item.get("content_preview_highlighted") or item.get("content_preview")),
+                is_selected=index == selected_row_index,
+            ),
         ]
-        for item in rows
+        for index, item in enumerate(rows)
     ]
 
 
@@ -426,11 +529,21 @@ def format_search_summary_html(formatted: dict | None) -> str:
     resolved = formatted or {}
     count = int(resolved.get("count") or 0)
     tone = "success" if count > 0 else "neutral"
+    query_text = _display_text(resolved.get("query_text"))
+    query_terms = resolved.get("query_terms") or []
+    query_style = "关键词 / 多组词" if len(query_terms) > 1 else "短语 / 整句"
     return _build_panel_html(
         title="检索结果",
         description="已找到相关内容" if count > 0 else "未找到相关内容",
-        cards=[("命中条数", str(count))],
-        notes=["结果明细已在下方表格中展示"],
+        cards=[
+            ("命中条数", str(count)),
+            ("查询类型", query_style if query_text != "-" else "未输入"),
+            ("当前查询", query_text),
+        ],
+        notes=[
+            "当前为混合检索，不是严格逐字匹配。",
+            "结果明细已在下方表格中展示，点击某一行可查看原文详情。",
+        ],
         tone=tone,
     )
 
@@ -1085,6 +1198,32 @@ def _truncate_text(value: object, limit: int = 60) -> str:
     return f"{text[:limit]}..."
 
 
+def _extract_search_terms(query_text: str) -> list[str]:
+    """提取用于高亮的检索词。"""
+
+    seen: set[str] = set()
+    terms: list[str] = []
+    for part in normalize_search_query(query_text).split():
+        term = part.strip()
+        if not term or term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+    return sorted(terms, key=len, reverse=True)
+
+
+def _highlight_query_terms(text: str, query_terms: list[str]) -> str:
+    """在文本中高亮命中的检索词。"""
+
+    if not text:
+        return "-"
+    highlighted = escape(text)
+    for term in query_terms:
+        escaped_term = escape(term)
+        highlighted = highlighted.replace(escaped_term, f"<mark>{escaped_term}</mark>")
+    return highlighted
+
+
 def _build_panel_html(
     *,
     title: str,
@@ -1102,7 +1241,7 @@ def _build_panel_html(
         f"""
         <div style="background:{palette['card_bg']};border:1px solid {palette['card_border']};border-radius:12px;padding:12px 14px;min-height:76px;">
             <div style="font-size:12px;color:{palette['muted']};margin-bottom:6px;">{escape(label)}</div>
-            <div style="font-size:20px;font-weight:700;color:{palette['value']};line-height:1.3;word-break:break-word;">{escape(value)}</div>
+            <div style="font-size:16px;font-weight:700;color:{palette['value']};line-height:1.4;word-break:break-word;">{escape(value)}</div>
         </div>
         """
         for label, value in cards
@@ -1124,7 +1263,7 @@ def _build_panel_html(
     <div style="border:1px solid {palette['border']};background:{palette['panel_bg']};border-radius:16px;padding:16px 18px;margin:0 0 12px 0;box-shadow:none;{min_height_style}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
             <div>
-                <div style="font-size:18px;font-weight:700;color:{palette['title']};margin:0 0 6px 0;">{escape(title)}</div>
+                <div style="font-size:16px;font-weight:700;color:{palette['title']};margin:0 0 6px 0;">{escape(title)}</div>
                 <div style="font-size:13px;line-height:1.7;color:{palette['text']};">{escape(description)}</div>
             </div>
             <div style="padding:4px 10px;border-radius:999px;background:{palette['badge_bg']};color:{palette['badge_text']};font-size:12px;font-weight:600;">

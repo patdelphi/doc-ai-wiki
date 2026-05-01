@@ -27,15 +27,102 @@ from src.ui.viewmodels import (
     format_quality_result_html,
     format_recent_quality_checks,
     format_review_history,
+    format_search_help_html,
+    format_search_result_detail_html,
     format_search_results,
     format_search_summary_html,
     get_document_detail,
     get_review_target_claim_id,
+    normalize_search_query,
     parse_claim_choice,
     parse_document_choice,
     parse_template_choice,
     scan_input_documents,
 )
+
+
+UI_CSS = """
+#search-top-row {
+  align-items: stretch !important;
+}
+#search-input-panel,
+#search-help-panel {
+  height: 100%;
+  min-height: 260px;
+  align-self: stretch !important;
+}
+#search-input-panel {
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+#search-input-panel > div,
+#search-help-panel > div {
+  height: 100%;
+}
+#search-input-panel .gradio-container-3-42-0,
+#search-input-panel .gradio-container-4-44-1 {
+  background: transparent !important;
+}
+#search-input-panel button {
+  margin-top: auto;
+}
+#search-results-table table th,
+#search-results-table table td {
+  font-size: 14px !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.7 !important;
+  vertical-align: top !important;
+}
+#search-results-table button[aria-label="Select column"],
+#search-results-table button[aria-label="Select row"] {
+  display: none !important;
+}
+#search-results-table .search-result-cell-selected {
+  display: block;
+  margin: -8px -10px;
+  padding: 8px 10px;
+  background: rgba(68, 68, 68, 0.22) !important;
+  border-top: 1px solid rgba(68, 68, 68, 0.45);
+  border-bottom: 1px solid rgba(68, 68, 68, 0.45);
+  font-weight: 600;
+}
+#search-results-table .search-result-cell-selected-first {
+  border-left: 5px solid rgba(68, 68, 68, 0.72);
+  padding-left: 12px;
+}
+#search-results-table tr:has(td:focus-within) td,
+#search-results-table tr:has(button:focus) td,
+#search-results-table tr:has(.selected) td,
+#search-results-table td.selected {
+  background: rgba(127, 127, 127, 0.14) !important;
+}
+#search-results-table tr:has(td:focus-within) td:first-child,
+#search-results-table tr:has(button:focus) td:first-child,
+#search-results-table tr:has(.selected) td:first-child {
+  box-shadow: inset 3px 0 0 0 rgba(127, 127, 127, 0.45) !important;
+}
+#search-results-table mark,
+#search-result-detail mark {
+  background: rgba(245, 158, 11, 0.20);
+  color: #b45309;
+  font-weight: 700;
+  padding: 0 3px;
+  border-radius: 4px;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+}
+#search-result-detail,
+#search-result-summary {
+  font-size: 14px !important;
+}
+"""
 
 
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service) -> gr.Blocks:
@@ -244,9 +331,29 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             rebuild_state,
         )
 
-    def run_search(query: str, top_k: int) -> tuple[str, list[list[str]]]:
+    def build_search_detail(search_row: dict | None, query_text: str) -> str:
+        """根据检索结果行构建原文详情。"""
+
+        if not search_row:
+            return format_search_result_detail_html(None, query_text=query_text)
+        detail = retrieval_service.get_chunk_detail(search_row.get("chunk_id", "")) or {}
+        return format_search_result_detail_html({**search_row, **detail}, query_text=query_text)
+
+    def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str]:
+        normalized_query = normalize_search_query(query)
+        if not normalized_query:
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": "请输入关键词、短语或整句后再检索"},
+                    title="检索结果",
+                ),
+                [],
+                [],
+                "",
+                format_search_result_detail_html(None, query_text=""),
+            )
         try:
-            items = retrieval_service.hybrid_search(query, top_k=top_k, use_rerank=True)
+            items = retrieval_service.hybrid_search(normalized_query, top_k=top_k, use_rerank=True)
         except AppError as exc:
             return (
                 format_operation_result_html(
@@ -254,9 +361,36 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     title="检索结果",
                 ),
                 [],
+                [],
+                normalized_query,
+                format_search_result_detail_html(None, query_text=normalized_query),
             )
-        formatted = format_search_results(items)
-        return format_search_summary_html(formatted), build_search_result_rows(formatted)
+        formatted = format_search_results(items, query_text=normalized_query)
+        detail_html = build_search_detail(formatted["table"][0], normalized_query) if formatted["table"] else format_search_result_detail_html(None, query_text=normalized_query)
+        return (
+            format_search_summary_html(formatted),
+            build_search_result_rows(formatted, selected_row_index=0 if formatted["table"] else None),
+            formatted["table"],
+            normalized_query,
+            detail_html,
+        )
+
+    def select_search_result(search_rows: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]]]:
+        """点击检索结果表格后展示对应原文。"""
+
+        if not search_rows:
+            return format_search_result_detail_html(None, query_text=query_text), []
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows})
+        if row_index < 0 or row_index >= len(search_rows):
+            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows})
+        return (
+            build_search_detail(search_rows[row_index], query_text),
+            build_search_result_rows({"table": search_rows}, selected_row_index=row_index),
+        )
 
     def render_claim_views(claim_choice: str, claim_detail_map: dict | None) -> tuple[str, list[list[str]], str]:
         """统一渲染 Claim 摘要与证据表。"""
@@ -493,21 +627,31 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         rebuild_result = gr.HTML(value=format_operation_result_html(None, title="重建结果"))
 
             with gr.Tab("文档检索"):
-                with gr.Row():
+                with gr.Row(elem_id="search-top-row", equal_height=True):
                     with gr.Column(scale=5):
-                        search_query = gr.Textbox(label="检索内容")
-                        search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=10, step=1, value=5)
-                        search_button = gr.Button("执行检索")
+                        with gr.Group(elem_id="search-input-panel"):
+                            search_query = gr.Textbox(
+                                label="检索内容",
+                                lines=3,
+                                placeholder="可输入关键词、短语、整句，或多组关键词（建议用空格、逗号分隔）",
+                            )
+                            search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=100, step=1, value=10)
+                            search_button = gr.Button("执行检索")
                     with gr.Column(scale=4):
-                        search_result_summary = gr.HTML(value=format_search_summary_html(None))
+                        search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
+                search_result_summary = gr.HTML(value=format_search_summary_html(None), elem_id="search-result-summary")
+                search_result_state = gr.State([])
+                search_query_state = gr.State("")
                 search_result = gr.Dataframe(
-                    headers=["文档名称", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                    datatype=["str"] * 7,
+                    headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                    datatype=["markdown"] * 9,
                     interactive=False,
                     row_count=0,
-                    column_count=7,
+                    column_count=9,
                     label="检索结果列表",
+                    elem_id="search-results-table",
                 )
+                search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
 
             with gr.Tab("AI 质检"):
                 with gr.Row():
@@ -655,7 +799,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 rebuild_button,
             ],
         )
-        search_button.click(fn=run_search, inputs=[search_query, search_top_k], outputs=[search_result_summary, search_result])
+        search_button.click(
+            fn=run_search,
+            inputs=[search_query, search_top_k],
+            outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail],
+        )
+        search_result.select(
+            fn=select_search_result,
+            inputs=[search_result_state, search_query_state],
+            outputs=[search_result_detail, search_result],
+        )
         quality_button.click(
             fn=run_quality_check,
             inputs=[quality_input, quality_template],

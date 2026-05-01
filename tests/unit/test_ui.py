@@ -12,6 +12,7 @@ from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
 from src.ui.app import create_ui_app
+from src.ui.pages import UI_CSS
 
 
 def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
@@ -120,3 +121,69 @@ def test_create_ui_app_should_use_html_status_panels(tmp_path: Path) -> None:
     assert any("质检结果" in value for value in html_values)
     assert any("审核结果" in value for value in html_values)
     assert any("未开始" in value for value in html_values)
+
+
+def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_path: Path) -> None:
+    """检索页应按输入说明、结果状态、结果列表、原文详情的顺序布局。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    sliders = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "slider" and component.get("props", {}).get("label") == "返回数量"
+    ]
+    dataframes = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "search-results-table"
+    ]
+
+    assert any("支持关键词、短语、整句" in value for value in html_values)
+    assert any("原文详情" in value for value in html_values)
+    assert sliders
+    assert sliders[0].get("value") == 10
+    assert sliders[0].get("maximum") == 100
+    assert dataframes
+    assert dataframes[0].get("headers", [])[0] == "序号"
+    assert dataframes[0].get("column_count", [])[0] == 9
+    assert "search-input-panel" in elem_ids
+    assert "search-top-row" in elem_ids
+    assert elem_ids.index("search-help-panel") < elem_ids.index("search-result-summary")
+    assert elem_ids.index("search-result-summary") < elem_ids.index("search-results-table")
+    assert elem_ids.index("search-results-table") < elem_ids.index("search-result-detail")
+
+
+def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_size() -> None:
+    """检索页样式应隐藏整行整列选择按钮，并使用常规字号。"""
+
+    assert "Select column" in UI_CSS
+    assert "Select row" in UI_CSS
+    assert "display:none" in UI_CSS.replace(" ", "")
+    assert "font-size:14px" in UI_CSS.replace(" ", "")
+    assert "#search-top-row" in UI_CSS
+    assert "#search-input-panel" in UI_CSS
+    assert "min-height:260px" in UI_CSS.replace(" ", "")
+    assert ".search-result-cell-selected" in UI_CSS
+    assert "border-left:5pxsolid" in UI_CSS.replace(" ", "")
+    assert "font-weight:700" in UI_CSS.replace(" ", "")
+    assert "#b45309" in UI_CSS
+    assert "tr:has(td:focus-within) td" in UI_CSS
+    assert "tr:has(button:focus) td" in UI_CSS
+    assert "td.selected" in UI_CSS

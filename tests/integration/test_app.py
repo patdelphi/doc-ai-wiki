@@ -220,6 +220,20 @@ def test_register_json_document_should_expose_extended_metadata_in_status_and_se
     assert search_item["tags"] == ["古文", "医学"]
 
 
+def test_search_endpoints_should_allow_default_10_and_max_100(tmp_path: Path) -> None:
+    """检索接口默认返回数量应为 10，最大允许 100。"""
+
+    app = create_app(build_test_settings(tmp_path))
+    with TestClient(app) as client:
+        default_response = client.get("/search/hybrid", params={"query": "阿胶"})
+        max_response = client.get("/search/hybrid", params={"query": "阿胶", "top_k": 100})
+        overflow_response = client.get("/search/hybrid", params={"query": "阿胶", "top_k": 101})
+
+    assert default_response.status_code == 200
+    assert max_response.status_code == 200
+    assert overflow_response.status_code == 422
+
+
 def test_register_invalid_json_document_should_return_validation_error(tmp_path: Path) -> None:
     """非法 JSON 输入应返回可识别的校验错误。"""
 

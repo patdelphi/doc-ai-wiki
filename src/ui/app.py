@@ -14,7 +14,7 @@ from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
-from src.ui.pages import build_ui
+from src.ui.pages import UI_CSS, build_ui
 
 
 def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
@@ -55,7 +55,12 @@ def launch_ui(settings_override: AppSettings | None = None) -> None:
 
     settings = settings_override or get_settings()
     demo = create_ui_app(settings)
-    demo.launch(server_name=settings.app_host, server_port=settings.gradio_port, show_error=True)
+    demo.launch(
+        server_name=settings.app_host,
+        server_port=settings.gradio_port,
+        show_error=True,
+        css=UI_CSS,
+    )
 
 
 if __name__ == "__main__":

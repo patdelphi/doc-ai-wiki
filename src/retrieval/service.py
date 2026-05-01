@@ -27,7 +27,7 @@ class RetrievalService:
 
         self.reranker = reranker
 
-    def fulltext_search(self, query: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
+    def fulltext_search(self, query: str, top_k: int = 10, doc_uid: str | None = None) -> list[dict]:
         """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
 
         doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
@@ -63,7 +63,7 @@ class RetrievalService:
                 ).fetchall()
         return [self._with_source(self._normalize_metadata_fields(dict(row)), "fulltext") for row in rows]
 
-    def vector_search(self, query: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
+    def vector_search(self, query: str, top_k: int = 10, doc_uid: str | None = None) -> list[dict]:
         """当前阶段先以简单相似替代向量检索占位。"""
 
         if self.vector_store is None:
@@ -74,7 +74,7 @@ class RetrievalService:
     def hybrid_search(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int = 10,
         doc_uid: str | None = None,
         *,
         fulltext_top_k: int | None = None,
@@ -108,6 +108,30 @@ class RetrievalService:
         if should_rerank:
             return self.reranker.rerank(query=query, items=items, top_k=top_k)
         return items[:top_k]
+
+    def get_chunk_detail(self, chunk_id: str) -> dict | None:
+        """按 chunk_id 读取检索结果详情。"""
+
+        if not chunk_id:
+            return None
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span, c.content,
+                       d.doc_title, d.author, d.source_name, d.tags_json, s.section_title
+                FROM chunks c
+                JOIN documents d ON d.doc_uid = c.doc_uid
+                LEFT JOIN document_sections s ON s.section_id = c.section_id
+                WHERE c.chunk_id = ?
+                """,
+                (chunk_id,),
+            ).fetchone()
+        if not row:
+            return None
+        detail = self._normalize_metadata_fields(dict(row))
+        detail["expanded_content"] = detail.get("content", "")
+        return detail
 
     def expand_evidence_context(
         self,

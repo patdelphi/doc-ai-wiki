@@ -130,7 +130,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.get("/search/fulltext", response_model=ApiResponse)
     def search_fulltext(
         query: str = Query(..., min_length=1),
-        top_k: int = Query(default=5, ge=1, le=20),
+        top_k: int = Query(default=10, ge=1, le=100),
     ) -> ApiResponse:
         """执行全文检索。"""
 
@@ -140,7 +140,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.get("/search/vector", response_model=ApiResponse)
     def search_vector(
         query: str = Query(..., min_length=1),
-        top_k: int = Query(default=5, ge=1, le=20),
+        top_k: int = Query(default=10, ge=1, le=100),
     ) -> ApiResponse:
         """执行向量检索占位实现。"""
 
@@ -150,7 +150,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.get("/search/hybrid", response_model=ApiResponse)
     def search_hybrid(
         query: str = Query(..., min_length=1),
-        top_k: int = Query(default=5, ge=1, le=20),
+        top_k: int = Query(default=10, ge=1, le=100),
         use_rerank: bool = Query(default=True),
     ) -> ApiResponse:
         """执行混合检索。"""
