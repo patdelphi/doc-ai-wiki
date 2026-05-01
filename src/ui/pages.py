@@ -9,6 +9,9 @@ from src.ui.viewmodels import (
     build_claim_evidence_rows,
     build_database_summary_rows,
     build_document_action_updates,
+    build_document_quality_batch_rows,
+    build_document_quality_chunk_rows,
+    build_document_quality_section_rows,
     build_document_management_state,
     build_quality_claim_rows,
     build_recent_claim_navigation,
@@ -22,6 +25,11 @@ from src.ui.viewmodels import (
     format_claim_detail_html,
     format_database_summary_html,
     format_document_detail_html,
+    format_document_quality_batch_summary_html,
+    format_document_quality_config_html,
+    format_document_quality_checks_html,
+    format_document_quality_report_html,
+    format_document_quality_search_summary_html,
     format_document_summary_html,
     format_evidence_detail_html,
     format_ingest_result,
@@ -407,9 +415,140 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "rebuild_interactive": rebuild_button_state["interactive"],
         }
 
-    def build_document_page_outputs(state: dict) -> tuple[str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    def build_document_quality_outputs(
+        detail: dict | None,
+        *,
+        query_text: str = "",
+    ) -> tuple[str, str, list[list[str]], list[list[str]], str, list[list[str]], list[dict], str]:
+        """构建文档管理页中的入库质检与文档内检索验证输出。"""
+
+        resolved_detail = detail or {}
+        doc_uid = str(resolved_detail.get("doc_uid") or "")
+        doc_title = str(resolved_detail.get("doc_title") or "")
+        if not doc_uid:
+            return (
+                format_operation_result_html({"success": False, "message": "当前文档尚未入库，无法执行入库质检。"}, title="入库质检总览"),
+                format_document_quality_checks_html(None),
+                [],
+                [],
+                format_document_quality_search_summary_html(None, doc_title=doc_title),
+                [],
+                [],
+                format_search_result_detail_html(None, query_text=query_text),
+            )
+
+        try:
+            report = ingest_service.inspect_document_quality(doc_uid)
+            report_html = format_document_quality_report_html(report)
+            checks_html = format_document_quality_checks_html(report)
+            section_rows = build_document_quality_section_rows(report)
+            chunk_rows = build_document_quality_chunk_rows(report)
+        except AppError as exc:
+            report_html = format_operation_result_html(
+                {"success": False, "message": exc.message, "error_code": exc.error_code},
+                title="入库质检总览",
+            )
+            checks_html = format_document_quality_checks_html(None)
+            section_rows = []
+            chunk_rows = []
+
+        normalized_query = normalize_search_query(query_text)
+        if not normalized_query:
+            return (
+                report_html,
+                checks_html,
+                section_rows,
+                chunk_rows,
+                format_document_quality_search_summary_html(None, doc_title=doc_title),
+                [],
+                [],
+                format_search_result_detail_html(None, query_text=query_text),
+            )
+
+        search_items = retrieval_service.hybrid_search(
+            normalized_query,
+            top_k=5,
+            doc_uid=doc_uid,
+            use_rerank=False,
+        )
+        formatted_search = format_search_results(search_items, query_text=normalized_query)
+        search_rows = build_search_result_rows(formatted_search)
+        detail_html = format_search_result_detail_html(None, query_text=normalized_query)
+        if formatted_search["table"]:
+            detail_html = build_search_detail(formatted_search["table"][0], normalized_query)
+        return (
+            report_html,
+            checks_html,
+            section_rows,
+            chunk_rows,
+            format_document_quality_search_summary_html(formatted_search, doc_title=doc_title),
+            search_rows,
+            formatted_search["table"],
+            detail_html,
+        )
+
+    def build_document_quality_batch_outputs() -> tuple[str, list[list[str]]]:
+        """构建批量入库质检结果输出。"""
+
+        batch_result = ingest_service.list_document_quality_reports()
+        return (
+            format_document_quality_batch_summary_html(batch_result),
+            build_document_quality_batch_rows(batch_result),
+        )
+
+    def build_document_quality_config_outputs(
+        result_payload: dict | None = None,
+    ) -> tuple[str, int, int, int, int, int, int, int, str]:
+        """构建入库质检阈值配置输出。"""
+
+        config = ingest_service.get_document_quality_config()
+        return (
+            format_document_quality_config_html(config),
+            int(config["sample_limit"]),
+            int(config["long_document_char_threshold"]),
+            int(config["min_sections_for_long_doc"]),
+            int(config["max_avg_chunks_per_section"]),
+            int(config["max_chunk_chars"]),
+            int(config["short_chunk_chars"]),
+            int(config["short_chunk_warn_min_chunk_count"]),
+            format_operation_result_html(result_payload, title="阈值配置结果"),
+        )
+
+    def build_document_page_outputs(state: dict) -> tuple[
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
         """将文档管理状态转换为页面组件输出。"""
 
+        quality_outputs = build_document_quality_outputs(state["selected_detail"])
+        batch_outputs = build_document_quality_batch_outputs()
+        config_outputs = build_document_quality_config_outputs()
         return (
             format_document_summary_html(state["scan_summary"]),
             format_database_summary_html(state["database_summary"]),
@@ -419,31 +558,131 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             format_document_detail_html(state["selected_detail"]),
             gr.Button(interactive=state["register_interactive"]),
             gr.Button(interactive=state["rebuild_interactive"]),
+            *quality_outputs,
+            *batch_outputs,
+            *config_outputs,
+            format_operation_result_html(None, title="导出结果"),
         )
 
-    def load_document_management_state() -> tuple[str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    def load_document_management_state() -> tuple[
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
         return build_document_page_outputs(get_document_management_state())
 
     def refresh_document_management_state(
         selected_choice: str | None = None,
-    ) -> tuple[str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    ) -> tuple[
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
         return build_document_page_outputs(get_document_management_state(selected_choice))
 
-    def inspect_document(choice: str) -> tuple[str, gr.Button, gr.Button]:
-        state = get_document_management_state(choice)
-        return (
-            format_document_detail_html(state["selected_detail"]),
-            gr.Button(interactive=state["register_interactive"]),
-            gr.Button(interactive=state["rebuild_interactive"]),
-        )
+    def inspect_document(choice: str) -> tuple[
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
+        page_outputs = build_document_page_outputs(get_document_management_state(choice))
+        return page_outputs[5:]
 
     def register_selected_document(
         choice: str,
         progress=gr.Progress(track_tqdm=False),
-    ) -> tuple[str, str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+    ]:
         file_path = parse_document_choice(choice)
         if not file_path:
-            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state(choice)
+            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
             return (
                 format_operation_result_html({"success": False, "message": "请选择文档"}, title="注册结果"),
                 summary,
@@ -454,6 +693,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 detail,
                 register_state,
                 rebuild_state,
+                qc_report,
+                qc_checks,
+                qc_sections,
+                qc_chunks,
+                qc_search_summary,
+                qc_search_rows,
+                qc_search_state,
+                qc_search_detail,
+                qc_batch_summary,
+                qc_batch_rows,
+                qc_config_panel,
+                qc_sample_limit,
+                qc_long_threshold,
+                qc_min_sections,
+                qc_max_avg_chunks,
+                qc_max_chunk_chars,
+                qc_short_chunk_chars,
+                qc_short_chunk_min_count,
+                qc_config_result,
+                qc_export_result,
             )
             
         progress(0, desc="准备执行当前文档注册")
@@ -470,25 +729,63 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state(choice)
+        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
         return (
             format_operation_result_html(payload, title="注册结果"),
-                summary,
-                database_summary,
-                database_rows,
-                table_rows,
-                dropdown,
-                detail,
-                register_state,
-                rebuild_state,
-            )
+            summary,
+            database_summary,
+            database_rows,
+            table_rows,
+            dropdown,
+            detail,
+            register_state,
+            rebuild_state,
+            qc_report,
+            qc_checks,
+            qc_sections,
+            qc_chunks,
+            qc_search_summary,
+            qc_search_rows,
+            qc_search_state,
+            qc_search_detail,
+            qc_batch_summary,
+            qc_batch_rows,
+            qc_config_panel,
+            qc_sample_limit,
+            qc_long_threshold,
+            qc_min_sections,
+            qc_max_avg_chunks,
+            qc_max_chunk_chars,
+            qc_short_chunk_chars,
+            qc_short_chunk_min_count,
+            qc_config_result,
+            qc_export_result,
+        )
 
     def register_all_documents(
         progress=gr.Progress(track_tqdm=False),
-    ) -> tuple[str, str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+    ]:
         documents = scan_input_documents(ingest_service.settings.input_root)
         if not documents:
-            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state()
+            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state()
             return (
                 format_operation_result_html({"success": False, "message": "Input 目录下没有可注册文档"}, title="批量注册结果"),
                 summary,
@@ -499,6 +796,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 detail,
                 register_state,
                 rebuild_state,
+                qc_report,
+                qc_checks,
+                qc_sections,
+                qc_chunks,
+                qc_search_summary,
+                qc_search_rows,
+                qc_search_state,
+                qc_search_detail,
+                qc_batch_summary,
+                qc_batch_rows,
+                qc_config_panel,
+                qc_sample_limit,
+                qc_long_threshold,
+                qc_min_sections,
+                qc_max_avg_chunks,
+                qc_max_chunk_chars,
+                qc_short_chunk_chars,
+                qc_short_chunk_min_count,
+                qc_config_result,
+                qc_export_result,
             )
 
         progress(0, desc="准备批量注册文档")
@@ -521,7 +838,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state = refresh_document_management_state()
+        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state()
         return (
             format_operation_result_html(payload, title="批量注册结果"),
             summary,
@@ -532,19 +849,74 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             detail,
             register_state,
             rebuild_state,
+            qc_report,
+            qc_checks,
+            qc_sections,
+            qc_chunks,
+            qc_search_summary,
+            qc_search_rows,
+            qc_search_state,
+            qc_search_detail,
+            qc_batch_summary,
+            qc_batch_rows,
+            qc_config_panel,
+            qc_sample_limit,
+            qc_long_threshold,
+            qc_min_sections,
+            qc_max_avg_chunks,
+            qc_max_chunk_chars,
+            qc_short_chunk_chars,
+            qc_short_chunk_min_count,
+            qc_config_result,
+            qc_export_result,
         )
 
-    def query_ingest_status() -> tuple[str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    def query_ingest_status() -> tuple[
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+    ]:
         return refresh_document_management_state()
 
     def rebuild_selected_document(
         choice: str,
         progress=gr.Progress(track_tqdm=False),
-    ) -> tuple[str, str, str, list[list[str]], gr.Dropdown, str, list[list[str]], gr.Button, gr.Button]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+    ]:
         current_state = get_document_management_state(choice)
         doc_uid = current_state["selected_detail"].get("doc_uid")
         if not doc_uid:
-            summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state = refresh_document_management_state(choice)
+            summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
             return (
                 format_operation_result_html({"success": False, "message": "当前文档尚未入库，无法重建"}, title="重建结果"),
                 summary,
@@ -555,6 +927,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 current_detail,
                 register_state,
                 rebuild_state,
+                qc_report,
+                qc_checks,
+                qc_sections,
+                qc_chunks,
+                qc_search_summary,
+                qc_search_rows,
+                qc_search_state,
+                qc_search_detail,
+                qc_batch_summary,
+                qc_batch_rows,
+                qc_config_panel,
+                qc_sample_limit,
+                qc_long_threshold,
+                qc_min_sections,
+                qc_max_avg_chunks,
+                qc_max_chunk_chars,
+                qc_short_chunk_chars,
+                qc_short_chunk_min_count,
+                qc_config_result,
+                qc_export_result,
             )
 
         progress(0, desc="准备执行索引重建")
@@ -572,7 +964,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state = refresh_document_management_state(choice)
+        summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
         return (
             format_operation_result_html(payload, title="重建结果"),
             summary,
@@ -583,6 +975,94 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             current_detail,
             register_state,
             rebuild_state,
+            qc_report,
+            qc_checks,
+            qc_sections,
+            qc_chunks,
+            qc_search_summary,
+            qc_search_rows,
+            qc_search_state,
+            qc_search_detail,
+            qc_batch_summary,
+            qc_batch_rows,
+            qc_config_panel,
+            qc_sample_limit,
+            qc_long_threshold,
+            qc_min_sections,
+            qc_max_avg_chunks,
+            qc_max_chunk_chars,
+            qc_short_chunk_chars,
+            qc_short_chunk_min_count,
+            qc_config_result,
+            qc_export_result,
+        )
+
+    def inspect_selected_document_quality(choice: str) -> tuple[str, str, list[list[str]], list[list[str]], str, list[list[str]], list[dict], str]:
+        """执行当前文档的入库质检，并返回总览、抽样与检索验证默认视图。"""
+
+        state = get_document_management_state(choice)
+        return build_document_quality_outputs(state["selected_detail"])
+
+    def run_document_quality_search(choice: str, query_text: str) -> tuple[str, list[list[str]], list[dict], str, str]:
+        """在当前文档范围内执行检索验证。"""
+
+        state = get_document_management_state(choice)
+        outputs = build_document_quality_outputs(state["selected_detail"], query_text=query_text)
+        normalized_query = normalize_search_query(query_text)
+        return outputs[4], outputs[5], outputs[6], normalized_query, outputs[7]
+
+    def run_batch_document_quality() -> tuple[str, list[list[str]]]:
+        """执行全部文档的批量入库质检。"""
+
+        return build_document_quality_batch_outputs()
+
+    def export_document_quality_csv() -> str:
+        """导出全部文档的入库质检结果。"""
+
+        try:
+            export_result = ingest_service.export_document_quality_reports_csv()
+            return format_operation_result_html(
+                {
+                    "success": True,
+                    "message": f'已导出 {export_result["row_count"]} 条质检结果。',
+                    "linked_check_id": export_result["file_path"],
+                },
+                title="导出结果",
+            )
+        except AppError as exc:
+            return format_operation_result_html(
+                {"success": False, "message": exc.message, "error_code": exc.error_code},
+                title="导出结果",
+            )
+
+    def save_document_quality_config(
+        sample_limit: int | float,
+        long_document_char_threshold: int | float,
+        min_sections_for_long_doc: int | float,
+        max_avg_chunks_per_section: int | float,
+        max_chunk_chars: int | float,
+        short_chunk_chars: int | float,
+        short_chunk_warn_min_chunk_count: int | float,
+    ) -> tuple[str, int, int, int, int, int, int, int, str]:
+        """保存入库质检阈值配置。"""
+
+        payload = {
+            "sample_limit": sample_limit,
+            "long_document_char_threshold": long_document_char_threshold,
+            "min_sections_for_long_doc": min_sections_for_long_doc,
+            "max_avg_chunks_per_section": max_avg_chunks_per_section,
+            "max_chunk_chars": max_chunk_chars,
+            "short_chunk_chars": short_chunk_chars,
+            "short_chunk_warn_min_chunk_count": short_chunk_warn_min_chunk_count,
+        }
+        try:
+            ingest_service.save_document_quality_config(payload)
+        except AppError as exc:
+            return build_document_quality_config_outputs(
+                {"success": False, "message": exc.message, "error_code": exc.error_code},
+            )
+        return build_document_quality_config_outputs(
+            {"success": True, "message": "入库质检阈值已保存。"},
         )
 
     def build_search_detail(search_row: dict | None, query_text: str) -> str:
@@ -592,6 +1072,23 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return format_search_result_detail_html(None, query_text=query_text)
         detail = retrieval_service.get_chunk_detail(search_row.get("chunk_id", "")) or {}
         return format_search_result_detail_html({**search_row, **detail}, query_text=query_text)
+
+    def select_document_quality_search_result(results: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]]]:
+        """点击文档内检索结果后，展示对应原文详情。"""
+
+        rows = results or []
+        if not rows:
+            return format_search_result_detail_html(None, query_text=query_text), []
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        if row_index < 0 or row_index >= len(rows):
+            row_index = 0
+        selected_row = rows[row_index]
+        formatted = {"table": rows}
+        return build_search_detail(selected_row, query_text), build_search_result_rows(formatted, selected_row_index=row_index)
 
     def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str]:
         normalized_query = normalize_search_query(query)
@@ -1501,6 +1998,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     initial_database_summary = format_database_summary_html(initial_document_state["database_summary"])
     initial_database_rows = build_database_summary_rows(initial_document_state["database_summary"])
     initial_document_detail = format_document_detail_html(initial_document_state["selected_detail"])
+    (
+        initial_document_quality_report,
+        initial_document_quality_checks,
+        initial_document_quality_section_rows,
+        initial_document_quality_chunk_rows,
+        initial_document_quality_search_summary,
+        initial_document_quality_search_rows,
+        initial_document_quality_search_state,
+        initial_document_quality_search_detail,
+    ) = build_document_quality_outputs(initial_document_state["selected_detail"])
+    initial_document_quality_batch_summary, initial_document_quality_batch_rows = build_document_quality_batch_outputs()
+    (
+        initial_document_quality_config_html,
+        initial_quality_sample_limit,
+        initial_quality_long_document_char_threshold,
+        initial_quality_min_sections_for_long_doc,
+        initial_quality_max_avg_chunks_per_section,
+        initial_quality_max_chunk_chars,
+        initial_quality_short_chunk_chars,
+        initial_quality_short_chunk_warn_min_chunk_count,
+        initial_document_quality_config_result,
+    ) = build_document_quality_config_outputs()
     try:
         initial_recent_results = quality_service.list_recent_results(limit=10)
     except AppError:
@@ -1604,6 +2123,125 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             interactive=True,
                         )
                         document_detail = gr.HTML(value=initial_document_detail)
+                        with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
+                            with gr.Row(elem_id="document-quality-summary-row", equal_height=True):
+                                with gr.Column(scale=1):
+                                    document_quality_report = gr.HTML(
+                                        value=initial_document_quality_report,
+                                        elem_id="document-quality-report",
+                                    )
+                                with gr.Column(scale=1):
+                                    document_quality_checks = gr.HTML(
+                                        value=initial_document_quality_checks,
+                                        elem_id="document-quality-checks",
+                                    )
+                            document_quality_run_button = gr.Button("执行入库质检")
+                            with gr.Row(elem_id="document-quality-sample-row", equal_height=True):
+                                with gr.Column(scale=1):
+                                    document_quality_sections = gr.Dataframe(
+                                        headers=["定位", "章节标题", "层级", "章节字数", "内容预览"],
+                                        datatype=["str"] * 5,
+                                        interactive=False,
+                                        row_count=0,
+                                        column_count=5,
+                                        label="章节抽样",
+                                        elem_id="document-quality-sections-table",
+                                        value=initial_document_quality_section_rows,
+                                    )
+                                with gr.Column(scale=1):
+                                    document_quality_chunks = gr.Dataframe(
+                                        headers=["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
+                                        datatype=["str"] * 6,
+                                        interactive=False,
+                                        row_count=0,
+                                        column_count=6,
+                                        label="分块抽样",
+                                        elem_id="document-quality-chunks-table",
+                                        value=initial_document_quality_chunk_rows,
+                                    )
+                            with gr.Row(elem_id="document-quality-search-row", equal_height=True):
+                                with gr.Column(scale=5):
+                                    document_quality_search_query = gr.Textbox(
+                                        label="文档内检索验证",
+                                        lines=2,
+                                        placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
+                                    )
+                                    document_quality_search_button = gr.Button("验证当前文档检索")
+                                with gr.Column(scale=4):
+                                    document_quality_search_summary = gr.HTML(
+                                        value=initial_document_quality_search_summary,
+                                        elem_id="document-quality-search-summary",
+                                    )
+                            document_quality_search_state = gr.State(initial_document_quality_search_state)
+                            document_quality_search_query_state = gr.State("")
+                            with gr.Row(elem_id="document-quality-result-row", equal_height=True):
+                                with gr.Column(scale=5):
+                                    document_quality_search_results = gr.Dataframe(
+                                        headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                                        datatype=["markdown"] * 9,
+                                        interactive=False,
+                                        row_count=0,
+                                        column_count=9,
+                                        label="文档内检索结果",
+                                        elem_id="document-quality-search-results",
+                                        value=initial_document_quality_search_rows,
+                                    )
+                                with gr.Column(scale=4):
+                                    document_quality_search_detail = gr.HTML(
+                                        value=initial_document_quality_search_detail,
+                                        elem_id="document-quality-search-detail",
+                                    )
+                            with gr.Row(elem_id="document-quality-batch-action-row"):
+                                document_quality_batch_button = gr.Button("执行全部文档质检")
+                                document_quality_export_button = gr.Button("导出质检 CSV")
+                            with gr.Row(elem_id="document-quality-batch-row", equal_height=True):
+                                with gr.Column(scale=4):
+                                    document_quality_batch_summary = gr.HTML(
+                                        value=initial_document_quality_batch_summary,
+                                        elem_id="document-quality-batch-summary",
+                                    )
+                                    document_quality_export_result = gr.HTML(
+                                        value=format_operation_result_html(None, title="导出结果"),
+                                        elem_id="document-quality-export-result",
+                                    )
+                                with gr.Column(scale=5):
+                                    document_quality_batch_table = gr.Dataframe(
+                                        headers=["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                                        datatype=["str"] * 9,
+                                        interactive=False,
+                                        row_count=0,
+                                        column_count=9,
+                                        label="批量质检结果",
+                                        elem_id="document-quality-batch-table",
+                                        value=initial_document_quality_batch_rows,
+                                    )
+                            with gr.Row(elem_id="document-quality-config-row", equal_height=True):
+                                with gr.Column(scale=4):
+                                    document_quality_config_panel = gr.HTML(
+                                        value=initial_document_quality_config_html,
+                                        elem_id="document-quality-config-panel",
+                                    )
+                                    document_quality_config_result = gr.HTML(
+                                        value=initial_document_quality_config_result,
+                                        elem_id="document-quality-config-result",
+                                    )
+                                with gr.Column(scale=5):
+                                    with gr.Group(elem_id="document-quality-config-form"):
+                                        gr.Markdown("### 质检阈值配置")
+                                        with gr.Row():
+                                            document_quality_sample_limit = gr.Number(label="抽样数量", value=initial_quality_sample_limit, precision=0)
+                                            document_quality_long_document_char_threshold = gr.Number(label="长文字数阈值", value=initial_quality_long_document_char_threshold, precision=0)
+                                            document_quality_min_sections_for_long_doc = gr.Number(label="长文最少章节", value=initial_quality_min_sections_for_long_doc, precision=0)
+                                        with gr.Row():
+                                            document_quality_max_avg_chunks_per_section = gr.Number(label="每章分块上限", value=initial_quality_max_avg_chunks_per_section, precision=0)
+                                            document_quality_max_chunk_chars = gr.Number(label="超长分块阈值", value=initial_quality_max_chunk_chars, precision=0)
+                                            document_quality_short_chunk_chars = gr.Number(label="过短分块阈值", value=initial_quality_short_chunk_chars, precision=0)
+                                        document_quality_short_chunk_warn_min_chunk_count = gr.Number(
+                                            label="过短分块告警起点",
+                                            value=initial_quality_short_chunk_warn_min_chunk_count,
+                                            precision=0,
+                                        )
+                                        document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
                 document_table = gr.Dataframe(
                     headers=["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
                     datatype=["str"] * 9,
@@ -1917,12 +2555,56 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_detail,
                 register_button,
                 rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_export_result,
             ],
         )
         document_choices.change(
             fn=inspect_document,
             inputs=document_choices,
-            outputs=[document_detail, register_button, rebuild_button],
+            outputs=[
+                document_detail,
+                register_button,
+                rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_export_result,
+            ],
         )
         register_button.click(
             fn=register_selected_document,
@@ -1937,6 +2619,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_detail,
                 register_button,
                 rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_export_result,
             ],
         )
         register_all_button.click(
@@ -1951,6 +2653,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_detail,
                 register_button,
                 rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_export_result,
             ],
         )
         status_button.click(
@@ -1964,6 +2686,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_detail,
                 register_button,
                 rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_export_result,
             ],
         )
         rebuild_button.click(
@@ -1979,6 +2721,75 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_detail,
                 register_button,
                 rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+            ],
+        )
+        document_quality_run_button.click(
+            fn=inspect_selected_document_quality,
+            inputs=document_choices,
+            outputs=[
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_chunks,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_detail,
+            ],
+        )
+        document_quality_search_button.click(
+            fn=run_document_quality_search,
+            inputs=[document_choices, document_quality_search_query],
+            outputs=[
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_state,
+                document_quality_search_query_state,
+                document_quality_search_detail,
+            ],
+        )
+        document_quality_search_results.select(
+            fn=select_document_quality_search_result,
+            inputs=[document_quality_search_state, document_quality_search_query_state],
+            outputs=[document_quality_search_detail, document_quality_search_results],
+        )
+        document_quality_batch_button.click(
+            fn=run_batch_document_quality,
+            outputs=[document_quality_batch_summary, document_quality_batch_table],
+        )
+        document_quality_export_button.click(
+            fn=export_document_quality_csv,
+            outputs=[document_quality_export_result],
+        )
+        document_quality_config_save_button.click(
+            fn=save_document_quality_config,
+            inputs=[
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+            ],
+            outputs=[
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
             ],
         )
         search_button.click(

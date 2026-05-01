@@ -518,6 +518,198 @@ def format_document_detail_html(detail: dict | None) -> str:
     )
 
 
+def format_document_quality_report_html(report: dict | None) -> str:
+    """将单文档入库质检结果转换为总览卡片。"""
+
+    resolved = report or {}
+    document = resolved.get("document") or {}
+    metrics = resolved.get("metrics") or {}
+    summary = resolved.get("summary") or {}
+    if not document:
+        return _build_panel_html(
+            title="入库质检",
+            description="请选择已入库文档后执行质检。",
+            cards=[("当前状态", "未执行")],
+            notes=["这里会展示章节、分块、全文/向量索引是否完备。"],
+            tone="neutral",
+        )
+
+    return _build_panel_html(
+        title="入库质检",
+        description=_display_text(summary.get("message")),
+        cards=[
+            ("文档名称", _display_text(document.get("doc_title"))),
+            ("章节数", _format_number(metrics.get("section_count"))),
+            ("分块数", _format_number(metrics.get("chunk_count"))),
+            ("全文索引数", _format_number(metrics.get("fts_chunk_count"))),
+            ("向量数", _format_number(metrics.get("vector_chunk_count"))),
+            ("平均分块长度", f'{_display_text(metrics.get("avg_chunk_chars"))} 字'),
+        ],
+        notes=[
+            f'首章标题：{_display_text(resolved.get("first_section_title"))}',
+            f'末章标题：{_display_text(resolved.get("last_section_title"))}',
+            f'平均每章分块数：{_display_text(metrics.get("avg_chunks_per_section"))}',
+        ],
+        tone=_map_quality_tone(summary.get("level")),
+    )
+
+
+def format_document_quality_checks_html(report: dict | None) -> str:
+    """将单文档入库质检检查项与风险提示转换为卡片。"""
+
+    resolved = report or {}
+    checks = resolved.get("checks") or []
+    issues = resolved.get("issues") or []
+    if not checks:
+        return _build_panel_html(
+            title="质检结论",
+            description="执行入库质检后，这里会汇总检查项结论。",
+            cards=[("检查项", "0"), ("风险提示", "0")],
+            notes=["建议先执行一次质检，再查看章节和分块抽样。"],
+            tone="neutral",
+        )
+
+    passed_count = sum(1 for item in checks if item.get("passed"))
+    warning_count = sum(1 for item in checks if item.get("level") == "warning")
+    failed_count = sum(1 for item in checks if item.get("level") == "danger")
+    check_notes = [
+        f'{_display_text(item.get("name"))}：{_display_text(item.get("message"))}'
+        for item in checks[:6]
+    ]
+    issue_notes = [f'风险提示：{_display_text(item.get("message"))}' for item in issues[:4]]
+    return _build_panel_html(
+        title="质检结论",
+        description="用于快速判断当前文档的结构、全文索引与向量索引是否完备。",
+        cards=[
+            ("检查项总数", str(len(checks))),
+            ("已通过", str(passed_count)),
+            ("警告", str(warning_count)),
+            ("失败", str(failed_count)),
+        ],
+        notes=check_notes + issue_notes,
+        tone="danger" if failed_count > 0 else "warning" if warning_count > 0 or issues else "success",
+    )
+
+
+def build_document_quality_section_rows(report: dict | None) -> list[list[str]]:
+    """将章节抽样结果转换为表格行。"""
+
+    items = (report or {}).get("section_samples") or []
+    return [
+        [
+            _display_text(item.get("source_span")),
+            _display_text(item.get("section_title")),
+            _format_number(item.get("section_level")),
+            _format_number(item.get("content_length")),
+            _truncate_text(item.get("content_preview"), limit=90),
+        ]
+        for item in items
+    ]
+
+
+def build_document_quality_chunk_rows(report: dict | None) -> list[list[str]]:
+    """将分块抽样结果转换为表格行。"""
+
+    items = (report or {}).get("chunk_samples") or []
+    return [
+        [
+            _display_text(item.get("chunk_id")),
+            _format_number(item.get("chunk_index")),
+            _display_text(item.get("section_title")),
+            _display_text(item.get("source_span")),
+            _format_number(item.get("token_count")),
+            _truncate_text(item.get("content_preview"), limit=90),
+        ]
+        for item in items
+    ]
+
+
+def format_document_quality_search_summary_html(formatted: dict | None, *, doc_title: str = "") -> str:
+    """构建单文档检索验证摘要。"""
+
+    resolved = formatted or {}
+    count = int(resolved.get("count") or 0)
+    return _build_panel_html(
+        title="文档内检索验证",
+        description="用于验证当前文档的分块和索引是否能召回正确内容。",
+        cards=[
+            ("当前文档", _display_text(doc_title)),
+            ("命中条数", str(count)),
+            ("当前查询", _display_text(resolved.get("query_text"))),
+        ],
+        notes=[
+            "建议输入该文档中确定存在的专有词、标题或关键句做验证。",
+            "命中 0 条时，需要结合章节/分块抽样一起判断是切分问题还是索引问题。",
+        ],
+        tone="success" if count > 0 else "neutral",
+    )
+
+
+def format_document_quality_batch_summary_html(batch_result: dict | None) -> str:
+    """构建批量入库质检摘要。"""
+
+    resolved = batch_result or {}
+    summary = resolved.get("summary") or {}
+    return _build_panel_html(
+        title="批量入库质检",
+        description="用于快速查看所有已入库文档的章节、分块与索引异常分布。",
+        cards=[
+            ("文档总数", _format_number(summary.get("document_count"))),
+            ("正常", _format_number(summary.get("success_count"))),
+            ("警告", _format_number(summary.get("warning_count"))),
+            ("失败", _format_number(summary.get("danger_count"))),
+        ],
+        notes=[
+            "建议优先处理警告和失败文档，再做定向重建或人工抽样复核。",
+            "导出 CSV 后可进一步人工筛查和留档。",
+        ],
+        tone="danger" if int(summary.get("danger_count") or 0) > 0 else "warning" if int(summary.get("warning_count") or 0) > 0 else "neutral",
+    )
+
+
+def build_document_quality_batch_rows(batch_result: dict | None) -> list[list[str]]:
+    """将批量入库质检结果转换为表格行。"""
+
+    reports = (batch_result or {}).get("reports") or []
+    return [
+        [
+            _display_text(report.get("document", {}).get("doc_title")),
+            _display_text(report.get("document", {}).get("doc_uid")),
+            _display_text(report.get("document", {}).get("index_status")),
+            _format_number(report.get("metrics", {}).get("section_count")),
+            _format_number(report.get("metrics", {}).get("chunk_count")),
+            _format_number(report.get("metrics", {}).get("fts_chunk_count")),
+            _format_number(report.get("metrics", {}).get("vector_chunk_count")),
+            _display_text(report.get("summary", {}).get("level")),
+            _truncate_text("；".join(str(item.get("message") or "") for item in report.get("issues", [])) or report.get("summary", {}).get("message"), limit=80),
+        ]
+        for report in reports
+    ]
+
+
+def format_document_quality_config_html(config: dict | None) -> str:
+    """构建入库质检阈值摘要。"""
+
+    resolved = config or {}
+    return _build_panel_html(
+        title="质检阈值",
+        description="这些阈值会直接影响章节过少、分块过碎、超长/过短分块等判定。",
+        cards=[
+            ("抽样数量", _format_number(resolved.get("sample_limit"))),
+            ("长文阈值", f'{_format_number(resolved.get("long_document_char_threshold"))} 字'),
+            ("长文最少章节", _format_number(resolved.get("min_sections_for_long_doc"))),
+            ("每章分块上限", _format_number(resolved.get("max_avg_chunks_per_section"))),
+        ],
+        notes=[
+            f'超长分块阈值：{_format_number(resolved.get("max_chunk_chars"))} 字',
+            f'过短分块阈值：{_format_number(resolved.get("short_chunk_chars"))} 字',
+            f'过短分块告警起点：{_format_number(resolved.get("short_chunk_warn_min_chunk_count"))} 个分块',
+            f'配置文件：{_display_text(resolved.get("config_path"))}',
+        ],
+        tone="neutral",
+    )
+
+
 def format_database_summary_markdown(summary: dict | None) -> str:
     """将数据库统计转换为文档管理页的自然语言摘要。"""
 
@@ -1693,6 +1885,18 @@ def _format_review_status_label(status: object) -> str:
         "updated": "已更新",
     }
     return mapping.get(str(status or "").lower(), _display_text(status))
+
+
+def _map_quality_tone(level: object) -> str:
+    """将质检等级映射为面板语义色。"""
+
+    mapping = {
+        "success": "success",
+        "warning": "warning",
+        "danger": "danger",
+        "error": "danger",
+    }
+    return mapping.get(str(level or "").lower(), "neutral")
 
 
 def _build_panel_html(

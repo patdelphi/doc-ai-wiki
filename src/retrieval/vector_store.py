@@ -58,6 +58,17 @@ class VectorStore:
 
         self.collection.delete(where={"doc_uid": doc_uid})
 
+    def count_by_doc_uid(self, doc_uid: str) -> int:
+        """统计指定文档当前已写入的向量条数。"""
+
+        if not doc_uid:
+            return 0
+        result = self.collection.get(
+            where={"doc_uid": doc_uid},
+            include=[],
+        )
+        return len(result.get("ids", []))
+
     def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
         """执行向量检索。"""
 

@@ -12,6 +12,9 @@ from src.ui.viewmodels import (
     build_search_result_rows,
     build_claim_detail_map,
     build_document_action_updates,
+    build_document_quality_batch_rows,
+    build_document_quality_chunk_rows,
+    build_document_quality_section_rows,
     build_recent_claim_navigation,
     build_doc_uid_choices,
     build_document_management_state,
@@ -29,7 +32,12 @@ from src.ui.viewmodels import (
     format_database_summary_html,
     format_database_summary_markdown,
     format_document_detail_html,
+    format_document_quality_batch_summary_html,
     format_document_detail_markdown,
+    format_document_quality_config_html,
+    format_document_quality_checks_html,
+    format_document_quality_report_html,
+    format_document_quality_search_summary_html,
     format_document_summary_html,
     format_document_summary_markdown,
     format_operation_result_html,
@@ -288,6 +296,95 @@ def test_database_summary_helpers_should_generate_natural_language_text() -> Non
     assert ["已入库文档", "2"] in summary_rows
     assert ["分块总数", "128"] in summary_rows
     assert ["审核记录", "5"] in summary_rows
+
+
+def test_document_quality_helpers_should_render_report_and_samples() -> None:
+    """入库质检视图应展示统计、风险提示与抽样表格。"""
+
+    report = {
+        "document": {"doc_title": "阿胶历史文化通典"},
+        "metrics": {
+            "section_count": 12,
+            "chunk_count": 36,
+            "fts_chunk_count": 36,
+            "vector_chunk_count": 36,
+            "avg_chunk_chars": 412.5,
+            "avg_chunks_per_section": 3.0,
+        },
+        "summary": {"level": "warning", "message": "发现需要复核的问题，请结合抽样结果进一步检查。"},
+        "first_section_title": "总论",
+        "last_section_title": "附录",
+        "checks": [
+            {"name": "全文索引", "passed": True, "message": "全文索引条数与分块一致，共 36 条。", "level": "success"},
+            {"name": "向量索引", "passed": False, "message": "向量索引条数 30 与分块数 36 不一致。", "level": "warning"},
+        ],
+        "issues": [{"level": "warning", "message": "向量索引条数 30 与分块数 36 不一致。"}],
+        "section_samples": [
+            {"source_span": "section-1", "section_title": "总论", "section_level": 1, "content_length": 820, "content_preview": "总论内容"}
+        ],
+        "chunk_samples": [
+            {"chunk_id": "chk_1", "chunk_index": 0, "section_title": "总论", "source_span": "section-1:chunk-0", "token_count": 412, "content_preview": "抽样分块内容"}
+        ],
+    }
+
+    report_html = format_document_quality_report_html(report)
+    checks_html = format_document_quality_checks_html(report)
+    search_summary_html = format_document_quality_search_summary_html({"count": 2, "query_text": "阿胶"}, doc_title="阿胶历史文化通典")
+    section_rows = build_document_quality_section_rows(report)
+    chunk_rows = build_document_quality_chunk_rows(report)
+
+    assert "入库质检" in report_html
+    assert "章节数" in report_html
+    assert "首章标题" in report_html
+    assert "质检结论" in checks_html
+    assert "向量索引条数 30 与分块数 36 不一致" in checks_html
+    assert "文档内检索验证" in search_summary_html
+    assert section_rows == [["section-1", "总论", "1", "820", "总论内容"]]
+    assert chunk_rows == [["chk_1", "0", "总论", "section-1:chunk-0", "412", "抽样分块内容"]]
+
+
+def test_document_quality_batch_and_config_helpers_should_render_summary() -> None:
+    """批量质检与阈值配置应输出可读摘要。"""
+
+    batch_result = {
+        "summary": {"document_count": 2, "success_count": 1, "warning_count": 1, "danger_count": 0},
+        "reports": [
+            {
+                "document": {"doc_title": "文档一", "doc_uid": "doc_1", "index_status": "indexed"},
+                "metrics": {"section_count": 5, "chunk_count": 20, "fts_chunk_count": 20, "vector_chunk_count": 20},
+                "summary": {"level": "success", "message": "正常"},
+                "issues": [],
+            },
+            {
+                "document": {"doc_title": "文档二", "doc_uid": "doc_2", "index_status": "partial_failed"},
+                "metrics": {"section_count": 2, "chunk_count": 8, "fts_chunk_count": 8, "vector_chunk_count": 6},
+                "summary": {"level": "warning", "message": "需要复核"},
+                "issues": [{"message": "向量索引条数 6 与分块数 8 不一致。"}],
+            },
+        ],
+    }
+    config = {
+        "sample_limit": 4,
+        "long_document_char_threshold": 2000,
+        "min_sections_for_long_doc": 2,
+        "max_avg_chunks_per_section": 12,
+        "max_chunk_chars": 700,
+        "short_chunk_chars": 30,
+        "short_chunk_warn_min_chunk_count": 3,
+        "config_path": "C:/templates/settings/ingest_quality.yaml",
+    }
+
+    batch_html = format_document_quality_batch_summary_html(batch_result)
+    batch_rows = build_document_quality_batch_rows(batch_result)
+    config_html = format_document_quality_config_html(config)
+
+    assert "批量入库质检" in batch_html
+    assert "文档总数" in batch_html
+    assert batch_rows[1][0] == "文档二"
+    assert batch_rows[1][7] == "warning"
+    assert "质检阈值" in config_html
+    assert "长文阈值" in config_html
+    assert "ingest_quality.yaml" in config_html
 
 
 def test_database_summary_html_should_generate_card_layout() -> None:

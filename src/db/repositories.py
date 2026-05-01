@@ -184,6 +184,75 @@ class DocumentRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_document_quality_snapshot(self, doc_uid: str, *, sample_limit: int = 3) -> dict[str, Any] | None:
+        """读取单篇文档的章节、分块与全文索引质检快照。"""
+
+        document = self.get_by_doc_uid(doc_uid)
+        if not document:
+            return None
+
+        with create_connection(self.database_path) as connection:
+            section_rows = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT section_id, section_title, section_level, source_span,
+                           LENGTH(content) AS content_length,
+                           SUBSTR(content, 1, 160) AS content_preview
+                    FROM document_sections
+                    WHERE doc_uid = ?
+                    ORDER BY rowid ASC
+                    """,
+                    (doc_uid,),
+                ).fetchall()
+            ]
+            chunk_rows = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT c.chunk_id, c.chunk_index, c.source_span, c.token_count,
+                           SUBSTR(c.content, 1, 160) AS content_preview,
+                           s.section_title
+                    FROM chunks c
+                    LEFT JOIN document_sections s ON s.section_id = c.section_id
+                    WHERE c.doc_uid = ?
+                    ORDER BY c.chunk_index ASC
+                    """,
+                    (doc_uid,),
+                ).fetchall()
+            ]
+            fts_row = connection.execute(
+                """
+                SELECT COUNT(1) AS fts_chunk_count
+                FROM chunk_fts
+                WHERE doc_uid = ?
+                """,
+                (doc_uid,),
+            ).fetchone()
+
+        section_count = len(section_rows)
+        chunk_count = len(chunk_rows)
+        total_chunk_chars = sum(int(row.get("token_count") or 0) for row in chunk_rows)
+        avg_chunk_chars = round(total_chunk_chars / chunk_count, 1) if chunk_count else 0.0
+        avg_chunks_per_section = round(chunk_count / section_count, 1) if section_count else 0.0
+        return {
+            "document": document,
+            "metrics": {
+                "section_count": section_count,
+                "chunk_count": chunk_count,
+                "fts_chunk_count": int(fts_row["fts_chunk_count"] or 0) if fts_row else 0,
+                "avg_chunk_chars": avg_chunk_chars,
+                "min_chunk_chars": min((int(row.get("token_count") or 0) for row in chunk_rows), default=0),
+                "max_chunk_chars": max((int(row.get("token_count") or 0) for row in chunk_rows), default=0),
+                "total_chunk_chars": total_chunk_chars,
+                "avg_chunks_per_section": avg_chunks_per_section,
+            },
+            "first_section_title": section_rows[0]["section_title"] if section_rows else "",
+            "last_section_title": section_rows[-1]["section_title"] if section_rows else "",
+            "section_samples": self._sample_rows(section_rows, sample_limit),
+            "chunk_samples": self._sample_rows(chunk_rows, sample_limit),
+        }
+
     def get_database_summary(self) -> dict[str, int]:
         """汇总数据库中的文档、分块、质检与审核统计。"""
 
@@ -204,6 +273,23 @@ class DocumentRepository:
                 """
             ).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
+
+    @staticmethod
+    def _sample_rows(rows: list[dict[str, Any]], sample_limit: int) -> list[dict[str, Any]]:
+        """按首中尾均匀抽样，避免长文档只看前几条。"""
+
+        if sample_limit <= 0 or not rows:
+            return []
+        if len(rows) <= sample_limit:
+            return rows
+
+        last_index = len(rows) - 1
+        sample_indexes: list[int] = []
+        for sample_index in range(sample_limit):
+            computed_index = round(sample_index * last_index / max(sample_limit - 1, 1))
+            if computed_index not in sample_indexes:
+                sample_indexes.append(computed_index)
+        return [rows[index] for index in sample_indexes]
 
     @staticmethod
     def _normalize_document_row(row: Any) -> dict[str, Any] | None:

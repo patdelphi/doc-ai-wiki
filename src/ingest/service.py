@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from src.common.errors import DatabaseAppError, NotFoundAppError, ValidationAppE
 from src.common.utils import read_text_file, sha256_of_text, utc_now_iso
 from src.db.repositories import DocumentRepository, IngestJobRepository
 from src.db.transaction import transaction
+from src.ingest.quality_config import IngestQualityConfigService
 from src.metadata.extractor import extract_basic_metadata
 from src.metadata.sections import parse_markdown_sections
 from src.retrieval.vector_store import VectorStore
@@ -25,6 +27,7 @@ class IngestService:
         self.settings = settings
         self.document_repository = DocumentRepository(settings.sqlite_db_path)
         self.job_repository = IngestJobRepository(settings.sqlite_db_path)
+        self.quality_config_service = IngestQualityConfigService(settings.templates_dir)
         self.vector_store = VectorStore(
             settings.chroma_persist_dir,
             embedding_client=build_embedding_client(settings),
@@ -181,6 +184,229 @@ class IngestService:
         """读取数据库中与文档管理相关的关键统计信息。"""
 
         return self.document_repository.get_database_summary()
+
+    def inspect_document_quality(self, doc_uid: str, *, sample_limit: int | None = None) -> dict:
+        """汇总单篇文档的入库质检结果。"""
+
+        if not doc_uid:
+            raise ValidationAppError("doc_uid 不能为空")
+
+        quality_config = self.quality_config_service.get_config()
+        resolved_sample_limit = int(sample_limit or quality_config["sample_limit"])
+        snapshot = self.document_repository.get_document_quality_snapshot(doc_uid, sample_limit=resolved_sample_limit)
+        if not snapshot:
+            raise NotFoundAppError("文档不存在", details={"doc_uid": doc_uid})
+
+        metrics = snapshot["metrics"]
+        document = snapshot["document"]
+        issues: list[dict] = []
+        checks: list[dict] = []
+
+        def append_check(name: str, passed: bool, message: str, *, level: str | None = None) -> None:
+            resolved_level = level or ("success" if passed else "danger")
+            checks.append({"name": name, "passed": passed, "message": message, "level": resolved_level})
+            if not passed:
+                issues.append({"level": resolved_level, "message": message})
+
+        append_check(
+            "入库状态",
+            str(document.get("ingest_status")) == "completed",
+            "文档已完成入库。" if str(document.get("ingest_status")) == "completed" else f'当前入库状态为 {document.get("ingest_status")}',
+        )
+        append_check(
+            "章节解析",
+            int(metrics.get("section_count") or 0) > 0,
+            (
+                f'已解析 {metrics.get("section_count")} 个章节。'
+                if int(metrics.get("section_count") or 0) > 0
+                else "未解析出任何章节。"
+            ),
+        )
+        append_check(
+            "分块生成",
+            int(metrics.get("chunk_count") or 0) > 0,
+            (
+                f'已生成 {metrics.get("chunk_count")} 个分块。'
+                if int(metrics.get("chunk_count") or 0) > 0
+                else "未生成任何分块。"
+            ),
+        )
+        fulltext_index_consistent = int(metrics.get("chunk_count") or 0) == int(metrics.get("fts_chunk_count") or 0)
+        append_check(
+            "全文索引",
+            fulltext_index_consistent,
+            (
+                f'全文索引条数与分块一致，共 {metrics.get("fts_chunk_count")} 条。'
+                if fulltext_index_consistent
+                else f'全文索引条数 {metrics.get("fts_chunk_count")} 与分块数 {metrics.get("chunk_count")} 不一致。'
+            ),
+            level="warning" if not fulltext_index_consistent else None,
+        )
+
+        vector_chunk_count: int | None
+        try:
+            vector_chunk_count = self.vector_store.count_by_doc_uid(doc_uid)
+        except Exception:  # noqa: BLE001
+            vector_chunk_count = None
+            checks.append(
+                {
+                    "name": "向量索引",
+                    "passed": False,
+                    "message": "当前无法读取向量索引条数，请检查向量库状态。",
+                    "level": "warning",
+                }
+            )
+            issues.append({"level": "warning", "message": "当前无法读取向量索引条数，请检查向量库状态。"})
+        else:
+            vector_index_consistent = vector_chunk_count == int(metrics.get("chunk_count") or 0)
+            append_check(
+                "向量索引",
+                vector_index_consistent,
+                (
+                    f'向量索引条数与分块一致，共 {vector_chunk_count} 条。'
+                    if vector_index_consistent
+                    else f'向量索引条数 {vector_chunk_count} 与分块数 {metrics.get("chunk_count")} 不一致。'
+                ),
+                level="warning" if not vector_index_consistent or str(document.get("index_status")) == "partial_failed" else None,
+            )
+
+        if str(document.get("index_status")) != "indexed":
+            issues.append({"level": "warning", "message": f'当前索引状态为 {document.get("index_status")}，建议执行重建。'})
+            checks.append(
+                {
+                    "name": "索引状态",
+                    "passed": False,
+                    "message": f'当前索引状态为 {document.get("index_status")}，建议执行重建。',
+                    "level": "warning",
+                }
+            )
+        else:
+            checks.append({"name": "索引状态", "passed": True, "message": "当前索引状态正常。", "level": "success"})
+
+        if (
+            int(metrics.get("section_count") or 0) < int(quality_config["min_sections_for_long_doc"])
+            and int(metrics.get("total_chunk_chars") or 0) >= int(quality_config["long_document_char_threshold"])
+        ):
+            issues.append({"level": "warning", "message": "章节数偏少，长文档可能没有按标题切开。"})
+        if float(metrics.get("avg_chunks_per_section") or 0.0) >= float(quality_config["max_avg_chunks_per_section"]):
+            issues.append({"level": "warning", "message": "平均每章分块数偏高，可能切得过碎。"})
+        if int(metrics.get("max_chunk_chars") or 0) >= int(quality_config["max_chunk_chars"]):
+            issues.append({"level": "warning", "message": "存在超长分块，建议抽样检查分块边界。"})
+        if (
+            int(metrics.get("min_chunk_chars") or 0) > 0
+            and int(metrics.get("min_chunk_chars") or 0) <= int(quality_config["short_chunk_chars"])
+            and int(metrics.get("chunk_count") or 0) >= int(quality_config["short_chunk_warn_min_chunk_count"])
+        ):
+            issues.append({"level": "warning", "message": "存在过短分块，可能影响检索效果。"})
+
+        overall_level = "success"
+        if any(item["level"] == "danger" for item in issues):
+            overall_level = "danger"
+        elif issues:
+            overall_level = "warning"
+        summary_message = (
+            "入库结构与索引看起来正常。"
+            if overall_level == "success"
+            else "发现需要复核的问题，请结合抽样结果进一步检查。"
+        )
+        return {
+            **snapshot,
+            "metrics": {
+                **metrics,
+                "vector_chunk_count": vector_chunk_count,
+            },
+            "checks": checks,
+            "issues": issues,
+            "summary": {
+                "level": overall_level,
+                "message": summary_message,
+            },
+            "applied_thresholds": quality_config,
+        }
+
+    def list_document_quality_reports(self, *, doc_uids: list[str] | None = None, page_size: int = 200) -> dict:
+        """批量读取文档入库质检结果。"""
+
+        if doc_uids:
+            documents = [
+                self.document_repository.get_by_doc_uid(doc_uid)
+                for doc_uid in doc_uids
+            ]
+            documents = [item for item in documents if item]
+        else:
+            documents, _ = self.list_status(doc_uid=None, status=None, page=1, page_size=page_size)
+
+        reports = [self.inspect_document_quality(str(document["doc_uid"])) for document in documents if document.get("doc_uid")]
+        summary = {
+            "document_count": len(reports),
+            "success_count": sum(1 for item in reports if item["summary"]["level"] == "success"),
+            "warning_count": sum(1 for item in reports if item["summary"]["level"] == "warning"),
+            "danger_count": sum(1 for item in reports if item["summary"]["level"] == "danger"),
+        }
+        return {"reports": reports, "summary": summary}
+
+    def export_document_quality_reports_csv(self, *, doc_uids: list[str] | None = None) -> dict:
+        """导出批量入库质检结果 CSV。"""
+
+        batch_result = self.list_document_quality_reports(doc_uids=doc_uids)
+        docs_dir = Path("Docs")
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        file_path = docs_dir / f'document_ingest_quality_{utc_now_iso().replace(":", "").replace("-", "").replace("+", "_").replace("T", "_")}.csv'
+        fieldnames = [
+            "doc_uid",
+            "doc_title",
+            "ingest_status",
+            "index_status",
+            "section_count",
+            "chunk_count",
+            "fts_chunk_count",
+            "vector_chunk_count",
+            "avg_chunk_chars",
+            "avg_chunks_per_section",
+            "quality_level",
+            "quality_message",
+            "issues",
+            "source_path",
+        ]
+        with file_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            for report in batch_result["reports"]:
+                document = report["document"]
+                metrics = report["metrics"]
+                writer.writerow(
+                    {
+                        "doc_uid": document.get("doc_uid"),
+                        "doc_title": document.get("doc_title"),
+                        "ingest_status": document.get("ingest_status"),
+                        "index_status": document.get("index_status"),
+                        "section_count": metrics.get("section_count"),
+                        "chunk_count": metrics.get("chunk_count"),
+                        "fts_chunk_count": metrics.get("fts_chunk_count"),
+                        "vector_chunk_count": metrics.get("vector_chunk_count"),
+                        "avg_chunk_chars": metrics.get("avg_chunk_chars"),
+                        "avg_chunks_per_section": metrics.get("avg_chunks_per_section"),
+                        "quality_level": report["summary"].get("level"),
+                        "quality_message": report["summary"].get("message"),
+                        "issues": "；".join(str(item.get("message") or "") for item in report.get("issues", [])),
+                        "source_path": document.get("source_path"),
+                    }
+                )
+        return {
+            "file_path": str(file_path.resolve()),
+            "row_count": len(batch_result["reports"]),
+            "summary": batch_result["summary"],
+        }
+
+    def get_document_quality_config(self) -> dict:
+        """读取入库质检阈值配置。"""
+
+        return self.quality_config_service.get_config()
+
+    def save_document_quality_config(self, payload: dict) -> dict:
+        """保存入库质检阈值配置。"""
+
+        return self.quality_config_service.save_config(payload)
 
     def rebuild_documents(
         self,

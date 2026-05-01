@@ -595,6 +595,21 @@
 - 已修复 注册结果、重建结果 默认显示失败的问题：未执行前改为显示 未开始 / 暂无执行记录。
 - 已执行 python -m pytest tests，结果 67 passed。### 2026-05-01 08:09:07
 
+### 用户
+
+- 在文档管理模块，增加入库质检的功能，实现你上面说的
+- 继续
+
+### 助手
+
+- 时间戳：`2026-05-01 17:44:11 +08:00`
+- 已在 `"todo.md"` 中按确认范围落实 `"文档管理 -> 文档详情下折叠区"` 的 `"入库质检"` 功能，并完成代码实现。
+- 已更新 `src/db/repositories.py`、`src/ingest/service.py`、`src/retrieval/vector_store.py`：新增单文档章节/分块/全文索引快照、向量条数统计、入库质检规则判断与风险提示。
+- 已更新 `src/ui/viewmodels.py`、`src/ui/pages.py`：在 `"文档管理"` 中新增 `"入库质检"` 折叠区，包含质检总览、检查结论、章节抽样、分块抽样和 `"文档内检索验证"`。
+- 已新增 `tests/unit/test_ingest_quality.py`，并扩展 `tests/unit/test_viewmodels.py`、`tests/unit/test_ui.py` 覆盖入库质检视图与 UI 结构。
+- 已执行 `python -m py_compile`，通过；已执行 `pytest "tests/unit/test_ingest_quality.py" "tests/unit/test_viewmodels.py"`，当前 `34 passed, 1 skipped`。
+- 当前环境缺少 `gradio` 与 `chromadb` 依赖，因此 `tests/unit/test_ui.py` 无法在本机收集，`tests/unit/test_ingest_quality.py` 已改为缺依赖时自动跳过。
+
 #### 用户
 
 - commit and push
@@ -1019,3 +1034,27 @@
 
 - 已按顺序继续优化人工审核页：先把可审核列表拆成 `待处理记录` 和 `已处理 Claim` 两个分区，再增加 `列表范围` 与 `风险筛选`。
 - 已完成页面联动、测试回归与浏览器验收，确认 `7860` 最新页面可见分区和筛选控件。
+### 2026-05-01 19:15:10
+
+#### 用户
+
+- 继续
+
+#### 助手
+
+- 已继续完成“入库质检”第二阶段收尾，统一了“全文索引/向量索引数量不一致”的等级语义：改为 `warning`，表示需要复核但可通过重建修复。
+- 已更新 `src/ingest/service.py`，使单文档与批量质检在索引数量不一致场景下保持同一分级口径，避免 UI 汇总与测试预期不一致。
+- 已执行 `python -m pytest tests/unit/test_ingest_quality.py tests/unit/test_viewmodels.py -q`，结果 `39 passed`。
+### 2026-05-01 19:30:06
+
+#### 用户
+
+- 重启
+- commit当前进度
+- 下一个，如何验证ai质检的效果
+
+#### 助手
+
+- 已重启本地 UI 服务，当前地址为 `http://127.0.0.1:7860`，并确认最新页面已启动。
+- 已检查当前工作区，准备提交本轮“入库质检扩展与收尾”相关代码；提交时将排除 `__pycache__`、运行日志和导出的 CSV 文件。
+- 已执行专项回归 `python -m pytest tests/unit/test_ui.py tests/unit/test_ingest_quality.py tests/unit/test_viewmodels.py -q`，命令退出码为 `0`。

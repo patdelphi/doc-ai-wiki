@@ -320,6 +320,60 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert elem_ids.index("settings-policy-group") < elem_ids.index("settings-prompt-group")
 
 
+def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
+    """文档管理页应提供入库质检折叠区、批量质检和阈值配置。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+    document_path = settings.input_root / "a1.md"
+    document_path.write_text("# 总论\n阿胶历史资料。\n\n## 典籍\n《本草纲目》记载。\n", encoding="utf-8")
+    IngestService(settings).register_document({"file_path": str(document_path)})
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+
+    assert "document-quality-accordion" in elem_ids
+    assert "document-quality-report" in elem_ids
+    assert "document-quality-checks" in elem_ids
+    assert "document-quality-sections-table" in elem_ids
+    assert "document-quality-chunks-table" in elem_ids
+    assert "document-quality-search-summary" in elem_ids
+    assert "document-quality-search-results" in elem_ids
+    assert "document-quality-search-detail" in elem_ids
+    assert "document-quality-batch-summary" in elem_ids
+    assert "document-quality-batch-table" in elem_ids
+    assert "document-quality-config-panel" in elem_ids
+    assert "document-quality-config-result" in elem_ids
+    assert "document-quality-config-form" in elem_ids
+    assert "章节抽样" in labels
+    assert "分块抽样" in labels
+    assert "文档内检索验证" in labels
+    assert "批量质检结果" in labels
+    assert "抽样数量" in labels
+    assert "长文字数阈值" in labels
+    assert "长文最少章节" in labels
+    assert "每章分块上限" in labels
+    assert "超长分块阈值" in labels
+    assert "过短分块阈值" in labels
+    assert "过短分块告警起点" in labels
+    assert any("入库质检" in value for value in html_values)
+
+
 def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp_path: Path) -> None:
     """人工审核页进入时应优先显示 AI 质检产生的可审核 Claim。"""
 
