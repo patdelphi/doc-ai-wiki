@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.common.errors import NotFoundAppError
 from src.common.utils import utc_now_iso
 from src.db.connection import create_connection
 from src.db.transaction import transaction
@@ -408,6 +409,41 @@ class QualityRepository:
 
         return results
 
+    def list_review_candidates(self, limit: int = 50) -> list[dict[str, Any]]:
+        """读取可进入人工审核的 Claim 列表，按待处理优先、时间倒序排列。"""
+
+        with create_connection(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    qc.claim_id,
+                    qc.check_id,
+                    qc.claim_text,
+                    qc.verdict,
+                    qc.risk_level,
+                    qc.confidence,
+                    qc.evidence,
+                    qc.source_doc,
+                    qc.source_span,
+                    qc.review_status,
+                    qc.created_at,
+                    qc.updated_at,
+                    q.template_name,
+                    q.input_text,
+                    q.created_at AS check_created_at
+                FROM quality_claims qc
+                JOIN quality_checks q ON q.check_id = qc.check_id
+                ORDER BY
+                    CASE WHEN COALESCE(qc.review_status, 'pending') = 'pending' THEN 0 ELSE 1 END ASC,
+                    COALESCE(qc.updated_at, qc.created_at, q.created_at) DESC,
+                    q.created_at DESC,
+                    qc.created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def insert_review_record(self, payload: dict[str, Any]) -> None:
         """保存审核记录并同步 claim 审核状态。"""
 
@@ -440,6 +476,59 @@ class QualityRepository:
                     payload["claim_id"],
                 ),
             )
+
+    def delete_review_record(self, review_id: str) -> dict[str, Any]:
+        """删除指定审核记录，并回退对应 claim 的审核状态。"""
+
+        with create_connection(self.database_path) as connection:
+            review_row = connection.execute(
+                """
+                SELECT review_id, claim_id, review_action, reviewed_verdict, review_note, reviewer, created_at
+                FROM review_records
+                WHERE review_id = ?
+                """,
+                (review_id,),
+            ).fetchone()
+        if not review_row:
+            raise NotFoundAppError("审核记录不存在", details={"review_id": review_id})
+
+        deleted_record = dict(review_row)
+        claim_id = str(review_row["claim_id"])
+        with transaction(self.database_path) as connection:
+            connection.execute(
+                """
+                DELETE FROM review_records
+                WHERE review_id = ?
+                """,
+                (review_id,),
+            )
+            latest_review_row = connection.execute(
+                """
+                SELECT review_action, created_at
+                FROM review_records
+                WHERE claim_id = ?
+                ORDER BY created_at DESC, review_id DESC
+                LIMIT 1
+                """,
+                (claim_id,),
+            ).fetchone()
+            restored_review_status = str(latest_review_row["review_action"]) if latest_review_row else "pending"
+            restored_updated_at = str(latest_review_row["created_at"]) if latest_review_row else utc_now_iso()
+            connection.execute(
+                """
+                UPDATE quality_claims
+                SET review_status = ?, updated_at = ?
+                WHERE claim_id = ?
+                """,
+                (
+                    restored_review_status,
+                    restored_updated_at,
+                    claim_id,
+                ),
+            )
+
+        deleted_record["restored_review_status"] = restored_review_status
+        return deleted_record
 
     def list_reviews(self, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
         """分页查询审核记录。"""

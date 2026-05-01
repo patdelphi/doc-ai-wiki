@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from uuid import uuid4
 
 from src.ai.llm import BaseLLMClient
@@ -44,6 +45,11 @@ class QualityService:
 
         return self.template_service.list_templates()
 
+    def get_template(self, template_id: str | None = None) -> dict:
+        """读取指定质检模板内容。"""
+
+        return self.template_service.get_template(template_id)
+
     def run_check(
         self,
         input_text: str,
@@ -51,6 +57,20 @@ class QualityService:
         template_id: str | None = None,
     ) -> dict:
         """执行最小 claim 质检。"""
+
+        final_result: dict | None = None
+        for event in self.run_check_stream(input_text, doc_uid=doc_uid, template_id=template_id):
+            if event.get("type") == "result":
+                final_result = event.get("result")
+        return final_result or {"check": {}, "claims": [], "rule_hits": []}
+
+    def run_check_stream(
+        self,
+        input_text: str,
+        doc_uid: str | None = None,
+        template_id: str | None = None,
+    ) -> Iterator[dict]:
+        """流式执行质检，逐步返回进度事件和最终结果。"""
 
         claims = self._split_claims(input_text)
         selected_template = self.template_service.get_template(template_id)
@@ -60,13 +80,61 @@ class QualityService:
         now = utc_now_iso()
         claim_items: list[dict] = []
         rule_hits: list[dict] = []
-        for claim_text in claims:
+        total_claims = len(claims)
+        llm_enabled = self.llm_client is not None
+
+        yield {
+            "type": "progress",
+            "status": "running",
+            "stage": "prepare",
+            "message": "正在解析输入内容并准备本次质检。",
+            "claim_index": 0,
+            "claim_total": total_claims,
+            "template_name": selected_template.get("template_name"),
+            "model_status": "已配置模型" if llm_enabled else "未配置模型，将使用规则与启发式判定",
+        }
+        yield {
+            "type": "progress",
+            "status": "running",
+            "stage": "template",
+            "message": f'已加载模板“{selected_template.get("template_name", "")}”，准备开始逐条质检。',
+            "claim_index": 0,
+            "claim_total": total_claims,
+            "template_name": selected_template.get("template_name"),
+            "model_status": "已配置模型" if llm_enabled else "未配置模型，将使用规则与启发式判定",
+        }
+
+        for index, claim_text in enumerate(claims, start=1):
             claim_id = f"claim_{uuid4().hex[:12]}"
+            claim_preview = claim_text[:60]
+            yield {
+                "type": "progress",
+                "status": "running",
+                "stage": "rules",
+                "message": f"正在匹配规则：第 {index}/{total_claims} 条 Claim",
+                "claim_index": index,
+                "claim_total": total_claims,
+                "claim_text": claim_preview,
+                "template_name": selected_template.get("template_name"),
+                "model_status": "已配置模型" if llm_enabled else "未配置模型，将使用规则与启发式判定",
+            }
             matched_rules = (
                 self.rule_service.match_claim(claim_text, active_tags=active_rule_tags)
                 if self.rule_service
                 else []
             )
+
+            yield {
+                "type": "progress",
+                "status": "running",
+                "stage": "retrieval",
+                "message": f"正在检索证据：第 {index}/{total_claims} 条 Claim",
+                "claim_index": index,
+                "claim_total": total_claims,
+                "claim_text": claim_preview,
+                "template_name": selected_template.get("template_name"),
+                "model_status": "已配置模型" if llm_enabled else "未配置模型，将使用规则与启发式判定",
+            }
             evidence_list = self.retrieval_service.hybrid_search(
                 claim_text,
                 top_k=retrieval_policy["final_top_k"],
@@ -75,12 +143,40 @@ class QualityService:
                 vector_top_k=retrieval_policy["vector_top_k"],
                 use_rerank=retrieval_policy["use_rerank"],
             )
+
+            yield {
+                "type": "progress",
+                "status": "running",
+                "stage": "context",
+                "message": f"正在整理证据上下文：第 {index}/{total_claims} 条 Claim",
+                "claim_index": index,
+                "claim_total": total_claims,
+                "claim_text": claim_preview,
+                "template_name": selected_template.get("template_name"),
+                "model_status": "已配置模型" if llm_enabled else "未配置模型，将使用规则与启发式判定",
+            }
             evidence_list = self.retrieval_service.expand_evidence_context(
                 evidence_list,
                 neighbor_window=retrieval_policy["neighbor_window"],
                 include_section_context=retrieval_policy["include_section_context"],
                 section_max_chars=retrieval_policy["section_max_chars"],
             )
+
+            yield {
+                "type": "progress",
+                "status": "running",
+                "stage": "model",
+                "message": (
+                    f"正在调用模型判定：第 {index}/{total_claims} 条 Claim"
+                    if llm_enabled
+                    else f"当前未配置模型，使用规则与启发式判定：第 {index}/{total_claims} 条 Claim"
+                ),
+                "claim_index": index,
+                "claim_total": total_claims,
+                "claim_text": claim_preview,
+                "template_name": selected_template.get("template_name"),
+                "model_status": "正在调用模型" if llm_enabled else "未调用模型",
+            }
             evaluation = self._evaluate_claim_with_fallback(
                 claim_text=claim_text,
                 evidence_list=evidence_list,
@@ -125,6 +221,16 @@ class QualityService:
                     }
                 )
 
+        yield {
+            "type": "progress",
+            "status": "running",
+            "stage": "persist",
+            "message": "正在写入质检结果和 Claim 记录。",
+            "claim_index": total_claims,
+            "claim_total": total_claims,
+            "template_name": selected_template.get("template_name"),
+            "model_status": "已完成模型判定" if llm_enabled else "本次未调用模型",
+        }
         overall_verdict = self._build_overall_verdict(claim_items)
         result = {
             "check": {
@@ -148,7 +254,16 @@ class QualityService:
             claims=result["claims"],
             rule_hits=result["rule_hits"],
         )
-        return result
+        yield {
+            "type": "result",
+            "status": "success",
+            "stage": "persist",
+            "result": result,
+            "message": "质检已完成。",
+            "claim_total": total_claims,
+            "template_name": selected_template.get("template_name"),
+            "model_status": "模型已参与判定" if llm_enabled else "本次未调用模型",
+        }
 
     def _evaluate_claim_with_fallback(
         self,

@@ -13,6 +13,7 @@ from src.ui.viewmodels import (
     build_quality_claim_rows,
     build_recent_claim_navigation,
     build_recent_quality_rows,
+    build_review_candidate_rows,
     build_review_history_rows,
     build_search_result_rows,
     build_template_choices,
@@ -30,12 +31,16 @@ from src.ui.viewmodels import (
     format_quality_result_html,
     format_quality_template_html,
     format_recent_quality_checks,
+    format_review_candidates,
+    format_review_help_html,
     format_review_history,
+    format_review_record_detail_html,
     format_search_help_html,
     format_search_result_detail_html,
     format_search_results,
     format_search_summary_html,
     get_document_detail,
+    get_review_record_detail,
     get_review_target_claim_id,
     normalize_search_query,
     parse_claim_choice,
@@ -191,6 +196,131 @@ UI_CSS = """
 #quality-recent-table tr:has(td:focus-within) td,
 #quality-recent-table tr:has(button:focus) td {
   font-weight: 600 !important;
+}
+#review-top-row {
+  align-items: stretch !important;
+}
+#review-top-row > .gradio-column,
+#review-summary-row > .gradio-column,
+#review-action-row > .gradio-column,
+#review-record-row > .gradio-column,
+#review-evidence-row > .gradio-column {
+  align-self: stretch !important;
+}
+#review-summary-row,
+#review-action-row,
+#review-record-row,
+#review-evidence-row {
+  align-items: stretch !important;
+}
+#review-action-panel {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+#review-help-panel,
+#review-result-panel,
+#review-claim-detail,
+#review-record-detail,
+#review-evidence-detail {
+  height: 100%;
+}
+#review-help-panel > div,
+#review-result-panel > div,
+#review-claim-detail > div,
+#review-record-detail > div,
+#review-evidence-detail > div {
+  height: 100%;
+}
+#review-help-panel {
+  min-height: 260px;
+}
+#review-result-panel {
+  min-height: 260px;
+}
+#review-action-panel button {
+  margin-top: 8px;
+}
+#review-pending-table table th,
+#review-pending-table table td,
+#review-processed-table table th,
+#review-processed-table table td,
+#review-history-table table th,
+#review-history-table table td,
+#review-evidence-table table th,
+#review-evidence-table table td {
+  font-size: 14px !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.7 !important;
+  vertical-align: top !important;
+}
+#review-pending-table table tbody tr,
+#review-processed-table table tbody tr,
+#review-history-table table tbody tr,
+#review-evidence-table table tbody tr {
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+#review-pending-table button[aria-label="Select column"],
+#review-pending-table button[aria-label="Select row"],
+#review-processed-table button[aria-label="Select column"],
+#review-processed-table button[aria-label="Select row"],
+#review-history-table button[aria-label="Select column"],
+#review-history-table button[aria-label="Select row"],
+#review-evidence-table button[aria-label="Select column"],
+#review-evidence-table button[aria-label="Select row"] {
+  display: none !important;
+}
+#review-pending-table tr:has(td:focus-within) td,
+#review-pending-table tr:has(button:focus) td,
+#review-pending-table tr:has(.selected) td,
+#review-pending-table td.selected,
+#review-processed-table tr:has(td:focus-within) td,
+#review-processed-table tr:has(button:focus) td,
+#review-processed-table tr:has(.selected) td,
+#review-processed-table td.selected,
+#review-history-table tr:has(td:focus-within) td,
+#review-history-table tr:has(button:focus) td,
+#review-history-table tr:has(.selected) td,
+#review-history-table td.selected,
+#review-evidence-table tr:has(td:focus-within) td,
+#review-evidence-table tr:has(button:focus) td,
+#review-evidence-table tr:has(.selected) td,
+#review-evidence-table td.selected {
+  background: rgba(68, 68, 68, 0.22) !important;
+  box-shadow: inset 0 1px 0 0 rgba(68, 68, 68, 0.28), inset 0 -1px 0 0 rgba(68, 68, 68, 0.28);
+}
+#review-pending-table tr:has(td:focus-within) td:first-child,
+#review-pending-table tr:has(button:focus) td:first-child,
+#review-pending-table tr:has(.selected) td:first-child,
+#review-processed-table tr:has(td:focus-within) td:first-child,
+#review-processed-table tr:has(button:focus) td:first-child,
+#review-processed-table tr:has(.selected) td:first-child,
+#review-history-table tr:has(td:focus-within) td:first-child,
+#review-history-table tr:has(button:focus) td:first-child,
+#review-history-table tr:has(.selected) td:first-child,
+#review-evidence-table tr:has(td:focus-within) td:first-child,
+#review-evidence-table tr:has(button:focus) td:first-child,
+#review-evidence-table tr:has(.selected) td:first-child {
+  box-shadow: inset 6px 0 0 0 rgba(68, 68, 68, 0.72) !important;
+}
+#review-pending-table tr:has(td:focus-within) td,
+#review-pending-table tr:has(button:focus) td,
+#review-processed-table tr:has(td:focus-within) td,
+#review-processed-table tr:has(button:focus) td,
+#review-history-table tr:has(td:focus-within) td,
+#review-history-table tr:has(button:focus) td,
+#review-evidence-table tr:has(td:focus-within) td,
+#review-evidence-table tr:has(button:focus) td {
+  font-weight: 700 !important;
+}
+#review-claim-detail,
+#review-record-detail,
+#review-evidence-detail,
+#review-result-panel {
+  font-size: 14px !important;
 }
 #search-results-table table th,
 #search-results-table table td {
@@ -726,84 +856,350 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             return
 
-    def list_review_history() -> tuple[list[list[str]], gr.Dropdown, dict]:
+    review_action_choices = ["通过", "不通过", "更新结论"]
+    review_scope_choices = ["全部记录", "仅待处理", "仅已处理"]
+    review_risk_choices = ["全部风险", "仅高风险", "仅中风险", "仅低风险"]
+    review_candidate_fetch_limit = 200
+
+    def normalize_review_action_value(action_value: str) -> str:
+        """将中文审核动作转换为内部值。"""
+
+        mapping = {
+            "通过": "approved",
+            "不通过": "rejected",
+            "更新结论": "updated",
+            "approved": "approved",
+            "rejected": "rejected",
+            "updated": "updated",
+        }
+        return mapping.get(str(action_value or "").strip(), "approved")
+
+    def display_review_action_value(action_value: str) -> str:
+        """将内部审核动作转换为中文值。"""
+
+        mapping = {
+            "approved": "通过",
+            "rejected": "不通过",
+            "updated": "更新结论",
+        }
+        return mapping.get(str(action_value or "").strip().lower(), "通过")
+
+    def find_latest_review_for_claim(review_items: list[dict], claim_id: str) -> dict | None:
+        """从审核历史中找到指定 Claim 最近的一条审核记录。"""
+
+        return next((item for item in (review_items or []) if str(item.get("claim_id") or "") == claim_id), None)
+
+    def normalize_review_scope_value(scope_value: str | None) -> str:
+        """规范人工审核范围筛选值。"""
+
+        value = str(scope_value or "").strip()
+        return value if value in review_scope_choices else review_scope_choices[0]
+
+    def normalize_review_risk_value(risk_value: str | None) -> str:
+        """规范人工审核风险筛选值。"""
+
+        value = str(risk_value or "").strip()
+        return value if value in review_risk_choices else review_risk_choices[0]
+
+    def filter_review_candidates(
+        review_candidates: list[dict] | None,
+        *,
+        scope_value: str,
+        risk_value: str,
+    ) -> list[dict]:
+        """按范围与风险等级过滤可审核 Claim。"""
+
+        normalized_scope = normalize_review_scope_value(scope_value)
+        normalized_risk = normalize_review_risk_value(risk_value)
+        risk_mapping = {
+            "仅高风险": "high",
+            "仅中风险": "medium",
+            "仅低风险": "low",
+        }
+        filtered_items: list[dict] = []
+        for item in review_candidates or []:
+            review_status = str(item.get("review_status") or "pending").lower()
+            if normalized_scope == "仅待处理" and review_status != "pending":
+                continue
+            if normalized_scope == "仅已处理" and review_status == "pending":
+                continue
+            expected_risk = risk_mapping.get(normalized_risk)
+            if expected_risk and str(item.get("risk_level") or "").lower() != expected_risk:
+                continue
+            filtered_items.append(item)
+        return filtered_items
+
+    def split_review_candidates(review_candidates: list[dict] | None) -> tuple[list[dict], list[dict]]:
+        """将可审核 Claim 分为待处理和已处理两组。"""
+
+        pending_items: list[dict] = []
+        processed_items: list[dict] = []
+        for item in review_candidates or []:
+            if str(item.get("review_status") or "pending").lower() == "pending":
+                pending_items.append(item)
+            else:
+                processed_items.append(item)
+        return pending_items, processed_items
+
+    def build_review_workspace_outputs(
+        review_candidates: list[dict] | None,
+        review_items: list[dict] | None,
+        *,
+        selected_claim_id: str | None = None,
+        preferred_review_id: str | None = None,
+        review_action_value: str | None = None,
+        review_note_value: str | None = None,
+        scope_value: str | None = None,
+        risk_value: str | None = None,
+    ) -> tuple[list[list[str]], list[list[str]], list[dict], str, dict, str, list[list[str]], list[dict], str, str, str, list[list[str]], list[dict], str, str]:
+        """构建人工审核页主工作区输出。"""
+
+        normalized_scope = normalize_review_scope_value(scope_value)
+        normalized_risk = normalize_review_risk_value(risk_value)
+        filtered_candidates = filter_review_candidates(
+            review_candidates,
+            scope_value=normalized_scope,
+            risk_value=normalized_risk,
+        )
+        pending_candidates, processed_candidates = split_review_candidates(filtered_candidates)
+        pending_rows = build_review_candidate_rows(format_review_candidates(pending_candidates))
+        processed_rows = build_review_candidate_rows(format_review_candidates(processed_candidates))
+        # 状态里保留全量候选集，避免切换筛选条件时只能基于上一次筛选结果继续过滤。
+        candidate_items = list(review_candidates or [])
+        normalized_claim_id = str(selected_claim_id or "")
+        formatted_candidates = format_review_candidates(filtered_candidates)
+        claim_detail_map = formatted_candidates.get("claim_detail_map", {})
+        if normalized_claim_id not in claim_detail_map and formatted_candidates.get("items"):
+            normalized_claim_id = str(formatted_candidates["items"][0].get("claim_id") or "")
+        claim_view, evidence_rows, _unused_review_view, evidence_items, evidence_detail_html = render_claim_views(
+            normalized_claim_id,
+            claim_detail_map,
+        )
+
+        formatted_history = format_review_history(review_items or [])
+        review_rows = build_review_history_rows(formatted_history)
+        selected_review_record: dict | None = None
+        if preferred_review_id:
+            selected_review_record = next(
+                (item for item in formatted_history["items"] if item.get("review_id") == preferred_review_id),
+                None,
+            )
+        if selected_review_record is None and normalized_claim_id:
+            selected_review_record = find_latest_review_for_claim(formatted_history["items"], normalized_claim_id)
+        if selected_review_record is None and not normalized_claim_id and formatted_history["items"]:
+            selected_review_record = formatted_history["items"][0]
+
+        resolved_action_value = review_action_value
+        resolved_note_value = review_note_value
+        if resolved_action_value is None:
+            resolved_action_value = (
+                display_review_action_value(str(selected_review_record.get("review_action") or ""))
+                if selected_review_record
+                else review_action_choices[0]
+            )
+        if resolved_note_value is None:
+            resolved_note_value = str(selected_review_record.get("review_note") or "") if selected_review_record else ""
+
+        return (
+            pending_rows,
+            processed_rows,
+            candidate_items,
+            normalized_claim_id,
+            claim_detail_map,
+            claim_view,
+            evidence_rows,
+            evidence_items,
+            evidence_detail_html,
+            resolved_action_value or review_action_choices[0],
+            resolved_note_value or "",
+            review_rows,
+            formatted_history["items"],
+            str(selected_review_record.get("review_id") or "") if selected_review_record else "",
+            format_review_record_detail_html(selected_review_record),
+        )
+
+    def list_review_workspace(
+        scope_value: str,
+        risk_value: str,
+        selected_claim_id: str,
+    ) -> tuple[list[list[str]], list[list[str]], list[dict], str, dict, str, list[list[str]], list[dict], str, str, str, list[list[str]], list[dict], str, str]:
+        """读取人工审核页所需的待审核列表与审核历史。"""
+
         try:
+            review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
             review_items, _ = review_service.list_reviews(page=1, page_size=20)
         except AppError:
-            return [], gr.Dropdown(choices=[], value=None), {}
-        formatted = format_review_history(review_items)
-        default_choice = formatted["review_choices"][0] if formatted["review_choices"] else None
-        return (
-            build_review_history_rows(formatted),
-            gr.Dropdown(choices=formatted["review_choices"], value=default_choice),
-            formatted["review_map"],
+            return build_review_workspace_outputs([], [], scope_value=scope_value, risk_value=risk_value)
+        return build_review_workspace_outputs(
+            review_candidates,
+            review_items,
+            selected_claim_id=selected_claim_id,
+            scope_value=scope_value,
+            risk_value=risk_value,
         )
+
+    def change_review_filters(
+        review_candidates: list[dict],
+        review_items: list[dict],
+        selected_claim_id: str,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple[list[list[str]], list[list[str]], str, dict, str, list[list[str]], list[dict], str, str, str, str, str]:
+        """切换筛选条件后刷新待处理/已处理列表与详情。"""
+
+        outputs = build_review_workspace_outputs(
+            review_candidates,
+            review_items,
+            selected_claim_id=selected_claim_id,
+            scope_value=scope_value,
+            risk_value=risk_value,
+        )
+        return outputs[0], outputs[1], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[13], outputs[14]
+
+    def select_review_candidate(
+        candidate_rows: list[list[str]],
+        review_candidates: list[dict],
+        review_items: list[dict],
+        evt: gr.SelectData,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple[str, dict, str, list[list[str]], list[dict], str, str, str, str, str]:
+        """点击可审核记录后联动 Claim、证据和审核输入区。"""
+
+        normalized_rows = candidate_rows.values.tolist() if hasattr(candidate_rows, "values") else candidate_rows
+        if not normalized_rows:
+            empty_outputs = build_review_workspace_outputs(
+                review_candidates,
+                review_items,
+                scope_value=scope_value,
+                risk_value=risk_value,
+            )
+            return empty_outputs[3], empty_outputs[4], empty_outputs[5], empty_outputs[6], empty_outputs[7], empty_outputs[8], empty_outputs[9], empty_outputs[10], empty_outputs[13], empty_outputs[14]
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        if row_index < 0 or row_index >= len(normalized_rows):
+            row_index = 0
+        selected_claim_id = str(normalized_rows[row_index][0]) if normalized_rows[row_index] else ""
+        outputs = build_review_workspace_outputs(
+            review_candidates,
+            review_items,
+            selected_claim_id=selected_claim_id,
+            scope_value=scope_value,
+            risk_value=risk_value,
+        )
+        return outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[13], outputs[14]
+
+    def select_review_history_record(
+        review_items: list[dict],
+        review_candidates: list[dict],
+        evt: gr.SelectData,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple[str, dict, str, list[list[str]], list[dict], str, str, str, str, str]:
+        """点击已审核记录后回放对应 Claim、证据与审核结论。"""
+
+        items = review_items or []
+        if not items:
+            empty_outputs = build_review_workspace_outputs(
+                review_candidates,
+                [],
+                scope_value=scope_value,
+                risk_value=risk_value,
+            )
+            return empty_outputs[3], empty_outputs[4], empty_outputs[5], empty_outputs[6], empty_outputs[7], empty_outputs[8], empty_outputs[9], empty_outputs[10], empty_outputs[13], empty_outputs[14]
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        if row_index < 0 or row_index >= len(items):
+            row_index = 0
+        selected_record = items[row_index]
+        outputs = build_review_workspace_outputs(
+            review_candidates,
+            review_items,
+            selected_claim_id=str(selected_record.get("claim_id") or ""),
+            preferred_review_id=str(selected_record.get("review_id") or ""),
+            scope_value=scope_value,
+            risk_value=risk_value,
+        )
+        return outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[13], outputs[14]
 
     def submit_review_action(
         claim_choice: str,
         review_action: str,
         review_note: str,
-    ) -> tuple[str, list[list[str]], gr.Dropdown, dict, list[list[str]], list[dict], str, dict, str, list[list[str]], str, list[dict], str]:
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple[str, list[list[str]], list[list[str]], list[dict], str, dict, str, list[list[str]], list[dict], str, str, str, list[list[str]], list[dict], str, str]:
         claim_id = parse_claim_choice(claim_choice)
+        if not claim_id:
+            empty_outputs = build_review_workspace_outputs([], [], scope_value=scope_value, risk_value=risk_value)
+            return (
+                format_operation_result_html({"success": False, "message": "请先选择要审核的记录"}, title="审核结果"),
+                *empty_outputs,
+            )
         try:
             result = review_service.submit_review(
                 claim_id=claim_id,
-                review_action=review_action,
+                review_action=normalize_review_action_value(review_action),
                 reviewed_verdict=None,
                 review_note=review_note,
                 reviewer="ui_user",
             )
+            review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
             review_items, _ = review_service.list_reviews(page=1, page_size=20)
-            recent_results = quality_service.list_recent_results(limit=10)
         except AppError as exc:
-            claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(claim_choice, {})
+            try:
+                current_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
+            except AppError:
+                current_candidates = []
+            try:
+                current_review_items, _ = review_service.list_reviews(page=1, page_size=20)
+            except AppError:
+                current_review_items = []
+            current_outputs = build_review_workspace_outputs(
+                current_candidates,
+                current_review_items,
+                selected_claim_id=claim_id,
+                review_action_value=review_action,
+                review_note_value=review_note,
+                scope_value=scope_value,
+                risk_value=risk_value,
+            )
             return (
                 format_operation_result_html(
                     {"success": False, "message": exc.message, "error_code": exc.error_code},
                     title="审核结果",
                 ),
-                [],
-                gr.Dropdown(choices=[], value=None),
-                {},
-                [],
-                [],
-                "",
-                {},
-                claim_view,
-                evidence_rows,
-                review_view,
-                evidence_items,
-                evidence_detail_html,
+                *current_outputs,
             )
 
-        review_history_payload = format_review_history(review_items)
-        recent_quality_payload = format_recent_quality_checks(recent_results)
-        navigation = build_recent_claim_navigation(recent_results, preferred_claim_id=claim_id)
-        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
+        current_outputs = build_review_workspace_outputs(
+            review_candidates,
+            review_items,
+            selected_claim_id=claim_id,
+            preferred_review_id=result["review_id"],
+            review_action_value=display_review_action_value(result["review_action"]),
+            review_note_value=str(result.get("review_note") or ""),
+            scope_value=scope_value,
+            risk_value=risk_value,
+        )
         return (
             format_operation_result_html(
                 {
+                    "success": True,
+                    "message": "审核记录已保存，待审核列表与历史记录已刷新。",
                     **result,
                     "linked_claim_id": claim_id,
-                    "linked_check_id": navigation["selected_detail"].get("summary", {}).get("check_id"),
+                    "review_action": display_review_action_value(result["review_action"]),
                 },
                 title="审核结果",
             ),
-            build_review_history_rows(review_history_payload),
-            gr.Dropdown(
-                choices=review_history_payload["review_choices"],
-                value=review_history_payload["review_choices"][0] if review_history_payload["review_choices"] else None,
-            ),
-            review_history_payload["review_map"],
-            build_recent_quality_rows(recent_quality_payload),
-            recent_results,
-            navigation["selected_choice"] or "",
-            navigation["claim_detail_map"],
-            claim_view,
-            evidence_rows,
-            review_view,
-            evidence_items,
-            evidence_detail_html,
+            *current_outputs,
         )
 
     def list_recent_quality_results() -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
@@ -836,24 +1232,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         selected_outputs = build_recent_quality_view_outputs(results, selected_index=row_index)
         return selected_outputs[:10]
 
-    def focus_review_record(
-        review_choice: str,
-        review_history_state: dict,
-        recent_quality_state: list[dict],
-    ) -> tuple[str, dict, str, list[list[str]], str, list[dict], str]:
-        claim_id = get_review_target_claim_id(review_choice, review_history_state)
-        navigation = build_recent_claim_navigation(recent_quality_state, preferred_claim_id=claim_id)
-        claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
-        return (
-            navigation["selected_choice"] or "",
-            navigation["claim_detail_map"],
-            claim_view,
-            evidence_rows,
-            review_view,
-            evidence_items,
-            evidence_detail_html,
-        )
-
     initial_document_state = get_document_management_state()
     initial_document_summary = format_document_summary_html(initial_document_state["scan_summary"])
     initial_database_summary = format_database_summary_html(initial_document_state["database_summary"])
@@ -877,6 +1255,31 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         _initial_recent_results_state,
         initial_recent_rows,
     ) = build_recent_quality_view_outputs(initial_recent_results, selected_index=0)
+    try:
+        initial_review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
+    except AppError:
+        initial_review_candidates = []
+    try:
+        initial_review_items, _ = review_service.list_reviews(page=1, page_size=20)
+    except AppError:
+        initial_review_items = []
+    (
+        initial_review_pending_rows,
+        initial_review_processed_rows,
+        initial_review_candidate_items_state,
+        initial_review_selected_claim_id,
+        initial_review_claim_detail_map,
+        initial_review_claim_view,
+        initial_review_evidence_rows,
+        initial_review_evidence_items,
+        initial_review_evidence_detail_html,
+        initial_review_action_value,
+        initial_review_note_value,
+        initial_review_rows,
+        initial_review_items_state,
+        initial_selected_review_id,
+        initial_review_record_detail_html,
+    ) = build_review_workspace_outputs(initial_review_candidates, initial_review_items)
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -1011,6 +1414,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         recent_quality_state = gr.State(_initial_recent_results_state)
                         evidence_items_state = gr.State(initial_evidence_items)
                         claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
+                        quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
                 with gr.Row(elem_id="quality-evidence-row", equal_height=True):
                     with gr.Column(scale=5):
                         claim_evidence_table = gr.Dataframe(
@@ -1050,29 +1454,101 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             )
 
             with gr.Tab("人工审核"):
-                with gr.Row():
-                    with gr.Column(scale=4):
-                        review_action_input = gr.Dropdown(
-                            choices=["approved", "rejected", "updated"],
-                            value="approved",
-                            label="审核动作",
-                        )
-                        review_note_input = gr.Textbox(label="审核备注", lines=3)
-                        review_button = gr.Button("提交审核")
-                        review_history_button = gr.Button("加载最近审核记录")
-                        review_history_selector = gr.Dropdown(label="最近审核定位", choices=[], interactive=True)
-                        review_history_state = gr.State({})
+                review_candidate_state = gr.State(initial_review_candidate_items_state)
+                review_history_state = gr.State(initial_review_items_state)
+                review_selected_record_state = gr.State(initial_selected_review_id)
+                review_selected_claim_state = gr.State(initial_review_selected_claim_id)
+                review_claim_detail_state = gr.State(initial_review_claim_detail_map)
+                review_evidence_items_state = gr.State(initial_review_evidence_items)
+                with gr.Row(elem_id="review-top-row", equal_height=True):
                     with gr.Column(scale=5):
-                        review_claim_detail = gr.HTML(value=format_claim_detail_html(None))
-                        review_result = gr.HTML(value=format_operation_result_html(None, title="审核结果"))
-                review_history = gr.Dataframe(
-                    headers=["审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
-                    datatype=["str"] * 8,
-                    interactive=False,
-                    row_count=0,
-                    column_count=8,
-                    label="最近审核记录",
-                )
+                        with gr.Row():
+                            review_scope_filter = gr.Dropdown(
+                                label="列表范围",
+                                choices=review_scope_choices,
+                                value=review_scope_choices[0],
+                                interactive=True,
+                            )
+                            review_risk_filter = gr.Dropdown(
+                                label="风险筛选",
+                                choices=review_risk_choices,
+                                value=review_risk_choices[0],
+                                interactive=True,
+                            )
+                        review_pending_candidates = gr.Dataframe(
+                            headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                            datatype=["str"] * 8,
+                            interactive=False,
+                            row_count=0,
+                            column_count=8,
+                            label="待处理记录",
+                            elem_id="review-pending-table",
+                            value=initial_review_pending_rows,
+                        )
+                        review_processed_candidates = gr.Dataframe(
+                            headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                            datatype=["str"] * 8,
+                            interactive=False,
+                            row_count=0,
+                            column_count=8,
+                            label="已处理 Claim",
+                            elem_id="review-processed-table",
+                            value=initial_review_processed_rows,
+                        )
+                    with gr.Column(scale=4):
+                        review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
+                with gr.Row(elem_id="review-summary-row", equal_height=True):
+                    with gr.Column(scale=5):
+                        review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
+                    with gr.Column(scale=4):
+                        review_evidence_detail = gr.HTML(
+                            value=initial_review_evidence_detail_html,
+                            elem_id="review-evidence-detail",
+                        )
+                with gr.Row(elem_id="review-evidence-row", equal_height=True):
+                    with gr.Column(scale=5):
+                        review_evidence_table = gr.Dataframe(
+                            headers=["片段 ID", "文档", "定位", "检索来源", "匹配来源", "重排分", "证据摘要"],
+                            datatype=["str"] * 7,
+                            interactive=False,
+                            row_count=0,
+                            column_count=7,
+                            label="关联证据列表",
+                            elem_id="review-evidence-table",
+                            value=initial_review_evidence_rows,
+                        )
+                    with gr.Column(scale=4):
+                        with gr.Group(elem_id="review-action-panel"):
+                            review_action_input = gr.Dropdown(
+                                choices=review_action_choices,
+                                value=initial_review_action_value,
+                                label="审核动作",
+                                interactive=True,
+                            )
+                            review_note_input = gr.Textbox(label="审核备注", lines=4, value=initial_review_note_value)
+                            review_button = gr.Button("提交审核")
+                            review_history_button = gr.Button("刷新审核列表")
+                            review_result = gr.HTML(
+                                value=format_operation_result_html(None, title="审核结果"),
+                                elem_id="review-result-panel",
+                            )
+                with gr.Row(elem_id="review-record-row", equal_height=True):
+                    with gr.Column(scale=5):
+                        review_history = gr.Dataframe(
+                            headers=["审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
+                            datatype=["str"] * 8,
+                            interactive=False,
+                            row_count=0,
+                            column_count=8,
+                            label="已审核记录",
+                            elem_id="review-history-table",
+                            value=initial_review_rows,
+                        )
+                    with gr.Column(scale=4):
+                        review_record_detail = gr.HTML(
+                            value=initial_review_record_detail_html,
+                            elem_id="review-record-detail",
+                        )
 
         scan_button.click(
             fn=load_document_management_state,
@@ -1170,7 +1646,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
-                review_claim_detail,
+                quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
                 recent_quality_state,
@@ -1192,7 +1668,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
-                review_claim_detail,
+                quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
                 recent_quality_checks,
@@ -1210,7 +1686,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
-                review_claim_detail,
+                quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
             ],
@@ -1218,7 +1694,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         quality_claims.select(
             fn=select_quality_claim,
             inputs=[quality_claims, claim_detail_state],
-            outputs=[claim_detail_view, claim_evidence_table, review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail],
+            outputs=[claim_detail_view, claim_evidence_table, quality_review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail],
         )
         claim_evidence_table.select(
             fn=select_quality_evidence,
@@ -1226,31 +1702,141 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[claim_evidence_detail],
         )
         review_history_button.click(
-            fn=list_review_history,
-            outputs=[review_history, review_history_selector, review_history_state],
+            fn=list_review_workspace,
+            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            outputs=[
+                review_pending_candidates,
+                review_processed_candidates,
+                review_candidate_state,
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_history,
+                review_history_state,
+                review_selected_record_state,
+                review_record_detail,
+            ],
         )
-        review_history_selector.change(
-            fn=focus_review_record,
-            inputs=[review_history_selector, review_history_state, recent_quality_state],
-            outputs=[selected_claim_state, claim_detail_state, claim_detail_view, claim_evidence_table, review_claim_detail, evidence_items_state, claim_evidence_detail],
+        review_scope_filter.change(
+            fn=list_review_workspace,
+            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            outputs=[
+                review_pending_candidates,
+                review_processed_candidates,
+                review_candidate_state,
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_history,
+                review_history_state,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_risk_filter.change(
+            fn=list_review_workspace,
+            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            outputs=[
+                review_pending_candidates,
+                review_processed_candidates,
+                review_candidate_state,
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_history,
+                review_history_state,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_pending_candidates.select(
+            fn=select_review_candidate,
+            inputs=[review_pending_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
+            outputs=[
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_processed_candidates.select(
+            fn=select_review_candidate,
+            inputs=[review_processed_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
+            outputs=[
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_history.select(
+            fn=select_review_history_record,
+            inputs=[review_history_state, review_candidate_state, review_scope_filter, review_risk_filter],
+            outputs=[
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_evidence_table.select(
+            fn=select_quality_evidence,
+            inputs=[review_evidence_items_state],
+            outputs=[review_evidence_detail],
         )
         review_button.click(
             fn=submit_review_action,
-            inputs=[selected_claim_state, review_action_input, review_note_input],
+            inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter],
             outputs=[
                 review_result,
+                review_pending_candidates,
+                review_processed_candidates,
+                review_candidate_state,
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
                 review_history,
-                review_history_selector,
                 review_history_state,
-                recent_quality_checks,
-                recent_quality_state,
-                selected_claim_state,
-                claim_detail_state,
-                claim_detail_view,
-                claim_evidence_table,
-                review_claim_detail,
-                evidence_items_state,
-                claim_evidence_detail,
+                review_selected_record_state,
+                review_record_detail,
             ],
         )
     return demo

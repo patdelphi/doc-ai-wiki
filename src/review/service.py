@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from src.common.errors import ValidationAppError
 from src.common.utils import utc_now_iso
 from src.db.repositories import QualityRepository
 
@@ -42,3 +43,16 @@ class ReviewService:
         """读取审核记录。"""
 
         return self.repository.list_reviews(page=page, page_size=page_size)
+
+    def list_review_candidates(self, limit: int = 50) -> list[dict]:
+        """读取可审核的 Claim 列表。"""
+
+        return self.repository.list_review_candidates(limit=limit)
+
+    def delete_review(self, review_id: str) -> dict:
+        """删除指定审核记录。"""
+
+        normalized_review_id = str(review_id or "").strip()
+        if not normalized_review_id:
+            raise ValidationAppError("review_id 不能为空")
+        return self.repository.delete_review_record(normalized_review_id)

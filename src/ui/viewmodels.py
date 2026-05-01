@@ -148,6 +148,27 @@ def format_quality_help_html() -> str:
     )
 
 
+def format_review_help_html() -> str:
+    """构建人工审核功能说明面板。"""
+
+    return _build_panel_html(
+        title="功能说明",
+        description="人工审核用于先选择待审核 Claim，再查看证据并提交审核结论；已审核记录可在下方回看。",
+        cards=[
+            ("先选记录", "先从可审核记录列表中选择一条 Claim，再开始审核"),
+            ("查看证据", "选中记录后，可同步查看 Claim 详情、证据列表与证据详情"),
+            ("提交审核", "填写审核动作和备注后提交，列表与历史会自动刷新"),
+        ],
+        notes=[
+            "可审核列表优先显示待处理记录，并保留历史质检产生的 Claim。",
+            "审核动作、审核状态、审核结果均统一使用中文展示。",
+            "下方的已审核记录用于回看历史，不再作为主入口。",
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
 def format_quality_template_html(template: dict | None) -> str:
     """构建质检模板内容展示面板。"""
 
@@ -950,7 +971,25 @@ def build_claim_detail_map(claims: list[dict]) -> dict:
             "check_created_at": item.get("check_created_at"),
             "evidence": item.get("evidence", ""),
             "evidence_reason": item.get("evidence_reason", ""),
-            "evidence_details": item.get("evidence_details", []),
+            "evidence_details": item.get("evidence_details", [])
+            or (
+                [
+                    {
+                        "chunk_id": item.get("source_span") or item["claim_id"],
+                        "doc_uid": item.get("source_doc", ""),
+                        "doc_title": item.get("source_doc", ""),
+                        "source_span": item.get("source_span", ""),
+                        "retrieval_source": item.get("retrieval_source", "history"),
+                        "matched_sources": item.get("matched_sources", ["history"]),
+                        "rerank_score": item.get("rerank_score"),
+                        "context_mode": item.get("context_mode", "history_record"),
+                        "section_title": item.get("section_title", ""),
+                        "content_preview": item.get("evidence", "") or item.get("claim_text", ""),
+                    }
+                ]
+                if item.get("source_doc") or item.get("source_span") or item.get("evidence")
+                else []
+            ),
         }
         for item in claims
         if item.get("claim_id")
@@ -1025,7 +1064,7 @@ def format_claim_detail_markdown(detail: dict | None) -> str:
             f'- 当前判定：{_format_verdict_label(summary.get("verdict"))}',
             f'- 风险等级：{_format_risk_level_label(summary.get("risk_level"))}',
             f'- 置信度：{_format_score(summary.get("confidence"))}',
-            f'- 审核状态：{_display_text(summary.get("review_status"))}',
+            f'- 审核状态：{_format_review_status_label(summary.get("review_status"))}',
             f'- 来源文档：{_display_text(summary.get("source_doc"))}',
             f'- 来源位置：{_display_text(summary.get("source_span"))}',
             f'- 证据摘要：{_display_text(summary.get("evidence"))}',
@@ -1049,7 +1088,7 @@ def format_claim_detail_html(detail: dict | None) -> str:
         )
     raw_verdict = _display_text(summary.get("verdict"))
     verdict = _format_verdict_label(raw_verdict)
-    review_status = _display_text(summary.get("review_status"))
+    review_status = _format_review_status_label(summary.get("review_status"))
     tone = "warning" if "review" in raw_verdict.lower() or review_status == "pending" else "success"
     return _build_panel_html(
         title="Claim 详情",
@@ -1069,6 +1108,37 @@ def format_claim_detail_html(detail: dict | None) -> str:
             f'证据说明：{_display_text(summary.get("evidence_reason"))}',
         ],
         tone=tone,
+    )
+
+
+def format_review_record_detail_html(record: dict | None) -> str:
+    """将审核记录详情转换为卡片式 HTML。"""
+
+    resolved = record or {}
+    if not resolved.get("review_id"):
+        return _build_panel_html(
+            title="审核记录详情",
+            description="请选择审核记录后查看详情",
+            cards=[("当前状态", "未选择审核记录")],
+            tone="neutral",
+        )
+    return _build_panel_html(
+        title="审核记录详情",
+        description=_display_text(resolved.get("claim_text")),
+        cards=[
+            ("审核 ID", _display_text(resolved.get("review_id"))),
+            ("审核动作", _format_review_action_label(resolved.get("review_action"))),
+            ("审核状态", _format_review_status_label(resolved.get("review_status"))),
+            ("审核人", _display_text(resolved.get("reviewer"))),
+            ("审核时间", _display_text(resolved.get("created_at"))),
+            ("关联模板", _display_text(resolved.get("template_name"))),
+        ],
+        notes=[
+            f'关联 Claim：{_display_text(resolved.get("claim_id"))}',
+            f'关联质检：{_display_text(resolved.get("check_id"))}',
+            f'审核备注：{_display_text(resolved.get("review_note"))}',
+        ],
+        tone="neutral",
     )
 
 
@@ -1237,6 +1307,54 @@ def build_recent_claim_navigation(quality_results: list[dict], preferred_claim_i
     }
 
 
+def format_review_candidates(candidate_items: list[dict]) -> dict:
+    """将可审核 Claim 列表转换为更适合人工审核页展示的结构。"""
+
+    items = [
+        {
+            "claim_id": item.get("claim_id"),
+            "check_id": item.get("check_id"),
+            "claim_text": item.get("claim_text", ""),
+            "verdict": item.get("verdict"),
+            "risk_level": item.get("risk_level"),
+            "confidence": item.get("confidence"),
+            "review_status": item.get("review_status", "pending"),
+            "source_doc": item.get("source_doc"),
+            "source_span": item.get("source_span"),
+            "evidence": item.get("evidence", ""),
+            "template_name": item.get("template_name", ""),
+            "check_created_at": item.get("check_created_at") or item.get("created_at"),
+        }
+        for item in candidate_items
+        if item.get("claim_id")
+    ]
+    claim_detail_map = build_claim_detail_map(candidate_items)
+    return {
+        "count": len(items),
+        "items": items,
+        "claim_detail_map": claim_detail_map,
+    }
+
+
+def build_review_candidate_rows(formatted: dict | None) -> list[list[str]]:
+    """将可审核 Claim 转换为表格行。"""
+
+    items = (formatted or {}).get("items") or []
+    return [
+        [
+            _display_text(item.get("claim_id")),
+            _truncate_text(item.get("claim_text")),
+            _format_verdict_label(item.get("verdict")),
+            _format_risk_level_label(item.get("risk_level")),
+            _format_review_status_label(item.get("review_status")),
+            _display_text(item.get("source_doc")),
+            _display_text(item.get("template_name")),
+            _display_text(item.get("check_created_at")),
+        ]
+        for item in items
+    ]
+
+
 def format_review_history(review_items: list[dict]) -> dict:
     """将审核记录转换为更适合 UI 展示的结构。"""
 
@@ -1277,8 +1395,8 @@ def build_review_history_rows(formatted: dict | None) -> list[list[str]]:
         [
             _display_text(item.get("review_id")),
             _display_text(item.get("claim_id")),
-            _display_text(item.get("review_action")),
-            _display_text(item.get("review_status")),
+            _format_review_action_label(item.get("review_action")),
+            _format_review_status_label(item.get("review_status")),
             _display_text(item.get("reviewer")),
             _display_text(item.get("created_at")),
             _display_text(item.get("review_note")),
@@ -1303,6 +1421,15 @@ def get_review_target_claim_id(review_choice: str, review_map: dict | None) -> s
     if not review_id or not review_map:
         return ""
     return str(review_map.get(review_id, {}).get("claim_id", ""))
+
+
+def get_review_record_detail(review_choice: str, review_map: dict | None) -> dict:
+    """从审核记录中提取详情。"""
+
+    review_id = parse_review_choice(review_choice)
+    if not review_id or not review_map:
+        return {}
+    return review_map.get(review_id, {})
 
 
 def _display_text(value: object) -> str:
@@ -1450,6 +1577,29 @@ def _format_verdict_label(verdict: object) -> str:
         "updated": "已更新",
     }
     return mapping.get(str(verdict or "").lower(), _display_text(verdict))
+
+
+def _format_review_action_label(action: object) -> str:
+    """将审核动作转换为中文展示。"""
+
+    mapping = {
+        "approved": "通过",
+        "rejected": "不通过",
+        "updated": "更新结论",
+    }
+    return mapping.get(str(action or "").lower(), _display_text(action))
+
+
+def _format_review_status_label(status: object) -> str:
+    """将审核状态转换为中文展示。"""
+
+    mapping = {
+        "pending": "待处理",
+        "approved": "已通过",
+        "rejected": "已驳回",
+        "updated": "已更新",
+    }
+    return mapping.get(str(status or "").lower(), _display_text(status))
 
 
 def _build_panel_html(

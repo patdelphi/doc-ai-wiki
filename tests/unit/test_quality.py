@@ -177,3 +177,43 @@ user_prompt_template: |
 
     assert result["check"]["retrieval_policy"]["use_rerank"] is False
     assert captured_search_kwargs["use_rerank"] is False
+
+
+def test_quality_service_stream_should_report_model_stage(tmp_path: Path) -> None:
+    """流式质检应暴露检索、模型和完成阶段，便于前端展示进度。"""
+
+    class StubLLMClient:
+        """程序说明：用于验证模型阶段事件的测试桩。"""
+
+        def evaluate_claim(
+            self,
+            *,
+            claim_text: str,
+            evidence_list: list[dict],
+            matched_rules: list[dict],
+            prompt_template: dict | None = None,
+        ) -> dict:
+            return {
+                "verdict": "needs_review",
+                "confidence": 0.61,
+                "risk_level": "medium",
+                "reason": f'llm:{prompt_template.get("template_id") if prompt_template else "none"}:{claim_text}:{len(evidence_list)}:{len(matched_rules)}',
+            }
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path, llm_client=StubLLMClient())
+    service.retrieval_service.hybrid_search = lambda query, top_k=3, doc_uid=None, **kwargs: [  # type: ignore[method-assign]
+        {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "section-1:chunk-0", "content": "证据内容"}
+    ]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    events = list(service.run_check_stream("需要模型参与判断。", template_id="general_fact_check"))
+
+    progress_stages = [event.get("stage") for event in events if event.get("type") == "progress"]
+    result_events = [event for event in events if event.get("type") == "result"]
+
+    assert "retrieval" in progress_stages
+    assert "model" in progress_stages
+    assert result_events
+    assert result_events[0]["result"]["claims"][0]["evidence_reason"].startswith("llm:general_fact_check:")

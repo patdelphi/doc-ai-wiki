@@ -7,6 +7,7 @@ from src.ui.viewmodels import (
     build_database_summary_rows,
     build_quality_claim_rows,
     build_recent_quality_rows,
+    build_review_candidate_rows,
     build_review_history_rows,
     build_search_result_rows,
     build_claim_detail_map,
@@ -35,6 +36,7 @@ from src.ui.viewmodels import (
     format_operation_result_markdown,
     format_quality_help_html,
     format_quality_progress_html,
+    format_review_candidates,
     format_review_history,
     get_document_detail,
     get_claim_detail,
@@ -127,6 +129,34 @@ def test_recent_quality_helpers_should_build_reviewable_choices() -> None:
     assert parse_claim_choice(formatted_checks[0]["claim_choices"][0]) == "claim_1"
     assert "pending" in formatted_checks[0]["claim_choices"][0]
     assert doc_uid_choices == ["doc_1 | 标题一", "doc_2 | 标题二"]
+
+
+def test_review_candidate_helpers_should_prioritize_claim_display() -> None:
+    """人工审核待选列表应能输出可读表格与 Claim 详情映射。"""
+
+    formatted = format_review_candidates(
+        [
+            {
+                "claim_id": "claim_review_1",
+                "check_id": "check_review_1",
+                "claim_text": "第一条待审核 Claim",
+                "verdict": "needs_review",
+                "risk_level": "medium",
+                "confidence": 0.81,
+                "review_status": "pending",
+                "source_doc": "文档一",
+                "template_name": "模板一",
+                "check_created_at": "2026-05-01T12:00:00+00:00",
+                "evidence": "第一条证据摘要",
+                "source_span": "section-1",
+            }
+        ]
+    )
+    rows = build_review_candidate_rows(formatted)
+
+    assert formatted["count"] == 1
+    assert "claim_review_1" in formatted["claim_detail_map"]
+    assert rows == [["claim_review_1", "第一条待审核 Claim", "需复核", "中级", "待处理", "文档一", "模板一", "2026-05-01T12:00:00+00:00"]]
 
 
 def test_parse_doc_uid_choice_should_return_doc_uid() -> None:
@@ -665,7 +695,7 @@ def test_operation_and_history_display_helpers_should_generate_readable_content(
     assert "执行状态：成功" in operation_markdown
     assert "最后进度：100%" in operation_markdown
     assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "2026-04-30T12:00:00Z", "测试输入"]]
-    assert review_rows == [["rev_1", "claim_1", "approved", "approved", "tester", "2026-04-30T12:30:00Z", "通过", "第一条结论"]]
+    assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "2026-04-30T12:30:00Z", "通过", "第一条结论"]]
 
 
 def test_operation_result_html_should_generate_card_layout() -> None:
