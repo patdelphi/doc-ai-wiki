@@ -66,3 +66,74 @@ user_prompt_template: |
 
     assert template["template_name"] == "古文模板"
     assert "古文系统提示" in template["system_prompt"]
+
+
+def test_quality_template_service_should_support_upsert_and_delete_custom_template(tmp_path: Path) -> None:
+    """模板服务应支持新增、更新和删除自定义模板。"""
+
+    from src.common.errors import NotFoundAppError
+    from src.quality.templates import QualityTemplateService
+
+    service = QualityTemplateService(tmp_path / "templates")
+    service.save_template(
+        {
+            "template_id": "custom_review",
+            "template_name": "自定义模板",
+            "description": "第一次保存",
+            "system_prompt": "系统提示 A",
+            "user_prompt_template": "用户提示 A",
+            "rule_tags": ["general", "strict"],
+            "retrieval_policy": {
+                "fulltext_top_k": 4,
+                "vector_top_k": 5,
+                "final_top_k": 3,
+                "use_rerank": True,
+                "neighbor_window": 1,
+                "include_section_context": False,
+                "section_max_chars": 500,
+            },
+        }
+    )
+
+    created_template = service.get_template("custom_review")
+    service.save_template(
+        {
+            **created_template,
+            "template_name": "自定义模板-更新",
+            "description": "第二次保存",
+        }
+    )
+    updated_template = service.get_template("custom_review")
+    service.delete_template("custom_review")
+
+    assert created_template["template_name"] == "自定义模板"
+    assert updated_template["template_name"] == "自定义模板-更新"
+    assert updated_template["description"] == "第二次保存"
+    assert all(item["template_id"] != "custom_review" for item in service.list_templates())
+
+    try:
+        service.get_template("custom_review")
+        assert False, "删除后不应还能读取模板"
+    except NotFoundAppError:
+        assert True
+
+
+def test_quality_template_service_should_allow_deleting_builtin_template(tmp_path: Path) -> None:
+    """按当前策略，内置模板也应支持删除并持久化删除状态。"""
+
+    from src.common.errors import NotFoundAppError
+    from src.quality.templates import QualityTemplateService
+
+    service = QualityTemplateService(tmp_path / "templates")
+
+    assert any(item["template_id"] == "general_fact_check" for item in service.list_templates())
+
+    service.delete_template("general_fact_check")
+
+    assert all(item["template_id"] != "general_fact_check" for item in service.list_templates())
+
+    try:
+        service.get_template("general_fact_check")
+        assert False, "删除后的内置模板不应继续可读"
+    except NotFoundAppError:
+        assert True

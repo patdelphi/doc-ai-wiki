@@ -38,6 +38,9 @@ from src.ui.viewmodels import (
     format_quality_progress_html,
     format_review_candidates,
     format_review_history,
+    format_settings_help_html,
+    format_settings_runtime_html,
+    format_settings_template_detail_html,
     get_document_detail,
     get_claim_detail,
     get_review_target_claim_id,
@@ -45,6 +48,7 @@ from src.ui.viewmodels import (
     parse_review_choice,
     parse_template_choice,
     parse_document_choice,
+    build_settings_template_rows,
     format_quality_template_html,
     normalize_search_query,
     scan_input_documents,
@@ -843,3 +847,66 @@ def test_quality_progress_panel_should_show_stage_and_model_status() -> None:
     assert "2/3" in progress_html
     assert "正在调用模型" in progress_html
     assert "阿胶可以治疗所有贫血" in progress_html
+
+
+def test_settings_helpers_should_generate_runtime_panel_and_template_rows() -> None:
+    """功能设置页应能生成模板列表行与运行配置面板。"""
+
+    rows = build_settings_template_rows(
+        [
+            {
+                "template_id": "custom_review",
+                "template_name": "自定义模板",
+                "source_label": "自定义",
+                "rule_tags": ["general", "strict"],
+                "retrieval_policy": {"final_top_k": 5},
+                "deletable": True,
+            }
+        ]
+    )
+    runtime_html = format_settings_runtime_html(
+        {
+            "input_root": "Input",
+            "templates_dir": "templates",
+            "llm_provider": "openai",
+            "embedding_provider": "openai",
+            "rerank_provider": "dashscope",
+            "rerank_enabled": True,
+            "max_input_chars": 2000,
+            "review_candidate_limit": 200,
+        }
+    )
+    help_html = format_settings_help_html()
+
+    assert rows == [["custom_review", "自定义模板", "自定义", "general、strict", "5", "是"]]
+    assert "运行配置" in runtime_html
+    assert "审核候选抓取上限：200" in runtime_html
+    assert "功能设置" in help_html
+    assert "模板管理" in help_html
+
+
+def test_settings_template_detail_should_generate_readable_card() -> None:
+    """设置页模板详情应展示来源、规则标签和检索策略。"""
+
+    detail_html = format_settings_template_detail_html(
+        {
+            "template_id": "general_fact_check",
+            "template_name": "通用事实核验",
+            "description": "用于常规内容核验。",
+            "source_label": "内置",
+            "rule_tags": ["general"],
+            "retrieval_policy": {
+                "fulltext_top_k": 3,
+                "vector_top_k": 3,
+                "final_top_k": 3,
+                "neighbor_window": 0,
+                "include_section_context": False,
+                "section_max_chars": 400,
+            },
+        }
+    )
+
+    assert "模板详情" in detail_html
+    assert "通用事实核验" in detail_html
+    assert "模板来源" in detail_html
+    assert "全文召回：3" in detail_html

@@ -16,6 +16,7 @@ from src.ui.viewmodels import (
     build_review_candidate_rows,
     build_review_history_rows,
     build_search_result_rows,
+    build_settings_template_rows,
     build_template_choices,
     format_claim_detail_for_review,
     format_claim_detail_html,
@@ -29,6 +30,9 @@ from src.ui.viewmodels import (
     format_quality_progress_html,
     format_quality_result,
     format_quality_result_html,
+    format_settings_help_html,
+    format_settings_runtime_html,
+    format_settings_template_detail_html,
     format_quality_template_html,
     format_recent_quality_checks,
     format_review_candidates,
@@ -374,7 +378,7 @@ UI_CSS = """
 """
 
 
-def build_ui(*, ingest_service, retrieval_service, quality_service, review_service) -> gr.Blocks:
+def build_ui(*, ingest_service, retrieval_service, quality_service, review_service, runtime_config: dict | None = None) -> gr.Blocks:
     """构建最小可用界面。"""
 
     template_items = quality_service.list_templates()
@@ -860,6 +864,266 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     review_scope_choices = ["全部记录", "仅待处理", "仅已处理"]
     review_risk_choices = ["全部风险", "仅高风险", "仅中风险", "仅低风险"]
     review_candidate_fetch_limit = 200
+    settings_runtime_payload = runtime_config or {}
+
+    def build_settings_runtime_payload() -> dict:
+        """构建功能设置页的运行配置摘要。"""
+
+        return {
+            **settings_runtime_payload,
+            "max_input_chars": settings_runtime_payload.get("max_input_chars", 2000),
+            "review_candidate_limit": review_candidate_fetch_limit,
+        }
+
+    def parse_rule_tags_text(rule_tags_text: str) -> list[str]:
+        """将模板规则标签输入框解析为标签列表。"""
+
+        raw = str(rule_tags_text or "")
+        for separator in ("，", "、", ";", "；", "\n", "\t"):
+            raw = raw.replace(separator, ",")
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    def to_int_setting(value: object, *, default: int) -> int:
+        """将表单数值统一转换为整数。"""
+
+        if value in (None, ""):
+            return default
+        return int(float(value))
+
+    def build_settings_form_values(template: dict | None) -> tuple[str, str, str, str, int, int, int, bool, int, bool, int, str, str]:
+        """根据模板生成设置页表单默认值。"""
+
+        resolved = template or {}
+        retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+        return (
+            str(resolved.get("template_id") or ""),
+            str(resolved.get("template_name") or ""),
+            str(resolved.get("description") or ""),
+            "、".join(str(item) for item in resolved.get("rule_tags", []) if item),
+            int(retrieval_policy.get("fulltext_top_k", 3)),
+            int(retrieval_policy.get("vector_top_k", 3)),
+            int(retrieval_policy.get("final_top_k", 3)),
+            bool(retrieval_policy.get("use_rerank", False)),
+            int(retrieval_policy.get("neighbor_window", 0)),
+            bool(retrieval_policy.get("include_section_context", False)),
+            int(retrieval_policy.get("section_max_chars", 400)),
+            str(resolved.get("system_prompt") or ""),
+            str(resolved.get("user_prompt_template") or ""),
+        )
+
+    def build_quality_template_refresh_outputs(selected_template_id: str | None = None) -> tuple[gr.update, str]:
+        """构建 AI 质检页模板下拉与详情的刷新输出。"""
+
+        template_items = quality_service.list_templates()
+        template_choices = build_template_choices(template_items)
+        normalized_template_id = str(selected_template_id or "")
+        available_ids = {str(item.get("template_id") or "") for item in template_items}
+        if normalized_template_id not in available_ids:
+            normalized_template_id = str(template_items[0].get("template_id") or "") if template_items else ""
+        selected_choice = next(
+            (choice for choice in template_choices if parse_template_choice(choice) == normalized_template_id),
+            template_choices[0] if template_choices else None,
+        )
+        detail_html = render_quality_template(selected_choice or "")
+        return gr.update(choices=template_choices, value=selected_choice), detail_html
+
+    def build_settings_workspace(
+        selected_template_id: str | None = None,
+        *,
+        result_payload: dict | None = None,
+        form_override: dict | None = None,
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool]:
+        """构建功能设置页所需的模板列表、详情和表单值。"""
+
+        templates = quality_service.list_templates()
+        template_ids = {str(item.get("template_id") or "") for item in templates}
+        normalized_template_id = str(selected_template_id or "")
+        if normalized_template_id not in template_ids:
+            normalized_template_id = str(templates[0].get("template_id") or "") if templates else ""
+        selected_template = quality_service.get_template(normalized_template_id) if normalized_template_id else None
+        detail_html = format_settings_template_detail_html(selected_template)
+        form_values = build_settings_form_values(selected_template)
+        if form_override:
+            form_values = (
+                str(form_override.get("template_id", form_values[0])),
+                str(form_override.get("template_name", form_values[1])),
+                str(form_override.get("description", form_values[2])),
+                str(form_override.get("rule_tags_text", form_values[3])),
+                to_int_setting(form_override.get("fulltext_top_k"), default=form_values[4]),
+                to_int_setting(form_override.get("vector_top_k"), default=form_values[5]),
+                to_int_setting(form_override.get("final_top_k"), default=form_values[6]),
+                bool(form_override.get("use_rerank", form_values[7])),
+                to_int_setting(form_override.get("neighbor_window"), default=form_values[8]),
+                bool(form_override.get("include_section_context", form_values[9])),
+                to_int_setting(form_override.get("section_max_chars"), default=form_values[10]),
+                str(form_override.get("system_prompt", form_values[11])),
+                str(form_override.get("user_prompt_template", form_values[12])),
+            )
+        return (
+            build_settings_template_rows(templates),
+            templates,
+            normalized_template_id,
+            detail_html,
+            *form_values,
+            format_operation_result_html(result_payload, title="设置结果"),
+            format_settings_runtime_html(build_settings_runtime_payload()),
+            False,
+        )
+
+    def refresh_settings_workspace(
+        selected_template_id: str | None,
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool]:
+        """刷新功能设置页。"""
+
+        return build_settings_workspace(selected_template_id)
+
+    def select_settings_template(
+        template_items: list[dict] | None,
+        evt: gr.SelectData,
+    ) -> tuple[str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, bool]:
+        """点击模板列表后加载对应模板详情与表单。"""
+
+        items = template_items or []
+        if not items:
+            outputs = build_settings_workspace("")
+            return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        if row_index < 0 or row_index >= len(items):
+            row_index = 0
+        template_id = str(items[row_index].get("template_id") or "")
+        outputs = build_settings_workspace(template_id)
+        return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
+
+    def prepare_new_template() -> tuple[str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, bool]:
+        """清空表单，准备创建新模板。"""
+
+        blank_form = {
+            "template_id": "",
+            "template_name": "",
+            "description": "",
+            "rule_tags_text": "",
+            "fulltext_top_k": 3,
+            "vector_top_k": 3,
+            "final_top_k": 3,
+            "use_rerank": False,
+            "neighbor_window": 0,
+            "include_section_context": False,
+            "section_max_chars": 400,
+            "system_prompt": "",
+            "user_prompt_template": "",
+        }
+        outputs = build_settings_workspace("", form_override=blank_form)
+        return "", outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
+
+    def save_settings_template(
+        selected_template_id: str,
+        template_id: str,
+        template_name: str,
+        description: str,
+        rule_tags_text: str,
+        fulltext_top_k: int | float,
+        vector_top_k: int | float,
+        final_top_k: int | float,
+        use_rerank: bool,
+        neighbor_window: int | float,
+        include_section_context: bool,
+        section_max_chars: int | float,
+        system_prompt: str,
+        user_prompt_template: str,
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str]:
+        """保存模板并刷新设置页。"""
+
+        form_payload = {
+            "template_id": template_id,
+            "template_name": template_name,
+            "description": description,
+            "rule_tags_text": rule_tags_text,
+            "fulltext_top_k": fulltext_top_k,
+            "vector_top_k": vector_top_k,
+            "final_top_k": final_top_k,
+            "use_rerank": use_rerank,
+            "neighbor_window": neighbor_window,
+            "include_section_context": include_section_context,
+            "section_max_chars": section_max_chars,
+            "system_prompt": system_prompt,
+            "user_prompt_template": user_prompt_template,
+        }
+        try:
+            saved_template = quality_service.save_template(
+                {
+                    "template_id": template_id,
+                    "template_name": template_name,
+                    "description": description,
+                    "rule_tags": parse_rule_tags_text(rule_tags_text),
+                    "system_prompt": system_prompt,
+                    "user_prompt_template": user_prompt_template,
+                    "retrieval_policy": {
+                        "fulltext_top_k": to_int_setting(fulltext_top_k, default=3),
+                        "vector_top_k": to_int_setting(vector_top_k, default=3),
+                        "final_top_k": to_int_setting(final_top_k, default=3),
+                        "use_rerank": bool(use_rerank),
+                        "neighbor_window": to_int_setting(neighbor_window, default=0),
+                        "include_section_context": bool(include_section_context),
+                        "section_max_chars": to_int_setting(section_max_chars, default=400),
+                    },
+                }
+            )
+        except AppError as exc:
+            outputs = build_settings_workspace(
+                selected_template_id,
+                result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
+                form_override=form_payload,
+            )
+            quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
+            return (*outputs, *quality_outputs)
+        outputs = build_settings_workspace(
+            saved_template.get("template_id"),
+            result_payload={"success": True, "message": "模板已保存。", "linked_claim_id": saved_template.get("template_id")},
+        )
+        quality_outputs = build_quality_template_refresh_outputs(saved_template.get("template_id"))
+        return (*outputs, *quality_outputs)
+
+    def delete_settings_template(
+        selected_template_id: str,
+        template_id_input: str,
+        delete_confirmed: bool,
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str]:
+        """删除当前模板并刷新设置页。"""
+
+        template_id = str(template_id_input or selected_template_id or "").strip()
+        if not template_id:
+            outputs = build_settings_workspace(
+                selected_template_id,
+                result_payload={"success": False, "message": "请先选择或输入模板 ID。"},
+            )
+            quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
+            return (*outputs, *quality_outputs)
+        if not delete_confirmed:
+            outputs = build_settings_workspace(
+                selected_template_id,
+                result_payload={"success": False, "message": "请先勾选“我确认删除当前模板”。"},
+            )
+            quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
+            return (*outputs, *quality_outputs)
+        try:
+            deleted_template = quality_service.delete_template(template_id)
+        except AppError as exc:
+            outputs = build_settings_workspace(
+                selected_template_id,
+                result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
+            )
+            quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
+            return (*outputs, *quality_outputs)
+        outputs = build_settings_workspace(
+            "",
+            result_payload={"success": True, "message": f'模板“{deleted_template.get("template_name") or template_id}”已删除。'},
+        )
+        quality_outputs = build_quality_template_refresh_outputs("")
+        return (*outputs, *quality_outputs)
 
     def normalize_review_action_value(action_value: str) -> str:
         """将中文审核动作转换为内部值。"""
@@ -1280,6 +1544,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_selected_review_id,
         initial_review_record_detail_html,
     ) = build_review_workspace_outputs(initial_review_candidates, initial_review_items)
+    (
+        initial_settings_template_rows,
+        initial_settings_template_state,
+        initial_settings_selected_template_id,
+        initial_settings_template_detail_html,
+        initial_settings_template_id_value,
+        initial_settings_template_name_value,
+        initial_settings_description_value,
+        initial_settings_rule_tags_value,
+        initial_settings_fulltext_top_k,
+        initial_settings_vector_top_k,
+        initial_settings_final_top_k,
+        initial_settings_use_rerank,
+        initial_settings_neighbor_window,
+        initial_settings_include_section_context,
+        initial_settings_section_max_chars,
+        initial_settings_system_prompt,
+        initial_settings_user_prompt_template,
+        initial_settings_result_html,
+        initial_settings_runtime_html,
+        initial_settings_delete_confirm,
+    ) = build_settings_workspace()
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -1550,6 +1836,76 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="review-record-detail",
                         )
 
+            with gr.Tab("功能设置"):
+                settings_template_state = gr.State(initial_settings_template_state)
+                settings_selected_template_state = gr.State(initial_settings_selected_template_id)
+                with gr.Row(elem_id="settings-top-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
+                with gr.Row(elem_id="settings-main-row", equal_height=True):
+                    with gr.Column(scale=4):
+                        settings_template_table = gr.Dataframe(
+                            headers=["模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
+                            datatype=["str"] * 6,
+                            interactive=False,
+                            row_count=0,
+                            column_count=6,
+                            label="模板列表",
+                            elem_id="settings-template-table",
+                            value=initial_settings_template_rows,
+                        )
+                        with gr.Row(elem_id="settings-list-actions"):
+                            settings_new_button = gr.Button("新建模板")
+                            settings_refresh_button = gr.Button("刷新模板")
+                    with gr.Column(scale=5):
+                        settings_template_detail = gr.HTML(
+                            value=initial_settings_template_detail_html,
+                            elem_id="settings-template-detail",
+                        )
+                        with gr.Group(elem_id="settings-template-form"):
+                            gr.Markdown("### 基础信息")
+                            with gr.Group(elem_id="settings-basic-group"):
+                                with gr.Row():
+                                    settings_template_id = gr.Textbox(label="模板 ID", value=initial_settings_template_id_value, scale=2)
+                                    settings_template_name = gr.Textbox(label="模板名称", value=initial_settings_template_name_value, scale=3)
+                                settings_template_description = gr.Textbox(label="模板说明", lines=3, value=initial_settings_description_value)
+                                settings_rule_tags = gr.Textbox(
+                                    label="规则标签",
+                                    value=initial_settings_rule_tags_value,
+                                    placeholder="多个标签用逗号、顿号或换行分隔",
+                                )
+                            gr.Markdown("### 检索策略")
+                            with gr.Group(elem_id="settings-policy-group"):
+                                with gr.Row():
+                                    settings_fulltext_top_k = gr.Number(label="全文召回", value=initial_settings_fulltext_top_k, precision=0)
+                                    settings_vector_top_k = gr.Number(label="向量召回", value=initial_settings_vector_top_k, precision=0)
+                                    settings_final_top_k = gr.Number(label="最终返回", value=initial_settings_final_top_k, precision=0)
+                                with gr.Row():
+                                    settings_neighbor_window = gr.Number(label="邻居窗口", value=initial_settings_neighbor_window, precision=0)
+                                    settings_section_max_chars = gr.Number(label="章节最大字数", value=initial_settings_section_max_chars, precision=0)
+                                with gr.Row():
+                                    settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_settings_use_rerank)
+                                    settings_include_section_context = gr.Checkbox(label="章节上下文", value=initial_settings_include_section_context)
+                            gr.Markdown("### Prompt 配置")
+                            with gr.Group(elem_id="settings-prompt-group"):
+                                settings_system_prompt = gr.Textbox(label="系统提示词", lines=8, value=initial_settings_system_prompt)
+                                settings_user_prompt_template = gr.Textbox(label="用户提示模板", lines=8, value=initial_settings_user_prompt_template)
+                            settings_delete_confirm = gr.Checkbox(
+                                label="我确认删除当前模板",
+                                value=initial_settings_delete_confirm,
+                            )
+                            with gr.Row(elem_id="settings-form-actions"):
+                                settings_save_button = gr.Button("保存模板", variant="primary")
+                                settings_delete_button = gr.Button("删除模板", variant="stop")
+                with gr.Row(elem_id="settings-bottom-row", equal_height=True):
+                    with gr.Column(scale=5):
+                        settings_result = gr.HTML(
+                            value=initial_settings_result_html,
+                            elem_id="settings-result-panel",
+                        )
+                    with gr.Column(scale=4):
+                        settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
+
         scan_button.click(
             fn=load_document_management_state,
             outputs=[
@@ -1700,6 +2056,148 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             fn=select_quality_evidence,
             inputs=[evidence_items_state],
             outputs=[claim_evidence_detail],
+        )
+        settings_refresh_button.click(
+            fn=refresh_settings_workspace,
+            inputs=[settings_selected_template_state],
+            outputs=[
+                settings_template_table,
+                settings_template_state,
+                settings_selected_template_state,
+                settings_template_detail,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+                settings_result,
+                settings_runtime,
+                settings_delete_confirm,
+            ],
+        )
+        settings_template_table.select(
+            fn=select_settings_template,
+            inputs=[settings_template_state],
+            outputs=[
+                settings_selected_template_state,
+                settings_template_detail,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+                settings_result,
+                settings_delete_confirm,
+            ],
+        )
+        settings_new_button.click(
+            fn=prepare_new_template,
+            outputs=[
+                settings_selected_template_state,
+                settings_template_detail,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+                settings_result,
+                settings_delete_confirm,
+            ],
+        )
+        settings_save_button.click(
+            fn=save_settings_template,
+            inputs=[
+                settings_selected_template_state,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+            ],
+            outputs=[
+                settings_template_table,
+                settings_template_state,
+                settings_selected_template_state,
+                settings_template_detail,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+                settings_result,
+                settings_runtime,
+                settings_delete_confirm,
+                quality_template,
+                quality_template_detail,
+            ],
+        )
+        settings_delete_button.click(
+            fn=delete_settings_template,
+            inputs=[settings_selected_template_state, settings_template_id, settings_delete_confirm],
+            outputs=[
+                settings_template_table,
+                settings_template_state,
+                settings_selected_template_state,
+                settings_template_detail,
+                settings_template_id,
+                settings_template_name,
+                settings_template_description,
+                settings_rule_tags,
+                settings_fulltext_top_k,
+                settings_vector_top_k,
+                settings_final_top_k,
+                settings_use_rerank,
+                settings_neighbor_window,
+                settings_include_section_context,
+                settings_section_max_chars,
+                settings_system_prompt,
+                settings_user_prompt_template,
+                settings_result,
+                settings_runtime,
+                settings_delete_confirm,
+                quality_template,
+                quality_template_detail,
+            ],
         )
         review_history_button.click(
             fn=list_review_workspace,

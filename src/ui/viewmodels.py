@@ -61,6 +61,22 @@ def build_template_choices(templates: list[dict]) -> list[str]:
     return [f'{item["template_id"]} | {item.get("template_name", "")}' for item in templates if item.get("template_id")]
 
 
+def build_settings_template_rows(templates: list[dict]) -> list[list[str]]:
+    """将模板列表转换为设置页表格行。"""
+
+    return [
+        [
+            _display_text(item.get("template_id")),
+            _display_text(item.get("template_name")),
+            _display_text(item.get("source_label") or item.get("source_type")),
+            _display_text(item.get("rule_tags")),
+            _display_text(item.get("retrieval_policy", {}).get("final_top_k") if isinstance(item.get("retrieval_policy", {}), dict) else None),
+            "是" if item.get("deletable", True) else "否",
+        ]
+        for item in templates
+    ]
+
+
 def normalize_search_query(query: str) -> str:
     """将多组关键词输入规范化为单个查询字符串。"""
 
@@ -166,6 +182,83 @@ def format_review_help_html() -> str:
         ],
         tone="neutral",
         min_height_px=260,
+    )
+
+
+def format_settings_help_html() -> str:
+    """构建功能设置说明面板。"""
+
+    return _build_panel_html(
+        title="功能设置",
+        description="用于维护质检模板和查看关键运行配置，优先减少改代码频率。",
+        cards=[
+            ("模板管理", "支持新增、编辑、删除模板"),
+            ("配置查看", "展示当前路径、模型与检索关键配置"),
+            ("生效方式", "模板保存后可立即在质检页选择"),
+        ],
+        notes=[
+            "建议优先维护模板名称、规则标签、检索策略和提示词。",
+            "内置模板在当前策略下也允许删除，删除后将从列表中隐藏。",
+            "运行配置当前以只读展示为主，便于确认实际生效参数。",
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
+def format_settings_runtime_html(runtime_config: dict | None) -> str:
+    """构建运行配置概览面板。"""
+
+    resolved = runtime_config or {}
+    return _build_panel_html(
+        title="运行配置",
+        description="当前为只读展示，用于确认实际生效的核心配置。",
+        cards=[
+            ("输入目录", _display_text(resolved.get("input_root"))),
+            ("模板目录", _display_text(resolved.get("templates_dir"))),
+            ("LLM Provider", _display_text(resolved.get("llm_provider"))),
+            ("Embedding", _display_text(resolved.get("embedding_provider"))),
+        ],
+        notes=[
+            f'重排：{_display_text(resolved.get("rerank_provider"))} / 启用={_display_text(resolved.get("rerank_enabled"))}',
+            f'最大输入长度：{_display_text(resolved.get("max_input_chars"))}',
+            f'审核候选抓取上限：{_display_text(resolved.get("review_candidate_limit"))}',
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
+def format_settings_template_detail_html(template: dict | None) -> str:
+    """构建设置页模板详情面板。"""
+
+    resolved = template or {}
+    if not resolved.get("template_id"):
+        return _build_panel_html(
+            title="模板详情",
+            description="请选择模板或点击新建模板。",
+            cards=[("当前状态", "未选择模板")],
+            notes=["选择模板后，这里会显示来源、规则标签和检索策略摘要。"],
+            tone="neutral",
+        )
+
+    retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+    return _build_panel_html(
+        title="模板详情",
+        description=_display_text(resolved.get("description")),
+        cards=[
+            ("模板 ID", _display_text(resolved.get("template_id"))),
+            ("模板名称", _display_text(resolved.get("template_name"))),
+            ("模板来源", _display_text(resolved.get("source_label") or resolved.get("source_type"))),
+            ("规则标签", _display_text(resolved.get("rule_tags"))),
+        ],
+        notes=[
+            f'全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
+            f'向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
+            f'最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
+            f'上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+        ],
+        tone="neutral",
     )
 
 

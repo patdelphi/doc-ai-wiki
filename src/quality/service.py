@@ -50,6 +50,16 @@ class QualityService:
 
         return self.template_service.get_template(template_id)
 
+    def save_template(self, payload: dict) -> dict:
+        """保存质检模板。"""
+
+        return self.template_service.save_template(payload)
+
+    def delete_template(self, template_id: str) -> dict:
+        """删除质检模板。"""
+
+        return self.template_service.delete_template(template_id)
+
     def run_check(
         self,
         input_text: str,

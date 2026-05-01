@@ -47,6 +47,15 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
         retrieval_service=retrieval_service,
         quality_service=quality_service,
         review_service=review_service,
+        runtime_config={
+            "input_root": str(settings.input_root),
+            "templates_dir": str(settings.templates_dir),
+            "sqlite_db_path": str(settings.sqlite_db_path),
+            "llm_provider": settings.llm_provider,
+            "embedding_provider": settings.embedding_provider,
+            "rerank_provider": settings.rerank_provider,
+            "rerank_enabled": settings.rerank_enabled,
+        },
     )
 
 

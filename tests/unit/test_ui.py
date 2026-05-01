@@ -263,6 +263,63 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "风险筛选" in labels
 
 
+def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None:
+    """系统菜单应包含功能设置页，且布局顺序符合操作主线。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    tab_labels = [
+        str(component.get("props", {}).get("label", ""))
+        for component in components
+        if component.get("type") == "tabitem"
+    ]
+
+    assert any("功能设置" in value for value in html_values)
+    assert tab_labels[-1] == "功能设置"
+    assert "settings-top-row" in elem_ids
+    assert "settings-main-row" in elem_ids
+    assert "settings-bottom-row" in elem_ids
+    assert "settings-list-actions" in elem_ids
+    assert "settings-form-actions" in elem_ids
+    assert "settings-basic-group" in elem_ids
+    assert "settings-policy-group" in elem_ids
+    assert "settings-prompt-group" in elem_ids
+    assert "settings-help-panel" in elem_ids
+    assert "settings-runtime-panel" in elem_ids
+    assert "settings-template-table" in elem_ids
+    assert "settings-template-detail" in elem_ids
+    assert "settings-template-form" in elem_ids
+    assert "模板列表" in labels
+    assert "模板 ID" in labels
+    assert "模板名称" in labels
+    assert "系统提示词" in labels
+    assert "用户提示模板" in labels
+    assert "我确认删除当前模板" in labels
+    assert elem_ids.index("settings-top-row") < elem_ids.index("settings-main-row")
+    assert elem_ids.index("settings-main-row") < elem_ids.index("settings-bottom-row")
+    assert elem_ids.index("settings-template-table") < elem_ids.index("settings-template-detail")
+    assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
+    assert elem_ids.index("settings-basic-group") < elem_ids.index("settings-policy-group")
+    assert elem_ids.index("settings-policy-group") < elem_ids.index("settings-prompt-group")
+
+
 def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp_path: Path) -> None:
     """人工审核页进入时应优先显示 AI 质检产生的可审核 Claim。"""
 
