@@ -93,8 +93,11 @@ def test_create_ui_app_should_include_database_status_module(tmp_path: Path) -> 
         for component in components
         if component.get("type") == "html"
     ]
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
 
     assert any("数据库状态" in value for value in html_values)
+    assert "document-management-help-panel" in elem_ids
+    assert any("文档管理用于查看输入文档、执行入库与重建" in value for value in html_values)
 
 
 def test_create_ui_app_should_use_html_status_panels(tmp_path: Path) -> None:
@@ -167,7 +170,12 @@ def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_pat
     assert dataframes[0].get("column_count", [])[0] == 9
     assert "search-input-panel" in elem_ids
     assert "search-top-row" in elem_ids
+    assert "search-result-workspace" in elem_ids
+    assert "search-result-row" in elem_ids
+    assert "search-export-row" in elem_ids
+    assert "search-export-result" in elem_ids
     assert elem_ids.index("search-help-panel") < elem_ids.index("search-result-summary")
+    assert elem_ids.index("search-top-row") < elem_ids.index("search-result-workspace")
     assert elem_ids.index("search-result-summary") < elem_ids.index("search-results-table")
     assert elem_ids.index("search-results-table") < elem_ids.index("search-result-detail")
 
@@ -207,6 +215,8 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-history-row" in elem_ids
     assert "quality-help-panel" in elem_ids
     assert "quality-template-panel" in elem_ids
+    assert "quality-main-workspace" in elem_ids
+    assert "quality-followup-workspace" in elem_ids
     assert "quality-progress-panel" in elem_ids
     assert "quality-result-panel" in elem_ids
     assert "quality-claims-table" in elem_ids
@@ -215,6 +225,10 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-history-note" in elem_ids
     assert "quality-evidence-table" in elem_ids
     assert "quality-evidence-detail" in elem_ids
+    assert "quality-export-result" in elem_ids
+    assert "quality-evaluation-export-result" in elem_ids
+    assert elem_ids.index("quality-template-row") < elem_ids.index("quality-main-workspace")
+    assert elem_ids.index("quality-main-workspace") < elem_ids.index("quality-followup-workspace")
 
 
 def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None:
@@ -240,11 +254,12 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
 
-    assert any("先从可审核记录列表中选择一条 Claim" in value for value in html_values)
+    assert any("人工审核用于处理 AI 质检产生的待审核 Claim" in value for value in html_values)
     assert "review-top-row" in elem_ids
     assert "review-summary-row" in elem_ids
     assert "review-record-row" in elem_ids
     assert "review-evidence-row" in elem_ids
+    assert "review-focus-panel" in elem_ids
     assert "review-action-panel" in elem_ids
     assert "review-help-panel" in elem_ids
     assert "review-result-panel" in elem_ids
@@ -255,12 +270,15 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "review-history-table" in elem_ids
     assert "review-evidence-table" in elem_ids
     assert "review-evidence-detail" in elem_ids
+    assert "review-export-result" in elem_ids
     assert "最近审核定位" not in labels
     assert "待处理记录" in labels
     assert "已处理 Claim" in labels
     assert "已审核记录" in labels
     assert "列表范围" in labels
     assert "风险筛选" in labels
+    assert elem_ids.index("review-focus-panel") < elem_ids.index("review-evidence-row")
+    assert elem_ids.index("review-evidence-row") < elem_ids.index("review-record-row")
 
 
 def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None:
@@ -293,6 +311,9 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
 
     assert any("功能设置" in value for value in html_values)
     assert tab_labels[-1] == "功能设置"
+    assert "settings-overview-panel" in elem_ids
+    assert "settings-workspace-panel" in elem_ids
+    assert "settings-footer-panel" in elem_ids
     assert "settings-top-row" in elem_ids
     assert "settings-main-row" in elem_ids
     assert "settings-bottom-row" in elem_ids
@@ -306,14 +327,19 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-template-table" in elem_ids
     assert "settings-template-detail" in elem_ids
     assert "settings-template-form" in elem_ids
+    assert "settings-export-row" in elem_ids
+    assert "settings-export-result" in elem_ids
     assert "模板列表" in labels
     assert "模板 ID" in labels
     assert "模板名称" in labels
     assert "系统提示词" in labels
     assert "用户提示模板" in labels
     assert "我确认删除当前模板" in labels
+    assert elem_ids.index("settings-overview-panel") < elem_ids.index("settings-workspace-panel")
+    assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-footer-panel")
     assert elem_ids.index("settings-top-row") < elem_ids.index("settings-main-row")
     assert elem_ids.index("settings-main-row") < elem_ids.index("settings-bottom-row")
+    assert elem_ids.index("settings-help-panel") < elem_ids.index("settings-runtime-panel")
     assert elem_ids.index("settings-template-table") < elem_ids.index("settings-template-detail")
     assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
     assert elem_ids.index("settings-basic-group") < elem_ids.index("settings-policy-group")
@@ -321,7 +347,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
 
 
 def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
-    """文档管理页应提供入库质检折叠区、批量质检和阈值配置。"""
+    """文档管理页应提供突出显示的当前文档区，以及底部折叠的入库质检区。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -347,7 +373,11 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
         if component.get("type") == "html"
     ]
 
+    assert "document-current-panel" in elem_ids
+    assert "document-current-title" in elem_ids
     assert "document-quality-accordion" in elem_ids
+    assert "document-quality-panel" in elem_ids
+    assert "document-quality-top-actions" in elem_ids
     assert "document-quality-report" in elem_ids
     assert "document-quality-checks" in elem_ids
     assert "document-quality-sections-table" in elem_ids
@@ -360,6 +390,9 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-quality-config-panel" in elem_ids
     assert "document-quality-config-result" in elem_ids
     assert "document-quality-config-form" in elem_ids
+    assert "document-quality-export-result" in elem_ids
+    assert "document-quality-batch-export-result" in elem_ids
+    assert "document-quality-config-export-result" in elem_ids
     assert "章节抽样" in labels
     assert "分块抽样" in labels
     assert "文档内检索验证" in labels
@@ -372,6 +405,51 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "过短分块阈值" in labels
     assert "过短分块告警起点" in labels
     assert any("入库质检" in value for value in html_values)
+    assert any("当前选中文档" in str(component.get("props", {}).get("value", "")) for component in components)
+
+
+def test_create_ui_app_should_include_quality_evaluation_workspace(tmp_path: Path) -> None:
+    """AI 质检页应提供效果评测输入、摘要和明细表。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    template_dropdowns = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dropdown" and component.get("props", {}).get("label") == "质检模板"
+    ]
+
+    assert "quality-evaluation-panel" in elem_ids
+    assert "quality-evaluation-help" in elem_ids
+    assert "quality-evaluation-summary" in elem_ids
+    assert "quality-evaluation-table" in elem_ids
+    assert "效果评测样例 JSON" in labels
+    assert "效果评测明细" in labels
+    assert template_dropdowns
+    assert "general_fact_check" in str(template_dropdowns[0].get("value"))
+
+    evaluation_help_panels = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "html" and component.get("props", {}).get("elem_id") == "quality-evaluation-help"
+    ]
+    assert evaluation_help_panels
+    assert "效果评测用于验证 AI 质检结果是否符合你的预期" in str(evaluation_help_panels[0].get("value", ""))
+    assert "核心命中" in str(evaluation_help_panels[0].get("value", ""))
+    assert "宽松命中" in str(evaluation_help_panels[0].get("value", ""))
 
 
 def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp_path: Path) -> None:
@@ -524,10 +602,10 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
     )
     claim_rows = pd.DataFrame(
         [
-            ["claim_1", "第一条 Claim", "rejected", "high", "1.000", "标题一", "section-1:chunk-1"],
-            ["claim_2", "第二条 Claim", "needs_review", "medium", "0.800", "标题二", "section-2:chunk-2"],
+            ["claim_1", "第一条 Claim", "rejected", "high", "1.000", "contradict", "标题一", "section-1:chunk-1"],
+            ["claim_2", "第二条 Claim", "needs_review", "medium", "0.800", "insufficient", "标题二", "section-2:chunk-2"],
         ],
-        columns=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "来源文档", "来源位置"],
+        columns=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
     )
     claim_detail_map = {
         "claim_1": {
@@ -536,6 +614,7 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
             "verdict": "rejected",
             "risk_level": "high",
             "confidence": 1.0,
+            "evidence_judgement": "contradict",
             "review_status": "pending",
             "source_doc": "标题一",
             "source_span": "section-1:chunk-1",
@@ -546,9 +625,12 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
                     "chunk_id": "chunk_1",
                     "doc_title": "标题一",
                     "source_span": "section-1:chunk-1",
+                    "evidence_relation": "contradict",
                     "retrieval_source": "vector",
                     "matched_sources": ["vector"],
+                    "matched_queries": ["claim_literal"],
                     "rerank_score": None,
+                    "relation_reason": "存在反证。",
                     "content_preview": "第一条证据内容",
                 }
             ],
@@ -559,6 +641,7 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
             "verdict": "needs_review",
             "risk_level": "medium",
             "confidence": 0.8,
+            "evidence_judgement": "insufficient",
             "review_status": "pending",
             "source_doc": "标题二",
             "source_span": "section-2:chunk-2",
@@ -569,29 +652,38 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
                     "chunk_id": "chunk_2",
                     "doc_title": "标题二",
                     "source_span": "section-2:chunk-2",
+                    "evidence_relation": "insufficient",
                     "retrieval_source": "fulltext",
                     "matched_sources": ["fulltext"],
+                    "matched_queries": ["logic_relaxed"],
                     "rerank_score": 0.7,
+                    "relation_reason": "边界证据不足。",
                     "content_preview": "第二条证据内容",
                 }
             ],
         },
     }
     event = gr.SelectData(None, {"index": [1, 0], "value": "claim_2"})
+    formatted_result = {"check": {"overall_verdict": "needs_review", "risk_level": "medium"}}
 
-    claim_view, evidence_rows, review_view, selected_claim_id, evidence_items, evidence_detail = select_handler(
+    claim_view, evidence_rows, review_view, selected_claim_id, evidence_items, evidence_detail, evaluation_cases = select_handler(
         claim_rows,
         claim_detail_map,
+        formatted_result,
         event,
     )
 
     assert selected_claim_id == "claim_2"
     assert "第二条 Claim" in claim_view
+    assert "证据关系" in claim_view
+    assert "证据不足" in claim_view
     assert "section-2:chunk-2" in claim_view
     assert "第二条 Claim" in review_view
     assert len(evidence_items) == 1
     assert "第二条证据内容" in evidence_detail
-    assert evidence_rows == [["chunk_2", "标题二", "section-2:chunk-2", "fulltext", "fulltext", "0.700", "第二条证据内容"]]
+    assert evidence_rows == [["chunk_2", "标题二", "section-2:chunk-2", "证据不足", "fulltext", "logic_relaxed", "0.700", "第二条证据内容"]]
+    assert "claim_2" in evaluation_cases
+    assert "第二条 Claim" in evaluation_cases
 
 
 def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path: Path) -> None:
@@ -618,18 +710,24 @@ def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path:
             "chunk_id": "chunk_1",
             "doc_title": "标题一",
             "source_span": "section-1:chunk-1",
+            "evidence_relation": "support",
             "retrieval_source": "vector",
             "matched_sources": ["vector"],
+            "matched_queries": ["claim_literal"],
             "rerank_score": None,
+            "relation_reason": "直接支持。",
             "content_preview": "第一条证据内容",
         },
         {
             "chunk_id": "chunk_2",
             "doc_title": "标题二",
             "source_span": "section-2:chunk-2",
+            "evidence_relation": "contradict",
             "retrieval_source": "fulltext",
             "matched_sources": ["fulltext"],
+            "matched_queries": ["logic_relaxed"],
             "rerank_score": 0.7,
+            "relation_reason": "出现反证。",
             "content_preview": "第二条证据内容",
         },
     ]
@@ -640,6 +738,7 @@ def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path:
     assert "证据详情" in evidence_detail
     assert "标题二" in evidence_detail
     assert "section-2:chunk-2" in evidence_detail
+    assert "矛盾" in evidence_detail
     assert "第二条证据内容" in evidence_detail
 
 
@@ -678,6 +777,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
                     "verdict": "supported",
                     "risk_level": "low",
                     "confidence": 0.95,
+                    "evidence_judgement": "support",
                     "evidence": "第一条证据摘要",
                     "evidence_reason": "第一条说明",
                     "source_doc": "文档一",
@@ -688,9 +788,12 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
                             "chunk_id": "chunk_a1",
                             "doc_title": "文档一",
                             "source_span": "section-1",
+                            "evidence_relation": "support",
                             "retrieval_source": "vector",
                             "matched_sources": ["vector"],
+                            "matched_queries": ["claim_literal"],
                             "rerank_score": 0.91,
+                            "relation_reason": "直接支持。",
                             "content_preview": "第一条证据内容",
                         }
                     ],
@@ -712,6 +815,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
                     "verdict": "needs_review",
                     "risk_level": "medium",
                     "confidence": 0.82,
+                    "evidence_judgement": "insufficient",
                     "evidence": "第二条证据摘要",
                     "evidence_reason": "第二条说明",
                     "source_doc": "文档二",
@@ -722,9 +826,12 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
                             "chunk_id": "chunk_b1",
                             "doc_title": "文档二",
                             "source_span": "section-2",
+                            "evidence_relation": "contradict",
                             "retrieval_source": "fulltext",
                             "matched_sources": ["fulltext"],
+                            "matched_queries": ["logic_relaxed"],
                             "rerank_score": 0.73,
+                            "relation_reason": "补充检索命中反证。",
                             "content_preview": "第二条证据内容",
                         }
                     ],
@@ -737,6 +844,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     (
         progress_html,
         result_html,
+        formatted_result,
         claim_rows,
         selected_claim_id,
         claim_detail_map,
@@ -745,17 +853,21 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
         review_view,
         evidence_items,
         evidence_detail_html,
+        evaluation_cases,
     ) = select_handler(recent_results, event)
 
     assert "已加载历史质检记录" in progress_html
     assert "模板二" in result_html
+    assert formatted_result["check"]["check_id"] == "chkres_b"
     assert "第二条 Claim" in claim_detail_html
+    assert "证据关系" in claim_detail_html
     assert "第二条 Claim" in review_view
     assert selected_claim_id.startswith("claim_b1 |")
     assert "claim_b1" in claim_detail_map
-    assert claim_rows == [["claim_b1", "第二条 Claim", "需复核", "中级", "0.820", "文档二", "section-2"]]
-    assert evidence_rows == [["chunk_b1", "文档二", "section-2", "fulltext", "fulltext", "0.730", "第二条证据内容"]]
+    assert claim_rows == [["claim_b1", "第二条 Claim", "需复核", "中级", "0.820", "证据不足", "文档二", "section-2"]]
+    assert evidence_rows == [["chunk_b1", "文档二", "section-2", "矛盾", "fulltext", "logic_relaxed", "0.730", "第二条证据内容"]]
     assert len(evidence_items) == 1
+    assert "claim_b1" in evaluation_cases
     assert "第二条证据内容" in evidence_detail_html
 
 
@@ -847,7 +959,7 @@ def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path:
     assert selected_claim_id == "claim_review_b"
     assert "claim_review_b" in review_claim_detail_map
     assert "第二条 Claim" in review_claim_detail_html
-    assert review_evidence_rows == [["section-2", "文档二", "section-2", "history", "history", "-", "第二条证据摘要"]]
+    assert review_evidence_rows == [["section-2", "文档二", "section-2", "证据不足", "history", "history", "-", "第二条证据摘要"]]
     assert len(review_evidence_items) == 1
     assert "第二条证据摘要" in review_evidence_detail_html
     assert review_action_value == "通过"
@@ -954,7 +1066,7 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
     assert selected_claim_id == "claim_pending_high"
     assert "claim_pending_high" in review_claim_detail_map
     assert "高风险待处理 Claim" in review_claim_detail_html
-    assert review_evidence_rows == [["section-1", "文档一", "section-1", "history", "history", "-", "高风险证据"]]
+    assert review_evidence_rows == [["section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "高风险证据"]]
     assert len(review_evidence_items) == 1
     assert "高风险证据" in review_evidence_detail_html
     assert review_action_value == "通过"
@@ -1254,7 +1366,7 @@ def test_review_history_select_handler_should_restore_selected_record(tmp_path: 
     assert "第一条 Claim" in review_claim_detail_html
     assert review_action_value == "通过"
     assert review_note_value == "确认通过"
-    assert review_evidence_rows == [["section-1", "文档一", "section-1", "history", "history", "-", "第一条证据摘要"]]
+    assert review_evidence_rows == [["section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "第一条证据摘要"]]
     assert len(review_evidence_items) == 1
     assert "第一条证据摘要" in review_evidence_detail_html
 

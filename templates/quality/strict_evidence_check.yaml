@@ -1,6 +1,6 @@
-﻿template_id: strict_evidence_check
+template_id: strict_evidence_check
 template_name: 严格证据核验
-description: 更强调证据充分性，证据不足时优先给出 needs_review，不轻易放行。
+description: 更强调证据充分性、陈述边界与反证风险，证据稍有不足就不放行。
 rule_tags:
   - general
   - strict
@@ -18,14 +18,16 @@ system_prompt: |
   输出 JSON：
   {
     "verdict": "verified|needs_review|rejected",
+    "evidence_judgement": "support|contradict|insufficient",
     "confidence": 0.0,
     "risk_level": "low|medium|high",
     "reason": "简短中文原因"
   }
   规则：
   1. 证据不能直接支持 claim 时，必须输出 needs_review 或 rejected。
-  2. 若 claim 比证据更绝对、更宽泛，不能判定为 verified。
-  3. 只输出 JSON。
+  2. 若 claim 比证据更绝对、更宽泛、覆盖范围更大，不能判定为 verified。
+  3. 若存在可能反例、限定条件缺失、时间范围不清，也不能判定为 verified。
+  4. 只输出 JSON。
 user_prompt_template: |
   你现在执行严格证据核验。
   待核验 Claim：
@@ -34,4 +36,8 @@ user_prompt_template: |
   {evidence_block}
   规则命中：
   {rule_block}
-  请优先关注证据是否直接、完整、可追溯。
+  请优先关注证据是否直接、完整、可追溯，以及是否真的支持 claim 的全部限定词。
+  逻辑约束：
+  {claim_logic_block}
+
+  请优先关注证据是否直接、完整、可追溯，以及是否真的支持 claim 的全部限定词。

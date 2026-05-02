@@ -22,32 +22,46 @@ from src.ui.viewmodels import (
     build_template_choices,
     format_ingest_result,
     format_search_help_html,
+    format_search_export_markdown,
     format_search_result_detail_html,
     format_search_results,
     format_quality_result,
+    format_quality_export_markdown,
+    format_quality_evaluation_export_markdown,
     format_recent_quality_checks,
     format_claim_detail_for_review,
     format_claim_detail_html,
     format_claim_detail_markdown,
     format_database_summary_html,
     format_database_summary_markdown,
+    format_document_management_help_html,
     format_document_detail_html,
     format_document_quality_batch_summary_html,
+    format_document_quality_batch_summary_markdown,
     format_document_detail_markdown,
+    format_document_quality_config_markdown,
     format_document_quality_config_html,
+    format_document_quality_checks_markdown,
     format_document_quality_checks_html,
+    format_document_quality_report_markdown,
     format_document_quality_report_html,
+    format_document_quality_search_summary_markdown,
     format_document_quality_search_summary_html,
     format_document_summary_html,
     format_document_summary_markdown,
     format_operation_result_html,
     format_operation_result_markdown,
     format_quality_help_html,
+    format_quality_evaluation_help_html,
+    format_quality_evaluation_summary_html,
     format_quality_progress_html,
     format_review_candidates,
     format_review_history,
+    format_review_record_detail_markdown,
     format_settings_help_html,
+    format_settings_runtime_markdown,
     format_settings_runtime_html,
+    format_settings_template_detail_markdown,
     format_settings_template_detail_html,
     get_document_detail,
     get_claim_detail,
@@ -58,6 +72,7 @@ from src.ui.viewmodels import (
     parse_document_choice,
     build_settings_template_rows,
     format_quality_template_html,
+    build_quality_evaluation_rows,
     normalize_search_query,
     scan_input_documents,
 )
@@ -387,6 +402,77 @@ def test_document_quality_batch_and_config_helpers_should_render_summary() -> No
     assert "ingest_quality.yaml" in config_html
 
 
+def test_document_quality_review_and_settings_markdown_helpers_should_render_export_text() -> None:
+    """入库质检、审核记录和功能设置应能输出下载用 Markdown。"""
+
+    report = {
+        "document": {"doc_title": "阿胶本草", "doc_uid": "doc_1"},
+        "metrics": {
+            "section_count": 3,
+            "chunk_count": 8,
+            "fts_chunk_count": 8,
+            "vector_chunk_count": 8,
+            "avg_chunk_chars": 128,
+            "avg_chunks_per_section": 2.7,
+        },
+        "summary": {"message": "结构与索引完整"},
+        "checks": [{"name": "章节解析", "message": "已解析 3 个章节。", "passed": True}],
+        "issues": [{"message": "建议继续抽样确认。"}],
+        "first_section_title": "总论",
+        "last_section_title": "附录",
+    }
+    batch_result = {"summary": {"document_count": 2, "success_count": 1, "warning_count": 1, "danger_count": 0}}
+    config = {
+        "sample_limit": 3,
+        "long_document_char_threshold": 2000,
+        "min_sections_for_long_doc": 5,
+        "max_avg_chunks_per_section": 8,
+        "max_chunk_chars": 1200,
+        "short_chunk_chars": 60,
+        "short_chunk_warn_min_chunk_count": 4,
+        "config_path": "templates/settings/ingest_quality.yaml",
+    }
+    runtime_config = {
+        "input_root": "Input",
+        "templates_dir": "templates",
+        "llm_provider": "openai",
+        "embedding_provider": "openai",
+        "rerank_provider": "bge",
+        "rerank_enabled": True,
+        "max_input_chars": 2000,
+        "review_candidate_limit": 200,
+    }
+    template = {
+        "template_id": "tpl_1",
+        "template_name": "严格证据核验",
+        "source_label": "用户模板",
+        "rule_tags": ["medical", "risk"],
+        "description": "用于严格校验医疗相关表述。",
+        "retrieval_policy": {"fulltext_top_k": 5, "vector_top_k": 10, "final_top_k": 6, "context_mode": "section"},
+    }
+    review_record = {
+        "review_id": "review_1",
+        "claim_id": "claim_1",
+        "check_id": "check_1",
+        "review_action": "reject",
+        "review_status": "reviewed",
+        "reviewer": "tester",
+        "created_at": "2026-05-01T12:00:00+00:00",
+        "template_name": "严格证据核验",
+        "claim_text": "阿胶可以治疗所有贫血",
+        "review_note": "证据不足",
+    }
+
+    assert "### 入库质检" in format_document_quality_report_markdown(report)
+    assert "#### 检查项" in format_document_quality_checks_markdown(report)
+    assert "### 文档内检索验证" in format_document_quality_search_summary_markdown({"count": 2, "query_text": "阿胶"}, doc_title="阿胶本草")
+    assert "### 批量入库质检" in format_document_quality_batch_summary_markdown(batch_result)
+    assert "### 质检阈值" in format_document_quality_config_markdown(config)
+    assert "### 运行配置" in format_settings_runtime_markdown(runtime_config)
+    assert "### 模板详情" in format_settings_template_detail_markdown(template)
+    assert "### 审核记录详情" in format_review_record_detail_markdown(review_record)
+
+
 def test_database_summary_html_should_generate_card_layout() -> None:
     """数据库状态应支持卡片式 HTML 展示。"""
 
@@ -420,7 +506,7 @@ def test_search_helpers_should_normalize_query_and_build_help_panel() -> None:
     help_html = format_search_help_html()
 
     assert normalized == "阿胶 补血 驴皮 古籍"
-    assert "支持关键词、短语、整句" in help_html
+    assert "支持关键词、短语、整句和多组关键词" in help_html
     assert "不支持正则表达式" in help_html
     assert "多组关键词" in help_html
     assert "font-size:20px" not in help_html
@@ -444,10 +530,10 @@ def test_template_choice_helpers_should_build_and_parse_template_id() -> None:
     """应能构建并解析模板下拉选项。"""
 
     choices = build_template_choices(
-        [{"template_id": "general_fact_check", "template_name": "通用事实核验"}]
+        [{"template_id": "general_fact_check", "template_name": "通用事实核检"}]
     )
 
-    assert choices == ["general_fact_check | 通用事实核验"]
+    assert choices == ["general_fact_check | 通用事实核检"]
     assert parse_template_choice(choices[0]) == "general_fact_check"
 
 
@@ -586,6 +672,7 @@ def test_claim_detail_helpers_should_return_selected_claim_detail() -> None:
                 "verdict": "needs_review",
                 "risk_level": "medium",
                 "confidence": 0.5,
+                "evidence_judgement": "insufficient",
                 "evidence": "证据摘要",
                 "evidence_reason": "heuristic",
                 "evidence_details": [{"chunk_id": "chk_1"}],
@@ -612,6 +699,7 @@ def test_format_claim_detail_for_review_should_build_summary_and_evidence_table(
                 "verdict": "needs_review",
                 "risk_level": "medium",
                 "confidence": 0.5,
+                "evidence_judgement": "insufficient",
                 "evidence": "证据摘要",
                 "evidence_reason": "heuristic",
                 "evidence_details": [
@@ -619,7 +707,10 @@ def test_format_claim_detail_for_review_should_build_summary_and_evidence_table(
                         "chunk_id": "chk_1",
                         "doc_uid": "doc_1",
                         "doc_title": "标题一",
+                        "evidence_relation": "contradict",
+                        "relation_reason": "存在反证。",
                         "matched_sources": ["fulltext", "vector"],
+                        "matched_queries": ["claim_literal", "logic_relaxed"],
                         "rerank_score": 0.9,
                     }
                 ],
@@ -631,7 +722,10 @@ def test_format_claim_detail_for_review_should_build_summary_and_evidence_table(
 
     assert detail["summary"]["claim_id"] == "claim_1"
     assert detail["evidence_count"] == 1
-    assert detail["evidence_table"][0]["matched_sources"] == ["fulltext", "vector"]
+    assert detail["summary"]["evidence_judgement"] == "insufficient"
+    assert detail["evidence_table"][0]["matched_sources"] == "fulltext、vector"
+    assert detail["evidence_table"][0]["matched_queries"] == "claim_literal、logic_relaxed"
+    assert detail["evidence_table"][0]["evidence_relation"] == "contradict"
 
 
 def test_claim_display_helpers_should_generate_markdown_and_rows() -> None:
@@ -645,6 +739,7 @@ def test_claim_display_helpers_should_generate_markdown_and_rows() -> None:
                 "verdict": "needs_review",
                 "risk_level": "medium",
                 "confidence": 0.5,
+                "evidence_judgement": "contradict",
                 "review_status": "pending",
                 "source_doc": "标题一",
                 "source_span": "章节1",
@@ -661,8 +756,10 @@ def test_claim_display_helpers_should_generate_markdown_and_rows() -> None:
                     "chunk_id": "chk_1",
                     "doc_title": "标题一",
                     "source_span": "章节1",
+                    "evidence_relation": "contradict",
                     "retrieval_source": "hybrid",
-                    "matched_sources": ["fulltext", "vector"],
+                    "matched_queries": "claim_literal、logic_relaxed",
+                    "matched_sources": "fulltext、vector",
                     "rerank_score": 0.91,
                     "content_preview": "证据内容",
                 }
@@ -671,8 +768,9 @@ def test_claim_display_helpers_should_generate_markdown_and_rows() -> None:
     )
 
     assert "Claim ID：claim_1" in detail_markdown
+    assert "证据关系：矛盾" in detail_markdown
     assert "证据条数：1" in detail_markdown
-    assert evidence_rows == [["chk_1", "标题一", "章节1", "hybrid", "fulltext、vector", "0.910", "证据内容"]]
+    assert evidence_rows == [["chk_1", "标题一", "章节1", "矛盾", "hybrid", "claim_literal、logic_relaxed", "0.910", "证据内容"]]
 
 
 def test_claim_detail_html_should_generate_card_layout() -> None:
@@ -831,6 +929,24 @@ def test_operation_result_html_should_show_pending_state_when_not_started() -> N
     assert "失败" not in operation_html
 
 
+def test_operation_result_html_should_render_download_link_when_present() -> None:
+    """下载结果应渲染可点击链接。"""
+
+    operation_html = format_operation_result_html(
+        {
+            "success": True,
+            "message": "已生成下载文件",
+            "download_url": "http://127.0.0.1:7860/gradio_api/file=C:/demo/result.txt",
+            "download_file_name": "result.txt",
+        },
+        title="下载结果",
+    )
+
+    assert "下载文件" in operation_html
+    assert "href=" in operation_html
+    assert "result.txt" in operation_html
+
+
 def test_document_management_helpers_should_return_detail_and_button_states() -> None:
     """文档管理辅助函数应能返回详情与按钮状态。"""
 
@@ -878,6 +994,7 @@ def test_quality_display_helpers_should_build_claim_rows() -> None:
                     "verdict": "needs_review",
                     "risk_level": "medium",
                     "confidence": 0.55,
+                    "evidence_judgement": "insufficient",
                     "source_doc": "标题一",
                     "source_span": "章节1",
                 }
@@ -887,13 +1004,14 @@ def test_quality_display_helpers_should_build_claim_rows() -> None:
 
     rows = build_quality_claim_rows(formatted)
 
-    assert rows == [["claim_1", "第一条结论", "需复核", "中级", "0.550", "标题一", "章节1"]]
+    assert rows == [["claim_1", "第一条结论", "需复核", "中级", "0.550", "证据不足", "标题一", "章节1"]]
 
 
 def test_quality_help_and_template_panels_should_be_human_readable() -> None:
     """AI 质检说明和模板内容应展示给普通用户。"""
 
     help_html = format_quality_help_html()
+    evaluation_help_html = format_quality_evaluation_help_html()
     template_html = format_quality_template_html(
         {
             "template_id": "strict_evidence_check",
@@ -913,8 +1031,16 @@ def test_quality_help_and_template_panels_should_be_human_readable() -> None:
             "user_prompt_template": "用户提示模板内容",
         }
     )
+    document_help_html = format_document_management_help_html()
 
     assert "AI 质检会把输入内容拆成多条 Claim" in help_html
+    assert "效果评测用于验证 AI 质检结果是否符合你的预期" in evaluation_help_html
+    assert "核心命中" in evaluation_help_html
+    assert "宽松命中" in evaluation_help_html
+    assert "完全命中" in evaluation_help_html
+    assert "为什么会出现 0 条完全命中" in evaluation_help_html
+    assert "预期结论 / 预期风险 / 预期 Claim 数" in evaluation_help_html
+    assert "文档管理用于查看输入文档、执行入库与重建" in document_help_html
     assert "严格证据核验" in template_html
     assert "系统提示词" in template_html
     assert "用户提示模板" in template_html
@@ -944,6 +1070,196 @@ def test_quality_progress_panel_should_show_stage_and_model_status() -> None:
     assert "2/3" in progress_html
     assert "正在调用模型" in progress_html
     assert "阿胶可以治疗所有贫血" in progress_html
+
+
+def test_search_and_quality_export_markdown_should_include_summary_table_and_detail() -> None:
+    """检索和 AI 质检导出内容应汇总摘要、表格和详情。"""
+
+    formatted_search = format_search_results(
+        [
+            {
+                "chunk_id": "chk_1",
+                "doc_uid": "doc_1",
+                "doc_title": "阿胶本草",
+                "source_name": "阿胶本草",
+                "source_span": "section-1:chunk-0",
+                "retrieval_source": "hybrid",
+                "matched_sources": ["fts", "vector"],
+                "score": 0.88,
+                "rerank_score": 0.91,
+                "section_title": "总论",
+                "content": "阿胶相关内容",
+            }
+        ],
+        query_text="阿胶",
+    )
+    search_markdown = format_search_export_markdown(formatted_search, formatted_search["table"][0], query_text="阿胶")
+
+    formatted_quality = format_quality_result(
+        {
+            "check": {
+                "check_id": "check_1",
+                "template_name": "严格证据核验",
+                "overall_verdict": "needs_review",
+                "summary": "存在需要复核的说法",
+            },
+            "claims": [
+                {
+                    "claim_id": "claim_1",
+                    "claim_text": "阿胶可以治疗所有贫血",
+                    "verdict": "needs_review",
+                    "risk_level": "high",
+                    "confidence": 0.45,
+                    "evidence_judgement": "contradict",
+                    "source_doc": "阿胶本草",
+                    "source_span": "section-2",
+                    "evidence": "证据摘要",
+                    "evidence_reason": "证据不足",
+                    "evidence_details": [
+                        {
+                            "chunk_id": "chk_1",
+                            "doc_uid": "doc_1",
+                            "doc_title": "阿胶本草",
+                            "source_span": "section-2",
+                            "evidence_relation": "contradict",
+                            "retrieval_source": "hybrid",
+                            "matched_sources": ["vector"],
+                            "matched_queries": ["logic_relaxed"],
+                            "rerank_score": 0.82,
+                            "relation_reason": "补充检索发现反证。",
+                            "context_mode": "chunk_only",
+                            "section_title": "辨伪",
+                            "content_preview": "证据内容",
+                        }
+                    ],
+                }
+            ],
+            "rule_hits": [],
+        }
+    )
+    claim_detail = format_claim_detail_for_review("claim_1", formatted_quality["claim_detail_map"])
+    quality_markdown = format_quality_export_markdown(
+        formatted_quality,
+        claim_detail,
+        claim_detail["evidence_table"][0],
+    )
+    evaluation_markdown = format_quality_evaluation_export_markdown(
+        {
+            "summary": {
+                "case_count": 1,
+                "overall_verdict_match_count": 1,
+                "risk_level_match_count": 1,
+                "claim_count_match_count": 1,
+                "exact_match_count": 1,
+            },
+            "rows": [
+                {
+                    "case_id": "case_1",
+                    "input_text": "阿胶具有补血作用。",
+                    "expected_overall_verdict": "passed",
+                    "actual_overall_verdict": "passed",
+                    "expected_risk_level": "low",
+                    "actual_risk_level": "low",
+                    "expected_claim_count": 1,
+                    "actual_claim_count": 1,
+                    "all_matched": True,
+                }
+            ],
+        }
+    )
+
+    assert "### 检索结果" in search_markdown
+    assert "#### 结果列表" in search_markdown
+    assert "阿胶本草" in search_markdown
+    assert "#### 原文详情" in search_markdown
+    assert "### 质检结果" in quality_markdown
+    assert "#### Claim 列表" in quality_markdown
+    assert "阿胶可以治疗所有贫血" in quality_markdown
+    assert "证据关系" in quality_markdown
+    assert "#### 当前证据详情" in quality_markdown
+    assert "### 效果评测" in evaluation_markdown
+    assert "核心命中" in evaluation_markdown
+    assert "宽松命中" in evaluation_markdown
+    assert "#### 评测明细" in evaluation_markdown
+
+
+def test_quality_evaluation_helpers_should_render_summary_and_rows() -> None:
+    """AI 质检效果评测应输出摘要卡片和逐条明细。"""
+
+    evaluation_result = {
+        "summary": {
+            "case_count": 2,
+            "overall_verdict_match_count": 1,
+            "risk_level_match_count": 2,
+            "claim_count_match_count": 1,
+            "exact_match_count": 1,
+        },
+        "rows": [
+            {
+                "case_id": "case_pass",
+                "input_text": "第一条结论。",
+                "expected_overall_verdict": "passed",
+                "actual_overall_verdict": "passed",
+                "expected_risk_level": "low",
+                "actual_risk_level": "low",
+                "expected_claim_count": 1,
+                "actual_claim_count": 1,
+                "overall_verdict_matched": True,
+                "risk_level_matched": True,
+                "claim_count_matched": True,
+                "all_matched": True,
+            },
+            {
+                "case_id": "case_diff",
+                "input_text": "第二条。第三条。",
+                "expected_overall_verdict": "needs_review",
+                "actual_overall_verdict": "passed",
+                "expected_risk_level": "low",
+                "actual_risk_level": "low",
+                "expected_claim_count": 1,
+                "actual_claim_count": 2,
+                "overall_verdict_matched": False,
+                "risk_level_matched": True,
+                "claim_count_matched": False,
+                "all_matched": False,
+            },
+        ],
+    }
+
+    summary_html = format_quality_evaluation_summary_html(evaluation_result)
+    rows = build_quality_evaluation_rows(evaluation_result)
+
+    assert "效果评测" in summary_html
+    assert "核心命中" in summary_html
+    assert "宽松命中" in summary_html
+    assert "完全命中" in summary_html
+    assert "结论命中率" in summary_html
+    assert "主要失败原因" in summary_html
+    assert rows[0] == [
+        "case_pass",
+        "通过",
+        "通过",
+        "是",
+        "低级",
+        "低级",
+        "是",
+        "1",
+        "1",
+        "是",
+        "是",
+        "是",
+        "三项均命中",
+        "无需排查",
+        "第一条结论。",
+    ]
+    assert rows[1][0] == "case_diff"
+    assert rows[1][3] == "否"
+    assert rows[1][6] == "是"
+    assert rows[1][9] == "否"
+    assert rows[1][10] == "否"
+    assert rows[1][11] == "否"
+    assert "结论不一致" in rows[1][12]
+    assert "拆分" in rows[1][13]
 
 
 def test_settings_helpers_should_generate_runtime_panel_and_template_rows() -> None:
@@ -978,7 +1294,7 @@ def test_settings_helpers_should_generate_runtime_panel_and_template_rows() -> N
     assert rows == [["custom_review", "自定义模板", "自定义", "general、strict", "5", "是"]]
     assert "运行配置" in runtime_html
     assert "审核候选抓取上限：200" in runtime_html
-    assert "功能设置" in help_html
+    assert "功能说明" in help_html
     assert "模板管理" in help_html
 
 
@@ -988,7 +1304,7 @@ def test_settings_template_detail_should_generate_readable_card() -> None:
     detail_html = format_settings_template_detail_html(
         {
             "template_id": "general_fact_check",
-            "template_name": "通用事实核验",
+            "template_name": "通用事实核检",
             "description": "用于常规内容核验。",
             "source_label": "内置",
             "rule_tags": ["general"],
@@ -1004,6 +1320,6 @@ def test_settings_template_detail_should_generate_readable_card() -> None:
     )
 
     assert "模板详情" in detail_html
-    assert "通用事实核验" in detail_html
+    assert "通用事实核检" in detail_html
     assert "模板来源" in detail_html
     assert "全文召回：3" in detail_html

@@ -68,6 +68,7 @@ def test_parse_llm_result_should_support_nested_interpretation() -> None:
     )
 
     assert result["verdict"] == "needs_review"
+    assert result["evidence_judgement"] == "insufficient"
     assert result["confidence"] == 0.5
     assert result["risk_level"] == "medium"
     assert result["reason"] == "smoke"

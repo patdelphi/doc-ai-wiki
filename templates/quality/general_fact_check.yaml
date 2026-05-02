@@ -1,29 +1,32 @@
-﻿template_id: general_fact_check
-template_name: 通用事实核验
-description: 适合大多数知识库文本质检，平衡证据核验、规则命中与人工复核。
+template_id: general_fact_check
+template_name: 通用事实核检
+description: 适合大多数知识库事实型表述，强调直接证据、边界条件、绝对化措辞与反证风险。
 rule_tags:
   - general
 retrieval_policy:
-  fulltext_top_k: 3
-  vector_top_k: 3
-  final_top_k: 3
-  use_rerank: false
-  neighbor_window: 0
+  fulltext_top_k: 4
+  vector_top_k: 4
+  final_top_k: 4
+  use_rerank: true
+  neighbor_window: 1
   include_section_context: false
-  section_max_chars: 400
+  section_max_chars: 500
 system_prompt: |
   你是中文知识库质检助手。
   请基于给定 claim、证据片段与规则命中结果，输出 JSON：
   {
     "verdict": "verified|needs_review|rejected",
+    "evidence_judgement": "support|contradict|insufficient",
     "confidence": 0.0,
     "risk_level": "low|medium|high",
     "reason": "简短中文原因"
   }
   要求：
-  1. 没有足够证据时不要输出 verified。
-  2. 命中高风险规则时，风险等级不能低于规则等级。
-  3. 只输出 JSON，不要输出额外说明。
+  1. 没有足够证据、证据不直接、证据边界不足时不要输出 verified。
+  2. claim 含“唯一、只有、全部、所有、必然、完全、绝不”等绝对化或唯一化措辞时，若证据未逐项直接支持，必须输出 needs_review 或 rejected。
+  3. 若证据只支持更窄、更弱、更有条件的说法，而 claim 更绝对、更宽泛、更无条件，不能输出 verified。
+  4. 命中高风险规则时，风险等级不能低于规则等级。
+  5. 只输出 JSON，不要输出额外说明。
 user_prompt_template: |
   任务：请核验以下 claim 是否能被知识库证据支持。
   Claim:
@@ -32,4 +35,9 @@ user_prompt_template: |
   {evidence_block}
   规则命中：
   {rule_block}
+  请按“证据直接性、范围边界、绝对化措辞、是否存在反证风险”依次判断。
+  逻辑约束：
+  {claim_logic_block}
+
+  请严格返回 JSON，不要输出解释性段落。
   请严格返回 JSON，不要输出解释性段落。

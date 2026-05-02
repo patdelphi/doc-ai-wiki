@@ -13,20 +13,23 @@ from src.common.errors import NotFoundAppError, ValidationAppError
 BUILTIN_TEMPLATES = {
     "general_fact_check": {
         "template_id": "general_fact_check",
-        "template_name": "通用事实核验",
-        "description": "适合大多数知识库文本质检，平衡证据核验、规则命中与人工复核。",
+        "template_name": "通用事实核检",
+        "description": "适合大多数知识库事实型表述，强调直接证据、边界条件、绝对化措辞与反证风险。",
         "system_prompt": """你是中文知识库质检助手。
 请基于给定 claim、证据片段与规则命中结果，输出 JSON：
 {
   "verdict": "verified|needs_review|rejected",
+  "evidence_judgement": "support|contradict|insufficient",
   "confidence": 0.0,
   "risk_level": "low|medium|high",
   "reason": "简短中文原因"
 }
 要求：
-1. 没有足够证据时不要输出 verified。
-2. 命中高风险规则时，风险等级不能低于规则等级。
-3. 只输出 JSON，不要输出额外说明。""",
+1. 没有足够证据、证据不直接、证据边界不足时不要输出 verified。
+2. claim 含“唯一、只有、全部、所有、必然、完全、绝不”等绝对化或唯一化措辞时，若证据未逐项直接支持，必须输出 needs_review 或 rejected。
+3. 若证据只支持更窄、更弱、更有条件的说法，而 claim 更绝对、更宽泛、更无条件，不能输出 verified。
+4. 命中高风险规则时，风险等级不能低于规则等级。
+5. 只输出 JSON，不要输出额外说明。""",
         "user_prompt_template": """任务：请核验以下 claim 是否能被知识库证据支持。
 
 Claim:
@@ -38,35 +41,41 @@ Claim:
 规则命中：
 {rule_block}
 
+逻辑约束：
+{claim_logic_block}
+
+请按“证据直接性、范围边界、绝对化措辞、是否存在反证风险”依次判断。
 请严格返回 JSON，不要输出解释性段落。""",
         "rule_tags": ["general"],
         "retrieval_policy": {
-            "fulltext_top_k": 3,
-            "vector_top_k": 3,
-            "final_top_k": 3,
-            "use_rerank": False,
-            "neighbor_window": 0,
+            "fulltext_top_k": 4,
+            "vector_top_k": 4,
+            "final_top_k": 4,
+            "use_rerank": True,
+            "neighbor_window": 1,
             "include_section_context": False,
-            "section_max_chars": 400,
+            "section_max_chars": 500,
         },
     },
     "strict_evidence_check": {
         "template_id": "strict_evidence_check",
         "template_name": "严格证据核验",
-        "description": "更强调证据充分性，证据不足时优先给出 needs_review，不轻易放行。",
+        "description": "更强调证据充分性、陈述边界与反证风险，证据稍有不足就不放行。",
         "system_prompt": """你是严格型中文知识库质检助手。
 你只能依据证据片段和规则命中做判断，禁止脑补常识。
 输出 JSON：
 {
   "verdict": "verified|needs_review|rejected",
+  "evidence_judgement": "support|contradict|insufficient",
   "confidence": 0.0,
   "risk_level": "low|medium|high",
   "reason": "简短中文原因"
 }
 规则：
 1. 证据不能直接支持 claim 时，必须输出 needs_review 或 rejected。
-2. 若 claim 比证据更绝对、更宽泛，不能判定为 verified。
-3. 只输出 JSON。""",
+2. 若 claim 比证据更绝对、更宽泛、覆盖范围更大，不能判定为 verified。
+3. 若存在可能反例、限定条件缺失、时间范围不清，也不能判定为 verified。
+4. 只输出 JSON。""",
         "user_prompt_template": """你现在执行严格证据核验。
 
 待核验 Claim：
@@ -78,7 +87,10 @@ Claim:
 规则命中：
 {rule_block}
 
-请优先关注证据是否直接、完整、可追溯。""",
+逻辑约束：
+{claim_logic_block}
+
+请优先关注证据是否直接、完整、可追溯，以及是否真的支持 claim 的全部限定词。""",
         "rule_tags": ["general", "strict"],
         "retrieval_policy": {
             "fulltext_top_k": 5,
@@ -93,20 +105,22 @@ Claim:
     "ancient_text_review": {
         "template_id": "ancient_text_review",
         "template_name": "古文审慎解读",
-        "description": "面向古文、古籍摘录或含歧义的旧文体，强调不确定性与语义保守解释。",
+        "description": "面向古文、古籍摘录或含歧义旧文体，强调训诂、断句、异文与现代转述边界。",
         "system_prompt": """你是古文知识库质检助手。
 处理古文、古籍摘录或文言文时，必须谨慎解释，避免把含混表述直接现代化定论。
 输出 JSON：
 {
   "verdict": "verified|needs_review|rejected",
+  "evidence_judgement": "support|contradict|insufficient",
   "confidence": 0.0,
   "risk_level": "low|medium|high",
   "reason": "简短中文原因"
 }
 要求：
 1. 证据存在歧义、异文、断句差异时，优先输出 needs_review。
-2. 不允许把推测性训释当作确定事实。
-3. 只输出 JSON。""",
+2. 不允许把推测性训释、后世转述或现代归纳直接当作原文确定事实。
+3. 如果 claim 使用现代确定性表述，而原文仅提供含混材料，不能输出 verified。
+4. 只输出 JSON。""",
         "user_prompt_template": """请按古文审慎解读模式核验下述内容。
 
 Claim：
@@ -118,7 +132,10 @@ Claim：
 规则命中：
 {rule_block}
 
-请重点说明是否存在词义歧义、断句歧义或现代转述过度。""",
+逻辑约束：
+{claim_logic_block}
+
+请重点说明是否存在词义歧义、断句歧义、版本差异或现代转述过度。""",
         "rule_tags": ["ancient", "strict"],
         "retrieval_policy": {
             "fulltext_top_k": 5,
@@ -133,19 +150,20 @@ Claim：
     "medical_safety_review": {
         "template_id": "medical_safety_review",
         "template_name": "医学内容审慎质检",
-        "description": "面向医学、方药、疗效、安全性描述，强调风险、禁忌与证据等级。",
+        "description": "面向医学、方药、疗效、安全性描述，强调适应证、禁忌、人群边界与证据等级。",
         "system_prompt": """你是医学内容质检助手。
 对疗效、适应症、安全性、禁忌、剂量等内容必须审慎判断。
 输出 JSON：
 {
   "verdict": "verified|needs_review|rejected",
+  "evidence_judgement": "support|contradict|insufficient",
   "confidence": 0.0,
   "risk_level": "low|medium|high",
   "reason": "简短中文原因"
 }
 要求：
-1. 对绝对疗效、明确治愈、无副作用等说法从严处理。
-2. 若证据仅为经验表述、缺少边界条件或禁忌说明，优先输出 needs_review。
+1. 对绝对疗效、明确治愈、无副作用、唯一方案、必然有效等说法从严处理。
+2. 若证据仅为经验表述、缺少适应证、人群、剂量、禁忌或边界条件，优先输出 needs_review。
 3. 涉及明显高风险误导时可输出 rejected。
 4. 只输出 JSON。""",
         "user_prompt_template": """请按医学内容审慎质检模板核验以下 claim。
@@ -159,7 +177,10 @@ Claim：
 规则命中：
 {rule_block}
 
-请重点关注疗效绝对化、安全性遗漏、适用范围夸大、禁忌缺失等问题。""",
+逻辑约束：
+{claim_logic_block}
+
+请重点关注疗效绝对化、安全性遗漏、适用范围夸大、人群边界缺失、禁忌遗漏等问题。""",
         "rule_tags": ["medical", "strict"],
         "retrieval_policy": {
             "fulltext_top_k": 6,

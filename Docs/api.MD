@@ -1,4 +1,4 @@
-﻿# 中文知识库系统 API 设计
+# 中文知识库系统 API 设计
 
 > **版本**：v1.0
 > **日期**：2026-04-30
@@ -394,8 +394,8 @@
     "items": [
       {
         "template_id": "general_fact_check",
-        "template_name": "通用事实核验",
-        "description": "适合大多数知识库文本质检，平衡证据核验、规则命中与人工复核。",
+        "template_name": "通用事实核检",
+        "description": "适合大多数知识库事实型表述，强调直接证据、边界条件、绝对化措辞与反证风险。",
         "rule_tags": ["general"],
         "retrieval_policy": {
           "fulltext_top_k": 3,
@@ -736,7 +736,7 @@
 
 | 模板 ID | 说明 |
 |------|------|
-| `general_fact_check` | 通用事实核验 |
+| `general_fact_check` | 通用事实核检 |
 | `citation_check` | 引用与出处核验 |
 | `structure_check` | 文档结构与规范检查 |
 | `medical_check_optional` | 可选医学内容检查 |

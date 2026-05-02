@@ -137,7 +137,7 @@ def test_quality_service_should_allow_template_to_disable_rerank(tmp_path: Path)
     (templates_dir / "general_fact_check.yaml").write_text(
         """
 template_id: general_fact_check
-template_name: 通用事实核验
+template_name: 通用事实核检
 description: 覆盖默认模板
 rule_tags:
   - general
@@ -217,3 +217,138 @@ def test_quality_service_stream_should_report_model_stage(tmp_path: Path) -> Non
     assert "model" in progress_stages
     assert result_events
     assert result_events[0]["result"]["claims"][0]["evidence_reason"].startswith("llm:general_fact_check:")
+
+
+def test_quality_service_should_run_evaluation_suite_and_aggregate_metrics(tmp_path: Path) -> None:
+    """效果评测应汇总预期与实际命中情况。"""
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path)
+    service.retrieval_service.hybrid_search = lambda query, top_k=3, doc_uid=None, **kwargs: [  # type: ignore[method-assign]
+        {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "section-1:chunk-0", "content": "证据内容"}
+    ]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    result = service.run_evaluation_suite(
+        [
+            {
+                "case_id": "case_pass",
+                "input_text": "第一条结论。",
+                "expected_overall_verdict": "passed",
+                "expected_risk_level": "low",
+                "expected_claim_count": 1,
+            },
+            {
+                "case_id": "case_mismatch",
+                "input_text": "第二条。第三条。",
+                "expected_overall_verdict": "needs_review",
+                "expected_risk_level": "medium",
+                "expected_claim_count": 1,
+            },
+        ],
+        template_id="general_fact_check",
+    )
+
+    assert result["summary"]["case_count"] == 2
+    assert result["summary"]["overall_verdict_match_count"] == 1
+    assert result["summary"]["risk_level_match_count"] == 1
+    assert result["summary"]["claim_count_match_count"] == 1
+    assert result["summary"]["exact_match_count"] == 1
+    assert result["rows"][0]["all_matched"] is True
+    assert result["rows"][1]["actual_claim_count"] == 2
+    assert result["rows"][1]["claim_count_matched"] is False
+
+
+def test_quality_service_should_not_upgrade_warn_claim_to_verified_even_if_llm_is_optimistic(tmp_path: Path) -> None:
+    """命中绝对化或唯一化规则时，即使模型乐观也不能直接放行为 verified。"""
+
+    class OptimisticLLMClient:
+        """程序说明：故意返回过于乐观结论，用于验证保守合并策略。"""
+
+        def evaluate_claim(
+            self,
+            *,
+            claim_text: str,
+            evidence_list: list[dict],
+            matched_rules: list[dict],
+            prompt_template: dict | None = None,
+        ) -> dict:
+            return {
+                "verdict": "verified",
+                "confidence": 0.96,
+                "risk_level": "low",
+                "reason": "llm optimistic",
+            }
+
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "general_rules.yaml").write_text(
+        """
+- code: G002
+  name: 唯一化表述
+  keywords:
+    - 只有
+  hit_level: error
+  message: 存在唯一化断言
+  template_tags:
+    - general
+""".strip(),
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path, rules_dir=rules_dir, llm_client=OptimisticLLMClient())
+    service.retrieval_service.hybrid_search = lambda query, top_k=3, doc_uid=None, **kwargs: [  # type: ignore[method-assign]
+        {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "section-1:chunk-0", "content": "东阿所产驴皮胶最负盛名。"}
+    ]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    result = service.run_check("阿胶只有东阿一家有。", template_id="general_fact_check")
+
+    assert result["claims"][0]["verdict"] == "needs_review"
+    assert result["claims"][0]["risk_level"] == "high"
+    assert result["rule_hits"][0]["rule_code"] == "G002"
+
+
+def test_quality_service_should_retrieve_counter_evidence_and_reject_exclusive_claim(tmp_path: Path) -> None:
+    """唯一化 claim 应结合放宽后的检索查询补召回反证，并输出 rejected。"""
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path)
+
+    captured_queries: list[str] = []
+
+    def fake_hybrid_search(query, top_k=5, doc_uid=None, **kwargs):  # noqa: ANN001
+        captured_queries.append(query)
+        if "只有" in query:
+            return [
+                {
+                    "chunk_id": "chk_primary",
+                    "doc_uid": "doc_1",
+                    "source_span": "section-1:chunk-0",
+                    "content": "东阿所产驴皮胶最负盛名。",
+                }
+            ]
+        return [
+            {
+                "chunk_id": "chk_counter",
+                "doc_uid": "doc_1",
+                "source_span": "section-2:chunk-1",
+                "content": "所载的阿胶一般不具有地域之别，连番邦小国也有产阿胶的。",
+            }
+        ]
+
+    service.retrieval_service.hybrid_search = fake_hybrid_search  # type: ignore[method-assign]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    result = service.run_check("阿胶只有东阿一家有。", template_id="general_fact_check")
+
+    assert len(captured_queries) >= 2
+    assert captured_queries[0] == "阿胶只有东阿一家有"
+    assert "只有" not in captured_queries[-1]
+    assert result["claims"][0]["verdict"] == "rejected"
+    assert result["check"]["overall_verdict"] == "rejected"
+    assert len(result["claims"][0]["evidence_details"]) >= 2

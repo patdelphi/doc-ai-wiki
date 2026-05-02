@@ -4,6 +4,10 @@
     - 一定
     - 必然
     - 完全
+    - 所有
+    - 全部
+    - 绝不
+    - 一律
   hit_level: warn
   message: 存在绝对化表述，建议人工复核证据边界。
   template_tags:
@@ -14,6 +18,10 @@
 - code: G002
   name: 唯一正确结论
   keywords:
+    - 唯一
+    - 只有
+    - 仅有
+    - 独家
     - 唯一正确
     - 毫无争议
   hit_level: error

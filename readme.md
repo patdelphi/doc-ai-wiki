@@ -132,7 +132,7 @@ python -m src.ui.app
 
 当前内置质检模板：
 
-- `general_fact_check`：通用事实核验
+- `general_fact_check`：通用事实核检
 - `strict_evidence_check`：严格证据核验
 - `ancient_text_review`：古文审慎解读
 - `medical_safety_review`：医学内容审慎质检

@@ -14,6 +14,7 @@ from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
+from src.ui.exporters import resolve_export_docs_dir
 from src.ui.pages import UI_CSS, build_ui
 
 
@@ -55,6 +56,8 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
             "embedding_provider": settings.embedding_provider,
             "rerank_provider": settings.rerank_provider,
             "rerank_enabled": settings.rerank_enabled,
+            "app_host": settings.app_host,
+            "gradio_port": settings.gradio_port,
         },
     )
 
@@ -64,11 +67,13 @@ def launch_ui(settings_override: AppSettings | None = None) -> None:
 
     settings = settings_override or get_settings()
     demo = create_ui_app(settings)
+    docs_dir = resolve_export_docs_dir(settings.sqlite_db_path)
     demo.launch(
         server_name=settings.app_host,
         server_port=settings.gradio_port,
         show_error=True,
         css=UI_CSS,
+        allowed_paths=[str(docs_dir.resolve())],
     )
 
 

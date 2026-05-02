@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import gradio as gr
 
 from src.common.errors import AppError
+from src.ui.exporters import build_download_url, save_markdown_export
 from src.ui.viewmodels import (
     build_claim_evidence_rows,
     build_database_summary_rows,
@@ -14,6 +17,7 @@ from src.ui.viewmodels import (
     build_document_quality_section_rows,
     build_document_management_state,
     build_quality_claim_rows,
+    build_quality_evaluation_rows,
     build_recent_claim_navigation,
     build_recent_quality_rows,
     build_review_candidate_rows,
@@ -23,32 +27,49 @@ from src.ui.viewmodels import (
     build_template_choices,
     format_claim_detail_for_review,
     format_claim_detail_html,
+    format_claim_detail_markdown,
     format_database_summary_html,
+    format_document_management_help_html,
     format_document_detail_html,
+    format_document_quality_batch_summary_markdown,
     format_document_quality_batch_summary_html,
+    format_document_quality_checks_markdown,
+    format_document_quality_config_markdown,
     format_document_quality_config_html,
     format_document_quality_checks_html,
+    format_document_quality_report_markdown,
     format_document_quality_report_html,
+    format_document_quality_search_summary_markdown,
     format_document_quality_search_summary_html,
     format_document_summary_html,
     format_evidence_detail_html,
+    format_evidence_detail_markdown,
     format_ingest_result,
     format_operation_result_html,
+    format_quality_evaluation_export_markdown,
+    format_quality_evaluation_help_html,
+    format_quality_evaluation_summary_html,
+    format_quality_export_markdown,
     format_quality_help_html,
     format_quality_progress_html,
     format_quality_result,
     format_quality_result_html,
+    format_search_export_markdown,
     format_settings_help_html,
+    format_settings_runtime_markdown,
     format_settings_runtime_html,
+    format_settings_template_detail_markdown,
     format_settings_template_detail_html,
     format_quality_template_html,
     format_recent_quality_checks,
     format_review_candidates,
     format_review_help_html,
     format_review_history,
+    format_review_record_detail_markdown,
     format_review_record_detail_html,
     format_search_help_html,
     format_search_result_detail_html,
+    format_search_result_detail_markdown,
     format_search_results,
     format_search_summary_html,
     get_document_detail,
@@ -65,6 +86,142 @@ from src.ui.viewmodels import (
 UI_CSS = """
 #search-top-row {
   align-items: stretch !important;
+}
+#document-management-focus-row {
+  align-items: stretch !important;
+}
+#document-management-focus-row > .gradio-column {
+  align-self: stretch !important;
+}
+#document-current-panel,
+#document-quality-panel {
+  width: 100%;
+}
+#document-current-panel {
+  border: 1px solid rgba(96, 165, 250, 0.36);
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.12), rgba(59, 130, 246, 0.05));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+  position: relative;
+  overflow: hidden;
+  padding-left: 6px;
+}
+#document-current-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 0.55));
+}
+#document-current-panel > div,
+#document-quality-panel > div {
+  height: 100%;
+}
+#document-current-title {
+  margin: 0 0 6px 0 !important;
+  text-align: left !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+}
+#document-current-note {
+  margin: 0 0 12px 0 !important;
+  font-size: 13px !important;
+  line-height: 1.7 !important;
+  color: var(--body-text-color-subdued) !important;
+}
+#document-current-panel .gradio-dropdown label,
+#document-current-panel .gradio-dropdown .wrap label,
+#document-current-panel .gradio-dropdown .label-wrap {
+  font-weight: 700 !important;
+}
+#document-current-panel .gradio-dropdown input,
+#document-current-panel .gradio-dropdown button,
+#document-current-panel .gradio-dropdown .wrap {
+  border-color: rgba(96, 165, 250, 0.38) !important;
+}
+#document-current-detail {
+  margin-top: 6px;
+}
+#document-current-detail > div {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.12);
+  padding: 6px 8px;
+}
+#document-current-detail h3,
+#document-current-detail h4 {
+  margin-top: 6px !important;
+  margin-bottom: 8px !important;
+  font-size: 15px !important;
+}
+#document-current-detail p,
+#document-current-detail li {
+  font-size: 13px !important;
+  line-height: 1.65 !important;
+}
+#document-current-detail ul {
+  margin-top: 6px !important;
+  margin-bottom: 0 !important;
+  padding-left: 18px !important;
+}
+#document-quality-accordion button,
+#document-quality-accordion summary {
+  justify-content: center !important;
+  text-align: center !important;
+  min-height: 56px !important;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em;
+  border-radius: 12px !important;
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  border-bottom: 2px solid rgba(96, 165, 250, 0.32) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 18px rgba(15, 23, 42, 0.08) !important;
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.14), rgba(71, 85, 105, 0.09)) !important;
+}
+#document-quality-accordion button span,
+#document-quality-accordion summary span {
+  width: 100%;
+  text-align: center !important;
+}
+#document-quality-accordion {
+  margin-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  padding-top: 12px;
+}
+#document-quality-panel {
+  padding-top: 10px;
+}
+#document-quality-top-actions,
+#search-export-row,
+#quality-export-row,
+#settings-export-row {
+  align-items: center !important;
+  gap: 10px;
+}
+#search-result-workspace,
+#quality-main-workspace,
+#quality-followup-workspace,
+#review-focus-panel,
+#settings-overview-panel,
+#settings-workspace-panel,
+#settings-footer-panel {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+#search-result-workspace > div,
+#quality-main-workspace > div,
+#quality-followup-workspace > div,
+#review-focus-panel > div,
+#settings-overview-panel > div,
+#settings-workspace-panel > div,
+#settings-footer-panel > div {
+  width: 100%;
 }
 #search-input-panel,
 #search-help-panel {
@@ -383,6 +540,24 @@ UI_CSS = """
 #search-result-summary {
   font-size: 14px !important;
 }
+#settings-top-row,
+#settings-main-row,
+#settings-bottom-row {
+  align-items: stretch !important;
+}
+#settings-top-row > .gradio-column,
+#settings-main-row > .gradio-column,
+#settings-bottom-row > .gradio-column {
+  align-self: stretch !important;
+}
+#settings-runtime-panel,
+#settings-result-panel {
+  height: 100%;
+}
+#settings-runtime-panel > div,
+#settings-result-panel > div {
+  height: 100%;
+}
 """
 
 
@@ -391,7 +566,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     template_items = quality_service.list_templates()
     template_choices = build_template_choices(template_items)
-    default_template_choice = template_choices[0] if template_choices else None
+    default_template_choice = next(
+        (choice for choice in template_choices if parse_template_choice(choice) == "general_fact_check"),
+        template_choices[0] if template_choices else None,
+    )
     default_template = quality_service.get_template(parse_template_choice(default_template_choice)) if default_template_choice else None
 
     def get_document_management_state(selected_choice: str | None = None) -> dict:
@@ -1065,13 +1243,80 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             {"success": True, "message": "入库质检阈值已保存。"},
         )
 
+    def export_markdown_result(module_name: str, result_name: str, markdown_text: str, *, linked_id: str | None = None) -> str:
+        """将 Markdown 结果导出为 TXT 文件，并返回包含下载链接的结果提示。"""
+
+        try:
+            export_result = save_markdown_export(
+                settings_runtime_payload.get("sqlite_db_path") or ".",
+                module_name=module_name,
+                result_name=result_name,
+                linked_id=linked_id,
+                markdown_text=markdown_text,
+            )
+            return format_operation_result_html(
+                {
+                    "success": True,
+                    "message": f'已生成下载文件：{export_result["file_name"]}',
+                    "download_url": build_download_url(
+                        file_path=export_result["file_path"],
+                        request_host=str(settings_runtime_payload.get("app_host") or "127.0.0.1"),
+                        request_port=int(settings_runtime_payload.get("gradio_port") or 7860),
+                    ),
+                    "download_file_name": export_result["file_name"],
+                },
+                title="下载结果",
+            )
+        except AppError as exc:
+            return format_operation_result_html(
+                {"success": False, "message": exc.message, "error_code": exc.error_code},
+                title="下载结果",
+            )
+
+    def build_markdown_table(headers: list[object], rows: list[list[object]]) -> str:
+        """将表头和行数据转换为 Markdown 表格。"""
+
+        normalized_headers = [str(item if item not in (None, "") else "-").replace("|", "\\|") for item in headers]
+        header_row = "| " + " | ".join(normalized_headers) + " |"
+        separator_row = "| " + " | ".join("---" for _ in normalized_headers) + " |"
+        body_rows = [
+            "| " + " | ".join(str(cell if cell not in (None, "") else "-").replace("\r", " ").replace("\n", "<br>").replace("|", "\\|") for cell in row) + " |"
+            for row in rows
+        ]
+        return "\n".join([header_row, separator_row, *body_rows])
+
+    def build_search_detail_payload(search_row: dict | None) -> dict | None:
+        """根据检索结果行补齐原文详情。"""
+
+        if not search_row:
+            return None
+        detail = retrieval_service.get_chunk_detail(search_row.get("chunk_id", "")) or {}
+        return {**search_row, **detail}
+
     def build_search_detail(search_row: dict | None, query_text: str) -> str:
         """根据检索结果行构建原文详情。"""
 
-        if not search_row:
-            return format_search_result_detail_html(None, query_text=query_text)
-        detail = retrieval_service.get_chunk_detail(search_row.get("chunk_id", "")) or {}
-        return format_search_result_detail_html({**search_row, **detail}, query_text=query_text)
+        return format_search_result_detail_html(build_search_detail_payload(search_row), query_text=query_text)
+
+    def export_search_results(
+        search_rows: list[dict],
+        selected_search_row: dict | None,
+        query_text: str,
+    ) -> str:
+        """导出当前检索结果为 TXT 文件。"""
+
+        formatted = {
+            "count": len(search_rows or []),
+            "query_text": normalize_search_query(query_text),
+            "table": search_rows or [],
+        }
+        markdown_text = format_search_export_markdown(
+            formatted,
+            selected_search_row or (search_rows[0] if search_rows else None),
+            query_text=query_text,
+        )
+        selected_chunk_id = str((selected_search_row or {}).get("chunk_id") or "")
+        return export_markdown_result("文档检索", "检索结果", markdown_text, linked_id=selected_chunk_id or None)
 
     def select_document_quality_search_result(results: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]]]:
         """点击文档内检索结果后，展示对应原文详情。"""
@@ -1090,7 +1335,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         formatted = {"table": rows}
         return build_search_detail(selected_row, query_text), build_search_result_rows(formatted, selected_row_index=row_index)
 
-    def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str]:
+    def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
         normalized_query = normalize_search_query(query)
         if not normalized_query:
             return (
@@ -1102,6 +1347,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 [],
                 "",
                 format_search_result_detail_html(None, query_text=""),
+                {},
             )
         try:
             items = retrieval_service.hybrid_search(normalized_query, top_k=top_k, use_rerank=True)
@@ -1115,32 +1361,41 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 [],
                 normalized_query,
                 format_search_result_detail_html(None, query_text=normalized_query),
+                {},
             )
         formatted = format_search_results(items, query_text=normalized_query)
-        detail_html = build_search_detail(formatted["table"][0], normalized_query) if formatted["table"] else format_search_result_detail_html(None, query_text=normalized_query)
+        selected_row = build_search_detail_payload(formatted["table"][0]) if formatted["table"] else {}
+        detail_html = (
+            format_search_result_detail_html(selected_row, query_text=normalized_query)
+            if selected_row
+            else format_search_result_detail_html(None, query_text=normalized_query)
+        )
         return (
             format_search_summary_html(formatted),
             build_search_result_rows(formatted, selected_row_index=0 if formatted["table"] else None),
             formatted["table"],
             normalized_query,
             detail_html,
+            selected_row,
         )
 
-    def select_search_result(search_rows: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]]]:
+    def select_search_result(search_rows: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]], dict]:
         """点击检索结果表格后展示对应原文。"""
 
         if not search_rows:
-            return format_search_result_detail_html(None, query_text=query_text), []
+            return format_search_result_detail_html(None, query_text=query_text), [], {}
         index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
         try:
             row_index = int(index)
         except (TypeError, ValueError):
-            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows})
+            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows}), {}
         if row_index < 0 or row_index >= len(search_rows):
-            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows})
+            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows}), {}
+        selected_row = build_search_detail_payload(search_rows[row_index]) or {}
         return (
-            build_search_detail(search_rows[row_index], query_text),
+            format_search_result_detail_html(selected_row, query_text=query_text),
             build_search_result_rows({"table": search_rows}, selected_row_index=row_index),
+            selected_row,
         )
 
     def render_claim_views(claim_choice: str, claim_detail_map: dict | None) -> tuple[str, list[list[str]], str, list[dict], str]:
@@ -1155,26 +1410,35 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def select_quality_claim(
         claim_rows: list[list[str]],
         claim_detail_map: dict | None,
+        formatted_result: dict | None,
         evt: gr.SelectData,
-    ) -> tuple[str, list[list[str]], str, str, list[dict], str]:
+    ) -> tuple[str, list[list[str]], str, str, list[dict], str, str]:
         """点击 Claim 列表后联动详情与证据区域。"""
 
         normalized_rows = claim_rows.values.tolist() if hasattr(claim_rows, "values") else claim_rows
         if not normalized_rows:
             claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
-            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html, build_quality_evaluation_example_text(formatted_result, "", claim_detail_map)
         index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
         try:
             row_index = int(index)
         except (TypeError, ValueError):
             claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
-            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html, build_quality_evaluation_example_text(formatted_result, "", claim_detail_map)
         if row_index < 0 or row_index >= len(normalized_rows):
             claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
-            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html
+            return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html, build_quality_evaluation_example_text(formatted_result, "", claim_detail_map)
         selected_claim_id = str(normalized_rows[row_index][0]) if normalized_rows[row_index] else ""
         claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(selected_claim_id, claim_detail_map)
-        return claim_view, evidence_rows, review_view, selected_claim_id, evidence_items, evidence_detail_html
+        return (
+            claim_view,
+            evidence_rows,
+            review_view,
+            selected_claim_id,
+            evidence_items,
+            evidence_detail_html,
+            build_quality_evaluation_example_text(formatted_result, selected_claim_id, claim_detail_map),
+        )
 
     def select_quality_evidence(
         evidence_items: list[dict] | None,
@@ -1206,10 +1470,289 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
         return format_quality_template_html(template)
 
+    def build_quality_evaluation_example_text(
+        formatted_result: dict | None = None,
+        selected_claim: str | None = None,
+        claim_detail_map: dict | None = None,
+    ) -> str:
+        """构建 AI 质检效果评测样例 JSON，优先跟随当前选中的 Claim。"""
+
+        claim_detail = format_claim_detail_for_review(selected_claim or "", claim_detail_map)
+        claim_summary = claim_detail.get("summary") or {}
+        if claim_summary.get("claim_id"):
+            check = (formatted_result or {}).get("check") or {}
+            return json.dumps(
+                [
+                    {
+                        "case_id": str(claim_summary.get("claim_id")),
+                        "input_text": str(claim_summary.get("claim_text") or ""),
+                        "expected_overall_verdict": (
+                            "passed" if str(claim_summary.get("verdict") or "") == "verified" else str(check.get("overall_verdict") or "needs_review")
+                        ),
+                        "expected_risk_level": str(claim_summary.get("risk_level") or check.get("risk_level") or "medium"),
+                        "expected_claim_count": 1,
+                    }
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        return json.dumps(
+            [
+                {
+                    "case_id": "demo_case_general_supported",
+                    "input_text": "阿胶具有补血作用。",
+                    "expected_overall_verdict": "passed",
+                    "expected_risk_level": "low",
+                    "expected_claim_count": 1,
+                },
+                {
+                    "case_id": "demo_case_general_absolute",
+                    "input_text": "阿胶只有东阿一家有。",
+                    "expected_overall_verdict": "needs_review",
+                    "expected_risk_level": "high",
+                    "expected_claim_count": 1,
+                },
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def run_quality_evaluation(cases_json: str, template_choice: str) -> tuple[str, list[list[str]], dict]:
+        """执行 AI 质检效果评测，并返回摘要和明细。"""
+
+        raw_text = str(cases_json or "").strip()
+        if not raw_text:
+            return (
+                format_operation_result_html({"success": False, "message": "请输入评测样例 JSON。"}, title="效果评测"),
+                [],
+                {},
+            )
+        try:
+            cases = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": f"样例 JSON 解析失败：{exc.msg}"},
+                    title="效果评测",
+                ),
+                [],
+                    {},
+            )
+        if not isinstance(cases, list):
+            return (
+                format_operation_result_html({"success": False, "message": "评测样例必须是 JSON 数组。"}, title="效果评测"),
+                [],
+                {},
+            )
+
+        try:
+            evaluation_result = quality_service.run_evaluation_suite(
+                cases,
+                template_id=parse_template_choice(template_choice),
+            )
+        except AppError as exc:
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": exc.message, "error_code": exc.error_code},
+                    title="效果评测",
+                ),
+                [],
+                {},
+            )
+
+        return (
+            format_quality_evaluation_summary_html(evaluation_result),
+            build_quality_evaluation_rows(evaluation_result),
+            evaluation_result,
+        )
+
+    def export_quality_results(
+        formatted_result: dict | None,
+        selected_claim: str,
+        claim_detail_map: dict | None,
+        evidence_items: list[dict] | None,
+    ) -> str:
+        """导出当前 AI 质检结果。"""
+
+        claim_detail = format_claim_detail_for_review(selected_claim, claim_detail_map)
+        selected_evidence = (evidence_items or [None])[0]
+        markdown_text = format_quality_export_markdown(
+            formatted_result,
+            claim_detail,
+            selected_evidence,
+        )
+        claim_summary = (claim_detail or {}).get("summary") or {}
+        linked_id = str(claim_summary.get("claim_id") or (formatted_result or {}).get("check", {}).get("check_id") or "")
+        return export_markdown_result("AI质检", "质检结果", markdown_text, linked_id=linked_id or None)
+
+    def export_quality_evaluation_results(evaluation_result: dict | None) -> str:
+        """导出当前 AI 质检效果评测结果。"""
+
+        markdown_text = format_quality_evaluation_export_markdown(evaluation_result)
+        first_row = ((evaluation_result or {}).get("rows") or [None])[0] or {}
+        linked_id = str(first_row.get("case_id") or first_row.get("check_id") or "")
+        return export_markdown_result("AI质检", "效果评测", markdown_text, linked_id=linked_id or None)
+
+    def export_document_quality_result(
+        choice: str,
+        search_rows: list[dict],
+        query_text: str,
+    ) -> str:
+        """导出当前文档的入库质检结果。"""
+
+        state = get_document_management_state(choice)
+        detail = state["selected_detail"]
+        doc_uid = str(detail.get("doc_uid") or "")
+        if not doc_uid:
+            return (
+                format_operation_result_html({"success": False, "message": "当前文档尚未入库，无法导出入库质检结果。"}, title="下载结果"),
+                None,
+            )
+        report = ingest_service.inspect_document_quality(doc_uid)
+        batch_result = ingest_service.list_document_quality_reports(doc_uids=[doc_uid], page_size=1)
+        markdown_sections = [
+            format_document_detail_markdown(detail),
+            "",
+            format_document_quality_report_markdown(report),
+            "",
+            format_document_quality_checks_markdown(report),
+            "",
+            "#### 章节抽样",
+            build_markdown_table(
+                ["定位", "章节标题", "层级", "章节字数", "内容预览"],
+                build_document_quality_section_rows(report),
+            ),
+            "",
+            "#### 分块抽样",
+            build_markdown_table(
+                ["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
+                build_document_quality_chunk_rows(report),
+            ),
+            "",
+            format_document_quality_search_summary_markdown({"count": len(search_rows or []), "query_text": query_text}, doc_title=detail.get("doc_title", "")),
+            "",
+            format_search_result_detail_markdown((search_rows or [None])[0], query_text=query_text),
+            "",
+            format_document_quality_batch_summary_markdown(batch_result),
+            "",
+            "#### 批量质检结果",
+            build_markdown_table(
+                ["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                build_document_quality_batch_rows(batch_result),
+            ),
+            "",
+            format_document_quality_config_markdown(ingest_service.get_document_quality_config()),
+        ]
+        return export_markdown_result("文档管理", "入库质检", "\n".join(markdown_sections), linked_id=doc_uid)
+
+    def export_document_quality_search_result(
+        choice: str,
+        search_rows: list[dict],
+        query_text: str,
+    ) -> str:
+        """导出当前文档内检索验证结果。"""
+
+        detail = get_document_management_state(choice)["selected_detail"]
+        selected_row = build_search_detail_payload((search_rows or [None])[0]) if search_rows else None
+        markdown_text = "\n".join(
+            [
+                format_document_quality_search_summary_markdown(
+                    {"count": len(search_rows or []), "query_text": query_text},
+                    doc_title=detail.get("doc_title", ""),
+                ),
+                "",
+                "#### 结果列表",
+                build_markdown_table(
+                    ["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                    build_search_result_rows({"table": search_rows or []}),
+                ) if search_rows else "- 暂无检索结果",
+                "",
+                format_search_result_detail_markdown(selected_row, query_text=query_text),
+            ]
+        )
+        return export_markdown_result("文档管理", "文档检索验证", markdown_text, linked_id=doc_uid or None)
+
+    def export_document_quality_batch_result() -> str:
+        """导出批量入库质检结果。"""
+
+        batch_result = ingest_service.list_document_quality_reports()
+        markdown_text = "\n".join(
+            [
+                format_document_quality_batch_summary_markdown(batch_result),
+                "",
+                "#### 批量质检结果",
+                build_markdown_table(
+                    ["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                    build_document_quality_batch_rows(batch_result),
+                ),
+            ]
+        )
+        return export_markdown_result("文档管理", "批量入库质检", markdown_text)
+
+    def export_document_quality_config_result(
+        sample_limit: int | float,
+        long_document_char_threshold: int | float,
+        min_sections_for_long_doc: int | float,
+        max_avg_chunks_per_section: int | float,
+        max_chunk_chars: int | float,
+        short_chunk_chars: int | float,
+        short_chunk_warn_min_chunk_count: int | float,
+    ) -> str:
+        """导出当前入库质检阈值配置。"""
+
+        config_payload = {
+            **ingest_service.get_document_quality_config(),
+            "sample_limit": int(sample_limit),
+            "long_document_char_threshold": int(long_document_char_threshold),
+            "min_sections_for_long_doc": int(min_sections_for_long_doc),
+            "max_avg_chunks_per_section": int(max_avg_chunks_per_section),
+            "max_chunk_chars": int(max_chunk_chars),
+            "short_chunk_chars": int(short_chunk_chars),
+            "short_chunk_warn_min_chunk_count": int(short_chunk_warn_min_chunk_count),
+        }
+        return export_markdown_result("文档管理", "质检阈值配置", format_document_quality_config_markdown(config_payload))
+
+    def export_review_result(
+        selected_claim_id: str,
+        claim_detail_map: dict | None,
+        evidence_items: list[dict] | None,
+        selected_review_id: str,
+        review_items: list[dict] | None,
+    ) -> str:
+        """导出人工审核当前查看结果。"""
+
+        claim_detail = format_claim_detail_for_review(selected_claim_id, claim_detail_map)
+        selected_record = next((item for item in (review_items or []) if str(item.get("review_id") or "") == str(selected_review_id or "")), None)
+        markdown_text = "\n".join(
+            [
+                format_claim_detail_markdown(claim_detail),
+                "",
+                format_evidence_detail_markdown((evidence_items or [None])[0]),
+                "",
+                format_review_record_detail_markdown(selected_record),
+            ]
+        )
+        return export_markdown_result("人工审核", "审核结果", markdown_text, linked_id=selected_claim_id or None)
+
+    def export_settings_result(selected_template_id: str) -> str:
+        """导出当前功能设置详情。"""
+
+        template = quality_service.get_template(selected_template_id) if selected_template_id else None
+        markdown_text = "\n".join(
+            [
+                format_settings_template_detail_markdown(template),
+                "",
+                format_settings_runtime_markdown(build_settings_runtime_payload()),
+            ]
+        )
+        return export_markdown_result("功能设置", "当前配置", markdown_text, linked_id=selected_template_id or None)
+
     def build_quality_outputs(
         *,
         progress_html: str,
         result_html: str,
+        formatted_result: dict | None = None,
         claim_rows: list[list[str]] | None = None,
         selected_claim: str | None = None,
         claim_detail_map: dict | None = None,
@@ -1220,16 +1763,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         evidence_detail_html: str | None = None,
         recent_results: list[dict] | None = None,
         recent_rows: list[list[str]] | None = None,
-    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
+        evaluation_cases_text: str | None = None,
+    ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         """统一构建 AI 质检页输出。"""
 
         empty_claim_view, empty_evidence_rows, empty_review_view, empty_evidence_items, empty_evidence_detail_html = render_claim_views("", {})
+        resolved_formatted_result = formatted_result or {}
+        resolved_selected_claim = selected_claim or ""
+        resolved_claim_detail_map = claim_detail_map or {}
         return (
             progress_html,
             result_html,
+            resolved_formatted_result,
             claim_rows or [],
-            selected_claim or "",
-            claim_detail_map or {},
+            resolved_selected_claim,
+            resolved_claim_detail_map,
             claim_view or empty_claim_view,
             evidence_rows or empty_evidence_rows,
             review_view or empty_review_view,
@@ -1237,6 +1785,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             evidence_detail_html or empty_evidence_detail_html,
             recent_results or [],
             recent_rows or [],
+            evaluation_cases_text or build_quality_evaluation_example_text(
+                resolved_formatted_result,
+                resolved_selected_claim,
+                resolved_claim_detail_map,
+            ),
         )
 
     def build_recent_quality_view_outputs(
@@ -1244,7 +1797,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         *,
         selected_index: int = 0,
         preferred_claim_id: str | None = None,
-    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
+    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         """根据最近质检记录构建当前页面展示状态。"""
 
         results = recent_results or []
@@ -1286,6 +1839,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return build_quality_outputs(
             progress_html=progress_html,
             result_html=format_quality_result_html(selected_formatted),
+            formatted_result=selected_formatted,
             claim_rows=build_quality_claim_rows(selected_formatted),
             selected_claim=navigation["selected_choice"],
             claim_detail_map=navigation["claim_detail_map"],
@@ -1313,6 +1867,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     yield build_quality_outputs(
                         progress_html=format_quality_progress_html(event),
                         result_html=initial_result_html,
+                        formatted_result={},
                     )
                     continue
 
@@ -1333,6 +1888,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 yield build_quality_outputs(
                     progress_html=format_quality_progress_html(event),
                     result_html=format_quality_result_html(formatted),
+                    formatted_result=formatted,
                     claim_rows=build_quality_claim_rows(formatted),
                     selected_claim=navigation["selected_choice"],
                     claim_detail_map=navigation["claim_detail_map"],
@@ -1354,6 +1910,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     {"success": False, "message": exc.message, "error_code": exc.error_code},
                     title="质检结果",
                 ),
+                formatted_result={},
             )
             return
 
@@ -1416,7 +1973,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         normalized_template_id = str(selected_template_id or "")
         available_ids = {str(item.get("template_id") or "") for item in template_items}
         if normalized_template_id not in available_ids:
-            normalized_template_id = str(template_items[0].get("template_id") or "") if template_items else ""
+            normalized_template_id = "general_fact_check" if "general_fact_check" in available_ids else (str(template_items[0].get("template_id") or "") if template_items else "")
         selected_choice = next(
             (choice for choice in template_choices if parse_template_choice(choice) == normalized_template_id),
             template_choices[0] if template_choices else None,
@@ -1436,7 +1993,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         template_ids = {str(item.get("template_id") or "") for item in templates}
         normalized_template_id = str(selected_template_id or "")
         if normalized_template_id not in template_ids:
-            normalized_template_id = str(templates[0].get("template_id") or "") if templates else ""
+            normalized_template_id = "general_fact_check" if "general_fact_check" in template_ids else (str(templates[0].get("template_id") or "") if templates else "")
         selected_template = quality_service.get_template(normalized_template_id) if normalized_template_id else None
         detail_html = format_settings_template_detail_html(selected_template)
         form_values = build_settings_form_values(selected_template)
@@ -1963,7 +2520,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *current_outputs,
         )
 
-    def list_recent_quality_results() -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]]]:
+    def list_recent_quality_results() -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         try:
             results = quality_service.list_recent_results(limit=10)
         except AppError:
@@ -1978,20 +2535,20 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def select_recent_quality_result(
         recent_results: list[dict],
         evt: gr.SelectData,
-    ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str]:
+    ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, str]:
         """点击最近质检记录后回放对应结果。"""
 
         results = recent_results or []
         if not results:
             empty_outputs = build_recent_quality_view_outputs([])
-            return empty_outputs[:10]
+            return (*empty_outputs[:11], empty_outputs[13])
         index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
         try:
             row_index = int(index)
         except (TypeError, ValueError):
             row_index = 0
         selected_outputs = build_recent_quality_view_outputs(results, selected_index=row_index)
-        return selected_outputs[:10]
+        return (*selected_outputs[:11], selected_outputs[13])
 
     initial_document_state = get_document_management_state()
     initial_document_summary = format_document_summary_html(initial_document_state["scan_summary"])
@@ -2020,6 +2577,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_quality_short_chunk_warn_min_chunk_count,
         initial_document_quality_config_result,
     ) = build_document_quality_config_outputs()
+    initial_quality_evaluation_summary = format_quality_evaluation_summary_html(None)
+    initial_quality_evaluation_rows: list[list[str]] = []
+    initial_quality_evaluation_result: dict = {}
     try:
         initial_recent_results = quality_service.list_recent_results(limit=10)
     except AppError:
@@ -2027,6 +2587,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     (
         initial_progress_html,
         initial_result_html,
+        initial_formatted_quality_result,
         initial_claim_rows,
         initial_selected_claim,
         initial_claim_detail_map,
@@ -2037,6 +2598,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_evidence_detail_html,
         _initial_recent_results_state,
         initial_recent_rows,
+        initial_quality_evaluation_cases,
     ) = build_recent_quality_view_outputs(initial_recent_results, selected_index=0)
     try:
         initial_review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
@@ -2091,12 +2653,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         with gr.Tabs():
             with gr.Tab("文档管理"):
-                gr.Markdown(
-                    """
-### 功能说明
-- 左侧用于查看和选择当前 `"Input"` 目录中的文档，并自动展示是否已入库、是否需要重建。
-- 右侧用于执行注册、批量注册、重建索引，并实时查看当前步骤、完成数量和进度摘要。
-                    """
+                document_management_help = gr.HTML(
+                    value=format_document_management_help_html(),
+                    elem_id="document-management-help-panel",
                 )
                 scan_button = gr.Button("刷新文档列表")
                 with gr.Row():
@@ -2104,8 +2663,22 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         document_summary = gr.HTML(value=initial_document_summary)
                     with gr.Column(scale=1):
                         database_summary = gr.HTML(value=initial_database_summary)
-                with gr.Row():
-                    with gr.Column(scale=1):
+                with gr.Row(elem_id="document-management-focus-row"):
+                    with gr.Column(scale=6):
+                        with gr.Group(elem_id="document-current-panel"):
+                            gr.Markdown("### 当前选中文档", elem_id="document-current-title")
+                            gr.HTML(
+                                value="<p>优先在这里选择目标文档，再执行注册、重建或入库质检。</p>",
+                                elem_id="document-current-note",
+                            )
+                            document_choices = gr.Dropdown(
+                                label="选择文档",
+                                choices=initial_document_state["document_choices"],
+                                value=initial_document_state["active_choice"],
+                                interactive=True,
+                            )
+                            document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
+                    with gr.Column(scale=4):
                         database_summary_table = gr.Dataframe(
                             headers=["指标", "数量"],
                             datatype=["str", "str"],
@@ -2115,133 +2688,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             label="数据库统计",
                             value=initial_database_rows,
                         )
-                    with gr.Column(scale=1):
-                        document_choices = gr.Dropdown(
-                            label="当前选中文档",
-                            choices=initial_document_state["document_choices"],
-                            value=initial_document_state["active_choice"],
-                            interactive=True,
-                        )
-                        document_detail = gr.HTML(value=initial_document_detail)
-                        with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
-                            with gr.Row(elem_id="document-quality-summary-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    document_quality_report = gr.HTML(
-                                        value=initial_document_quality_report,
-                                        elem_id="document-quality-report",
-                                    )
-                                with gr.Column(scale=1):
-                                    document_quality_checks = gr.HTML(
-                                        value=initial_document_quality_checks,
-                                        elem_id="document-quality-checks",
-                                    )
-                            document_quality_run_button = gr.Button("执行入库质检")
-                            with gr.Row(elem_id="document-quality-sample-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    document_quality_sections = gr.Dataframe(
-                                        headers=["定位", "章节标题", "层级", "章节字数", "内容预览"],
-                                        datatype=["str"] * 5,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=5,
-                                        label="章节抽样",
-                                        elem_id="document-quality-sections-table",
-                                        value=initial_document_quality_section_rows,
-                                    )
-                                with gr.Column(scale=1):
-                                    document_quality_chunks = gr.Dataframe(
-                                        headers=["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
-                                        datatype=["str"] * 6,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=6,
-                                        label="分块抽样",
-                                        elem_id="document-quality-chunks-table",
-                                        value=initial_document_quality_chunk_rows,
-                                    )
-                            with gr.Row(elem_id="document-quality-search-row", equal_height=True):
-                                with gr.Column(scale=5):
-                                    document_quality_search_query = gr.Textbox(
-                                        label="文档内检索验证",
-                                        lines=2,
-                                        placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
-                                    )
-                                    document_quality_search_button = gr.Button("验证当前文档检索")
-                                with gr.Column(scale=4):
-                                    document_quality_search_summary = gr.HTML(
-                                        value=initial_document_quality_search_summary,
-                                        elem_id="document-quality-search-summary",
-                                    )
-                            document_quality_search_state = gr.State(initial_document_quality_search_state)
-                            document_quality_search_query_state = gr.State("")
-                            with gr.Row(elem_id="document-quality-result-row", equal_height=True):
-                                with gr.Column(scale=5):
-                                    document_quality_search_results = gr.Dataframe(
-                                        headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                                        datatype=["markdown"] * 9,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=9,
-                                        label="文档内检索结果",
-                                        elem_id="document-quality-search-results",
-                                        value=initial_document_quality_search_rows,
-                                    )
-                                with gr.Column(scale=4):
-                                    document_quality_search_detail = gr.HTML(
-                                        value=initial_document_quality_search_detail,
-                                        elem_id="document-quality-search-detail",
-                                    )
-                            with gr.Row(elem_id="document-quality-batch-action-row"):
-                                document_quality_batch_button = gr.Button("执行全部文档质检")
-                                document_quality_export_button = gr.Button("导出质检 CSV")
-                            with gr.Row(elem_id="document-quality-batch-row", equal_height=True):
-                                with gr.Column(scale=4):
-                                    document_quality_batch_summary = gr.HTML(
-                                        value=initial_document_quality_batch_summary,
-                                        elem_id="document-quality-batch-summary",
-                                    )
-                                    document_quality_export_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="导出结果"),
-                                        elem_id="document-quality-export-result",
-                                    )
-                                with gr.Column(scale=5):
-                                    document_quality_batch_table = gr.Dataframe(
-                                        headers=["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                                        datatype=["str"] * 9,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=9,
-                                        label="批量质检结果",
-                                        elem_id="document-quality-batch-table",
-                                        value=initial_document_quality_batch_rows,
-                                    )
-                            with gr.Row(elem_id="document-quality-config-row", equal_height=True):
-                                with gr.Column(scale=4):
-                                    document_quality_config_panel = gr.HTML(
-                                        value=initial_document_quality_config_html,
-                                        elem_id="document-quality-config-panel",
-                                    )
-                                    document_quality_config_result = gr.HTML(
-                                        value=initial_document_quality_config_result,
-                                        elem_id="document-quality-config-result",
-                                    )
-                                with gr.Column(scale=5):
-                                    with gr.Group(elem_id="document-quality-config-form"):
-                                        gr.Markdown("### 质检阈值配置")
-                                        with gr.Row():
-                                            document_quality_sample_limit = gr.Number(label="抽样数量", value=initial_quality_sample_limit, precision=0)
-                                            document_quality_long_document_char_threshold = gr.Number(label="长文字数阈值", value=initial_quality_long_document_char_threshold, precision=0)
-                                            document_quality_min_sections_for_long_doc = gr.Number(label="长文最少章节", value=initial_quality_min_sections_for_long_doc, precision=0)
-                                        with gr.Row():
-                                            document_quality_max_avg_chunks_per_section = gr.Number(label="每章分块上限", value=initial_quality_max_avg_chunks_per_section, precision=0)
-                                            document_quality_max_chunk_chars = gr.Number(label="超长分块阈值", value=initial_quality_max_chunk_chars, precision=0)
-                                            document_quality_short_chunk_chars = gr.Number(label="过短分块阈值", value=initial_quality_short_chunk_chars, precision=0)
-                                        document_quality_short_chunk_warn_min_chunk_count = gr.Number(
-                                            label="过短分块告警起点",
-                                            value=initial_quality_short_chunk_warn_min_chunk_count,
-                                            precision=0,
-                                        )
-                                        document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
                 document_table = gr.Dataframe(
                     headers=["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
                     datatype=["str"] * 9,
@@ -2263,6 +2709,140 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         register_result = gr.HTML(value=format_operation_result_html(None, title="注册结果"))
                     with gr.Column(scale=1):
                         rebuild_result = gr.HTML(value=format_operation_result_html(None, title="重建结果"))
+                with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
+                    with gr.Group(elem_id="document-quality-panel"):
+                        with gr.Row(elem_id="document-quality-top-actions"):
+                            document_quality_run_button = gr.Button("执行入库质检")
+                            document_quality_result_export_button = gr.Button("下载质检结果")
+                        document_quality_result_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="document-quality-export-result")
+                        with gr.Row(elem_id="document-quality-summary-row", equal_height=True):
+                            with gr.Column(scale=1):
+                                document_quality_report = gr.HTML(
+                                    value=initial_document_quality_report,
+                                    elem_id="document-quality-report",
+                                )
+                            with gr.Column(scale=1):
+                                document_quality_checks = gr.HTML(
+                                    value=initial_document_quality_checks,
+                                    elem_id="document-quality-checks",
+                                )
+                        with gr.Row(elem_id="document-quality-sample-row", equal_height=True):
+                            with gr.Column(scale=1):
+                                document_quality_sections = gr.Dataframe(
+                                    headers=["定位", "章节标题", "层级", "章节字数", "内容预览"],
+                                    datatype=["str"] * 5,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=5,
+                                    label="章节抽样",
+                                    elem_id="document-quality-sections-table",
+                                    value=initial_document_quality_section_rows,
+                                )
+                            with gr.Column(scale=1):
+                                document_quality_chunks = gr.Dataframe(
+                                    headers=["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
+                                    datatype=["str"] * 6,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=6,
+                                    label="分块抽样",
+                                    elem_id="document-quality-chunks-table",
+                                    value=initial_document_quality_chunk_rows,
+                                )
+                        with gr.Row(elem_id="document-quality-search-row", equal_height=True):
+                            with gr.Column(scale=5):
+                                document_quality_search_query = gr.Textbox(
+                                    label="文档内检索验证",
+                                    lines=2,
+                                    placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
+                                )
+                                document_quality_search_button = gr.Button("验证当前文档检索")
+                                document_quality_search_export_button = gr.Button("下载检索结果")
+                            with gr.Column(scale=4):
+                                document_quality_search_summary = gr.HTML(
+                                    value=initial_document_quality_search_summary,
+                                    elem_id="document-quality-search-summary",
+                                )
+                        document_quality_search_state = gr.State(initial_document_quality_search_state)
+                        document_quality_search_query_state = gr.State("")
+                        with gr.Row(elem_id="document-quality-result-row", equal_height=True):
+                            with gr.Column(scale=5):
+                                document_quality_search_results = gr.Dataframe(
+                                    headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                                    datatype=["markdown"] * 9,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=9,
+                                    label="文档内检索结果",
+                                    elem_id="document-quality-search-results",
+                                    value=initial_document_quality_search_rows,
+                                )
+                            with gr.Column(scale=4):
+                                document_quality_search_detail = gr.HTML(
+                                    value=initial_document_quality_search_detail,
+                                    elem_id="document-quality-search-detail",
+                                )
+                        with gr.Row(elem_id="document-quality-batch-action-row"):
+                            document_quality_batch_button = gr.Button("执行全部文档质检")
+                            document_quality_csv_export_button = gr.Button("导出质检 CSV")
+                            document_quality_batch_export_button = gr.Button("下载批量结果")
+                        with gr.Row(elem_id="document-quality-batch-row", equal_height=True):
+                            with gr.Column(scale=4):
+                                document_quality_batch_summary = gr.HTML(
+                                    value=initial_document_quality_batch_summary,
+                                    elem_id="document-quality-batch-summary",
+                                )
+                                document_quality_csv_export_result = gr.HTML(
+                                    value=format_operation_result_html(None, title="导出结果"),
+                                    elem_id="document-quality-csv-export-result",
+                                )
+                                document_quality_batch_export_result = gr.HTML(
+                                    value=format_operation_result_html(None, title="下载结果"),
+                                    elem_id="document-quality-batch-export-result",
+                                )
+                            with gr.Column(scale=5):
+                                document_quality_batch_table = gr.Dataframe(
+                                    headers=["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                                    datatype=["str"] * 9,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=9,
+                                    label="批量质检结果",
+                                    elem_id="document-quality-batch-table",
+                                    value=initial_document_quality_batch_rows,
+                                )
+                        with gr.Row(elem_id="document-quality-config-row", equal_height=True):
+                            with gr.Column(scale=4):
+                                document_quality_config_panel = gr.HTML(
+                                    value=initial_document_quality_config_html,
+                                    elem_id="document-quality-config-panel",
+                                )
+                                document_quality_config_result = gr.HTML(
+                                    value=initial_document_quality_config_result,
+                                    elem_id="document-quality-config-result",
+                                )
+                            with gr.Column(scale=5):
+                                with gr.Group(elem_id="document-quality-config-form"):
+                                    gr.Markdown("### 质检阈值配置")
+                                    with gr.Row():
+                                        document_quality_sample_limit = gr.Number(label="抽样数量", value=initial_quality_sample_limit, precision=0)
+                                        document_quality_long_document_char_threshold = gr.Number(label="长文字数阈值", value=initial_quality_long_document_char_threshold, precision=0)
+                                        document_quality_min_sections_for_long_doc = gr.Number(label="长文最少章节", value=initial_quality_min_sections_for_long_doc, precision=0)
+                                    with gr.Row():
+                                        document_quality_max_avg_chunks_per_section = gr.Number(label="每章分块上限", value=initial_quality_max_avg_chunks_per_section, precision=0)
+                                        document_quality_max_chunk_chars = gr.Number(label="超长分块阈值", value=initial_quality_max_chunk_chars, precision=0)
+                                        document_quality_short_chunk_chars = gr.Number(label="过短分块阈值", value=initial_quality_short_chunk_chars, precision=0)
+                                    document_quality_short_chunk_warn_min_chunk_count = gr.Number(
+                                        label="过短分块告警起点",
+                                        value=initial_quality_short_chunk_warn_min_chunk_count,
+                                        precision=0,
+                                    )
+                                    document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
+                                    document_quality_config_export_button = gr.Button("下载当前配置")
+                                    document_quality_config_export_result = gr.HTML(
+                                        value=format_operation_result_html(None, title="下载结果"),
+                                        elem_id="document-quality-config-export-result",
+                                    )
 
             with gr.Tab("文档检索"):
                 with gr.Row(elem_id="search-top-row", equal_height=True):
@@ -2277,19 +2857,27 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             search_button = gr.Button("执行检索")
                     with gr.Column(scale=4):
                         search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
-                search_result_summary = gr.HTML(value=format_search_summary_html(None), elem_id="search-result-summary")
-                search_result_state = gr.State([])
-                search_query_state = gr.State("")
-                search_result = gr.Dataframe(
-                    headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                    datatype=["markdown"] * 9,
-                    interactive=False,
-                    row_count=0,
-                    column_count=9,
-                    label="检索结果列表",
-                    elem_id="search-results-table",
-                )
-                search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
+                with gr.Group(elem_id="search-result-workspace"):
+                    search_result_summary = gr.HTML(value=format_search_summary_html(None), elem_id="search-result-summary")
+                    search_result_state = gr.State([])
+                    search_query_state = gr.State("")
+                    search_selected_row_state = gr.State({})
+                    with gr.Row(elem_id="search-result-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            search_result = gr.Dataframe(
+                                headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                                datatype=["markdown"] * 9,
+                                interactive=False,
+                                row_count=0,
+                                column_count=9,
+                                label="检索结果列表",
+                                elem_id="search-results-table",
+                            )
+                        with gr.Column(scale=4):
+                            search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
+                    with gr.Row(elem_id="search-export-row"):
+                        search_export_button = gr.Button("下载结果")
+                        search_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="search-export-result")
 
             with gr.Tab("AI 质检"):
                 with gr.Row(elem_id="quality-top-row"):
@@ -2315,67 +2903,133 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         value=format_quality_template_html(default_template),
                         elem_id="quality-template-panel",
                     )
-                with gr.Row(elem_id="quality-summary-row", equal_height=True):
-                    with gr.Column(scale=1):
-                        quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
-                    with gr.Column(scale=1):
-                        quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
-                with gr.Row(elem_id="quality-claim-row", equal_height=True):
-                    with gr.Column(scale=5):
-                        quality_claims = gr.Dataframe(
-                            headers=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "来源文档", "来源位置"],
-                            datatype=["str"] * 7,
-                            interactive=False,
-                            row_count=0,
-                            column_count=7,
-                            label="Claim 列表",
-                            elem_id="quality-claims-table",
-                            value=initial_claim_rows,
-                        )
-                    with gr.Column(scale=4):
-                        selected_claim_state = gr.State(initial_selected_claim)
-                        claim_detail_state = gr.State(initial_claim_detail_map)
-                        recent_quality_state = gr.State(_initial_recent_results_state)
-                        evidence_items_state = gr.State(initial_evidence_items)
-                        claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
-                        quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
-                with gr.Row(elem_id="quality-evidence-row", equal_height=True):
-                    with gr.Column(scale=5):
-                        claim_evidence_table = gr.Dataframe(
-                            headers=["片段 ID", "文档", "定位", "检索来源", "匹配来源", "重排分", "证据摘要"],
-                            datatype=["str"] * 7,
-                            interactive=False,
-                            row_count=0,
-                            column_count=7,
-                            label="证据列表",
-                            elem_id="quality-evidence-table",
-                            value=initial_evidence_rows,
-                        )
-                    with gr.Column(scale=4):
-                        claim_evidence_detail = gr.HTML(
-                            value=initial_evidence_detail_html,
-                            elem_id="quality-evidence-detail",
-                        )
-                with gr.Row(elem_id="quality-history-row", equal_height=True):
-                    with gr.Column(scale=1):
-                        with gr.Group(elem_id="quality-history-panel"):
-                            recent_quality_note = gr.HTML(
-                                value=(
-                                    "<div>最近质检记录用于回看历史质检任务。"
-                                    "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
-                                ),
-                                elem_id="quality-history-note",
-                            )
-                            recent_quality_checks = gr.Dataframe(
-                                headers=["质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
-                                datatype=["str"] * 6,
+                formatted_quality_result_state = gr.State(initial_formatted_quality_result)
+                with gr.Group(elem_id="quality-main-workspace"):
+                    with gr.Row(elem_id="quality-summary-row", equal_height=True):
+                        with gr.Column(scale=1):
+                            quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
+                        with gr.Column(scale=1):
+                            quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
+                    quality_relation_note = gr.HTML(
+                        value=(
+                            "<div style='padding:8px 2px 14px 2px;'>"
+                            "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
+                            "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
+                            "</div>"
+                        ),
+                        elem_id="quality-relation-note",
+                    )
+                    with gr.Row(elem_id="quality-claim-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            quality_claims = gr.Dataframe(
+                                headers=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
+                                datatype=["str"] * 8,
                                 interactive=False,
                                 row_count=0,
-                                column_count=6,
-                                label="最近质检记录",
-                                elem_id="quality-recent-table",
-                                value=initial_recent_rows,
+                                column_count=8,
+                                label="Claim 列表",
+                                elem_id="quality-claims-table",
+                                value=initial_claim_rows,
                             )
+                        with gr.Column(scale=4):
+                            selected_claim_state = gr.State(initial_selected_claim)
+                            claim_detail_state = gr.State(initial_claim_detail_map)
+                            recent_quality_state = gr.State(_initial_recent_results_state)
+                            evidence_items_state = gr.State(initial_evidence_items)
+                            claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
+                            quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
+                    with gr.Row(elem_id="quality-evidence-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            claim_evidence_table = gr.Dataframe(
+                                headers=["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                                datatype=["str"] * 8,
+                                interactive=False,
+                                row_count=0,
+                                column_count=8,
+                                label="证据列表",
+                                elem_id="quality-evidence-table",
+                                value=initial_evidence_rows,
+                            )
+                        with gr.Column(scale=4):
+                            claim_evidence_detail = gr.HTML(
+                                value=initial_evidence_detail_html,
+                                elem_id="quality-evidence-detail",
+                            )
+                    with gr.Row(elem_id="quality-export-row"):
+                        quality_export_button = gr.Button("下载结果")
+                        quality_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="quality-export-result",
+                        )
+                with gr.Group(elem_id="quality-followup-workspace"):
+                    with gr.Row(elem_id="quality-history-row", equal_height=True):
+                        with gr.Column(scale=1):
+                            with gr.Group(elem_id="quality-history-panel"):
+                                recent_quality_note = gr.HTML(
+                                    value=(
+                                        "<div>最近质检记录用于回看历史质检任务。"
+                                        "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
+                                    ),
+                                    elem_id="quality-history-note",
+                                )
+                                recent_quality_checks = gr.Dataframe(
+                                    headers=["质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
+                                    datatype=["str"] * 6,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=6,
+                                    label="最近质检记录",
+                                    elem_id="quality-recent-table",
+                                    value=initial_recent_rows,
+                                )
+                    with gr.Group(elem_id="quality-evaluation-panel"):
+                        quality_evaluation_help = gr.HTML(
+                            value=format_quality_evaluation_help_html(),
+                            elem_id="quality-evaluation-help",
+                        )
+                        quality_evaluation_cases = gr.Textbox(
+                            label="效果评测样例 JSON",
+                            lines=12,
+                            value=initial_quality_evaluation_cases,
+                            placeholder="输入 JSON 数组，每项至少包含 input_text，可选 expected_overall_verdict / expected_risk_level / expected_claim_count",
+                        )
+                        quality_evaluation_button = gr.Button("执行效果评测")
+                        quality_evaluation_summary = gr.HTML(
+                            value=initial_quality_evaluation_summary,
+                            elem_id="quality-evaluation-summary",
+                        )
+                        quality_evaluation_result_state = gr.State(initial_quality_evaluation_result)
+                        quality_evaluation_table = gr.Dataframe(
+                            headers=[
+                                "样例 ID",
+                                "预期结论",
+                                "实际结论",
+                                "结论命中",
+                                "预期风险",
+                                "实际风险",
+                                "风险命中",
+                                "预期 Claim 数",
+                                "实际 Claim 数",
+                                "Claim 数命中",
+                                "宽松命中",
+                                "完全命中",
+                                "差异说明",
+                                "建议排查方向",
+                                "输入摘要",
+                            ],
+                            datatype=["str"] * 15,
+                            interactive=False,
+                            row_count=0,
+                            column_count=15,
+                            label="效果评测明细",
+                            elem_id="quality-evaluation-table",
+                            value=initial_quality_evaluation_rows,
+                        )
+                        quality_evaluation_export_button = gr.Button("下载评测结果")
+                        quality_evaluation_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="quality-evaluation-export-result",
+                        )
 
             with gr.Tab("人工审核"):
                 review_candidate_state = gr.State(initial_review_candidate_items_state)
@@ -2384,59 +3038,60 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_selected_claim_state = gr.State(initial_review_selected_claim_id)
                 review_claim_detail_state = gr.State(initial_review_claim_detail_map)
                 review_evidence_items_state = gr.State(initial_review_evidence_items)
-                with gr.Row(elem_id="review-top-row", equal_height=True):
-                    with gr.Column(scale=5):
-                        with gr.Row():
-                            review_scope_filter = gr.Dropdown(
-                                label="列表范围",
-                                choices=review_scope_choices,
-                                value=review_scope_choices[0],
-                                interactive=True,
+                with gr.Group(elem_id="review-focus-panel"):
+                    with gr.Row(elem_id="review-top-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            with gr.Row():
+                                review_scope_filter = gr.Dropdown(
+                                    label="列表范围",
+                                    choices=review_scope_choices,
+                                    value=review_scope_choices[0],
+                                    interactive=True,
+                                )
+                                review_risk_filter = gr.Dropdown(
+                                    label="风险筛选",
+                                    choices=review_risk_choices,
+                                    value=review_risk_choices[0],
+                                    interactive=True,
+                                )
+                            review_pending_candidates = gr.Dataframe(
+                                headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                                datatype=["str"] * 8,
+                                interactive=False,
+                                row_count=0,
+                                column_count=8,
+                                label="待处理记录",
+                                elem_id="review-pending-table",
+                                value=initial_review_pending_rows,
                             )
-                            review_risk_filter = gr.Dropdown(
-                                label="风险筛选",
-                                choices=review_risk_choices,
-                                value=review_risk_choices[0],
-                                interactive=True,
+                            review_processed_candidates = gr.Dataframe(
+                                headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                                datatype=["str"] * 8,
+                                interactive=False,
+                                row_count=0,
+                                column_count=8,
+                                label="已处理 Claim",
+                                elem_id="review-processed-table",
+                                value=initial_review_processed_rows,
                             )
-                        review_pending_candidates = gr.Dataframe(
-                            headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                            datatype=["str"] * 8,
-                            interactive=False,
-                            row_count=0,
-                            column_count=8,
-                            label="待处理记录",
-                            elem_id="review-pending-table",
-                            value=initial_review_pending_rows,
-                        )
-                        review_processed_candidates = gr.Dataframe(
-                            headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                            datatype=["str"] * 8,
-                            interactive=False,
-                            row_count=0,
-                            column_count=8,
-                            label="已处理 Claim",
-                            elem_id="review-processed-table",
-                            value=initial_review_processed_rows,
-                        )
-                    with gr.Column(scale=4):
-                        review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
-                with gr.Row(elem_id="review-summary-row", equal_height=True):
-                    with gr.Column(scale=5):
-                        review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
-                    with gr.Column(scale=4):
-                        review_evidence_detail = gr.HTML(
-                            value=initial_review_evidence_detail_html,
-                            elem_id="review-evidence-detail",
-                        )
+                        with gr.Column(scale=4):
+                            review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
+                    with gr.Row(elem_id="review-summary-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
+                        with gr.Column(scale=4):
+                            review_evidence_detail = gr.HTML(
+                                value=initial_review_evidence_detail_html,
+                                elem_id="review-evidence-detail",
+                            )
                 with gr.Row(elem_id="review-evidence-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_evidence_table = gr.Dataframe(
-                            headers=["片段 ID", "文档", "定位", "检索来源", "匹配来源", "重排分", "证据摘要"],
-                            datatype=["str"] * 7,
+                            headers=["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                            datatype=["str"] * 8,
                             interactive=False,
                             row_count=0,
-                            column_count=7,
+                            column_count=8,
                             label="关联证据列表",
                             elem_id="review-evidence-table",
                             value=initial_review_evidence_rows,
@@ -2456,6 +3111,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=format_operation_result_html(None, title="审核结果"),
                                 elem_id="review-result-panel",
                             )
+                            review_export_button = gr.Button("下载当前审核结果")
+                            review_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="review-export-result")
                 with gr.Row(elem_id="review-record-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_history = gr.Dataframe(
@@ -2477,72 +3134,79 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             with gr.Tab("功能设置"):
                 settings_template_state = gr.State(initial_settings_template_state)
                 settings_selected_template_state = gr.State(initial_settings_selected_template_id)
-                with gr.Row(elem_id="settings-top-row", equal_height=True):
-                    with gr.Column(scale=1):
-                        settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
-                with gr.Row(elem_id="settings-main-row", equal_height=True):
-                    with gr.Column(scale=4):
-                        settings_template_table = gr.Dataframe(
-                            headers=["模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
-                            datatype=["str"] * 6,
-                            interactive=False,
-                            row_count=0,
-                            column_count=6,
-                            label="模板列表",
-                            elem_id="settings-template-table",
-                            value=initial_settings_template_rows,
-                        )
-                        with gr.Row(elem_id="settings-list-actions"):
-                            settings_new_button = gr.Button("新建模板")
-                            settings_refresh_button = gr.Button("刷新模板")
-                    with gr.Column(scale=5):
-                        settings_template_detail = gr.HTML(
-                            value=initial_settings_template_detail_html,
-                            elem_id="settings-template-detail",
-                        )
-                        with gr.Group(elem_id="settings-template-form"):
-                            gr.Markdown("### 基础信息")
-                            with gr.Group(elem_id="settings-basic-group"):
-                                with gr.Row():
-                                    settings_template_id = gr.Textbox(label="模板 ID", value=initial_settings_template_id_value, scale=2)
-                                    settings_template_name = gr.Textbox(label="模板名称", value=initial_settings_template_name_value, scale=3)
-                                settings_template_description = gr.Textbox(label="模板说明", lines=3, value=initial_settings_description_value)
-                                settings_rule_tags = gr.Textbox(
-                                    label="规则标签",
-                                    value=initial_settings_rule_tags_value,
-                                    placeholder="多个标签用逗号、顿号或换行分隔",
-                                )
-                            gr.Markdown("### 检索策略")
-                            with gr.Group(elem_id="settings-policy-group"):
-                                with gr.Row():
-                                    settings_fulltext_top_k = gr.Number(label="全文召回", value=initial_settings_fulltext_top_k, precision=0)
-                                    settings_vector_top_k = gr.Number(label="向量召回", value=initial_settings_vector_top_k, precision=0)
-                                    settings_final_top_k = gr.Number(label="最终返回", value=initial_settings_final_top_k, precision=0)
-                                with gr.Row():
-                                    settings_neighbor_window = gr.Number(label="邻居窗口", value=initial_settings_neighbor_window, precision=0)
-                                    settings_section_max_chars = gr.Number(label="章节最大字数", value=initial_settings_section_max_chars, precision=0)
-                                with gr.Row():
-                                    settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_settings_use_rerank)
-                                    settings_include_section_context = gr.Checkbox(label="章节上下文", value=initial_settings_include_section_context)
-                            gr.Markdown("### Prompt 配置")
-                            with gr.Group(elem_id="settings-prompt-group"):
-                                settings_system_prompt = gr.Textbox(label="系统提示词", lines=8, value=initial_settings_system_prompt)
-                                settings_user_prompt_template = gr.Textbox(label="用户提示模板", lines=8, value=initial_settings_user_prompt_template)
-                            settings_delete_confirm = gr.Checkbox(
-                                label="我确认删除当前模板",
-                                value=initial_settings_delete_confirm,
+                with gr.Group(elem_id="settings-overview-panel"):
+                    with gr.Row(elem_id="settings-top-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
+                        with gr.Column(scale=4):
+                            settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
+                with gr.Group(elem_id="settings-workspace-panel"):
+                    with gr.Row(elem_id="settings-main-row", equal_height=True):
+                        with gr.Column(scale=4):
+                            settings_template_table = gr.Dataframe(
+                                headers=["模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
+                                datatype=["str"] * 6,
+                                interactive=False,
+                                row_count=0,
+                                column_count=6,
+                                label="模板列表",
+                                elem_id="settings-template-table",
+                                value=initial_settings_template_rows,
                             )
-                            with gr.Row(elem_id="settings-form-actions"):
-                                settings_save_button = gr.Button("保存模板", variant="primary")
-                                settings_delete_button = gr.Button("删除模板", variant="stop")
-                with gr.Row(elem_id="settings-bottom-row", equal_height=True):
-                    with gr.Column(scale=5):
-                        settings_result = gr.HTML(
-                            value=initial_settings_result_html,
-                            elem_id="settings-result-panel",
-                        )
-                    with gr.Column(scale=4):
-                        settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
+                            with gr.Row(elem_id="settings-list-actions"):
+                                settings_new_button = gr.Button("新建模板")
+                                settings_refresh_button = gr.Button("刷新模板")
+                        with gr.Column(scale=5):
+                            settings_template_detail = gr.HTML(
+                                value=initial_settings_template_detail_html,
+                                elem_id="settings-template-detail",
+                            )
+                            with gr.Group(elem_id="settings-template-form"):
+                                gr.Markdown("### 基础信息")
+                                with gr.Group(elem_id="settings-basic-group"):
+                                    with gr.Row():
+                                        settings_template_id = gr.Textbox(label="模板 ID", value=initial_settings_template_id_value, scale=2)
+                                        settings_template_name = gr.Textbox(label="模板名称", value=initial_settings_template_name_value, scale=3)
+                                    settings_template_description = gr.Textbox(label="模板说明", lines=3, value=initial_settings_description_value)
+                                    settings_rule_tags = gr.Textbox(
+                                        label="规则标签",
+                                        value=initial_settings_rule_tags_value,
+                                        placeholder="多个标签用逗号、顿号或换行分隔",
+                                    )
+                                gr.Markdown("### 检索策略")
+                                with gr.Group(elem_id="settings-policy-group"):
+                                    with gr.Row():
+                                        settings_fulltext_top_k = gr.Number(label="全文召回", value=initial_settings_fulltext_top_k, precision=0)
+                                        settings_vector_top_k = gr.Number(label="向量召回", value=initial_settings_vector_top_k, precision=0)
+                                        settings_final_top_k = gr.Number(label="最终返回", value=initial_settings_final_top_k, precision=0)
+                                    with gr.Row():
+                                        settings_neighbor_window = gr.Number(label="邻居窗口", value=initial_settings_neighbor_window, precision=0)
+                                        settings_section_max_chars = gr.Number(label="章节最大字数", value=initial_settings_section_max_chars, precision=0)
+                                    with gr.Row():
+                                        settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_settings_use_rerank)
+                                        settings_include_section_context = gr.Checkbox(label="章节上下文", value=initial_settings_include_section_context)
+                                gr.Markdown("### Prompt 配置")
+                                with gr.Group(elem_id="settings-prompt-group"):
+                                    settings_system_prompt = gr.Textbox(label="系统提示词", lines=8, value=initial_settings_system_prompt)
+                                    settings_user_prompt_template = gr.Textbox(label="用户提示模板", lines=8, value=initial_settings_user_prompt_template)
+                                settings_delete_confirm = gr.Checkbox(
+                                    label="我确认删除当前模板",
+                                    value=initial_settings_delete_confirm,
+                                )
+                                with gr.Row(elem_id="settings-form-actions"):
+                                    settings_save_button = gr.Button("保存模板", variant="primary")
+                                    settings_delete_button = gr.Button("删除模板", variant="stop")
+                with gr.Group(elem_id="settings-footer-panel"):
+                    with gr.Row(elem_id="settings-bottom-row", equal_height=True):
+                        with gr.Column(scale=5):
+                            settings_result = gr.HTML(
+                                value=initial_settings_result_html,
+                                elem_id="settings-result-panel",
+                            )
+                        with gr.Column(scale=4):
+                            with gr.Row(elem_id="settings-export-row"):
+                                settings_export_button = gr.Button("下载当前配置")
+                                settings_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="settings-export-result")
 
         scan_button.click(
             fn=load_document_management_state,
@@ -2574,7 +3238,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_short_chunk_chars,
                 document_quality_short_chunk_warn_min_chunk_count,
                 document_quality_config_result,
-                document_quality_export_result,
+                document_quality_csv_export_result,
             ],
         )
         document_choices.change(
@@ -2603,7 +3267,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_short_chunk_chars,
                 document_quality_short_chunk_warn_min_chunk_count,
                 document_quality_config_result,
-                document_quality_export_result,
+                document_quality_csv_export_result,
             ],
         )
         register_button.click(
@@ -2638,7 +3302,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_short_chunk_chars,
                 document_quality_short_chunk_warn_min_chunk_count,
                 document_quality_config_result,
-                document_quality_export_result,
+                document_quality_csv_export_result,
             ],
         )
         register_all_button.click(
@@ -2672,7 +3336,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_short_chunk_chars,
                 document_quality_short_chunk_warn_min_chunk_count,
                 document_quality_config_result,
-                document_quality_export_result,
+                document_quality_csv_export_result,
             ],
         )
         status_button.click(
@@ -2705,7 +3369,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_short_chunk_chars,
                 document_quality_short_chunk_warn_min_chunk_count,
                 document_quality_config_result,
-                document_quality_export_result,
+                document_quality_csv_export_result,
             ],
         )
         rebuild_button.click(
@@ -2761,13 +3425,27 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             inputs=[document_quality_search_state, document_quality_search_query_state],
             outputs=[document_quality_search_detail, document_quality_search_results],
         )
+        document_quality_result_export_button.click(
+            fn=export_document_quality_result,
+            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state],
+            outputs=[document_quality_result_export_result],
+        )
+        document_quality_search_export_button.click(
+            fn=export_document_quality_search_result,
+            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state],
+            outputs=[document_quality_result_export_result],
+        )
         document_quality_batch_button.click(
             fn=run_batch_document_quality,
             outputs=[document_quality_batch_summary, document_quality_batch_table],
         )
-        document_quality_export_button.click(
+        document_quality_batch_export_button.click(
+            fn=export_document_quality_batch_result,
+            outputs=[document_quality_batch_export_result],
+        )
+        document_quality_csv_export_button.click(
             fn=export_document_quality_csv,
-            outputs=[document_quality_export_result],
+            outputs=[document_quality_csv_export_result],
         )
         document_quality_config_save_button.click(
             fn=save_document_quality_config,
@@ -2792,15 +3470,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_config_result,
             ],
         )
+        document_quality_config_export_button.click(
+            fn=export_document_quality_config_result,
+            inputs=[
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+            ],
+            outputs=[document_quality_config_export_result],
+        )
         search_button.click(
             fn=run_search,
             inputs=[search_query, search_top_k],
-            outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail],
+            outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail, search_selected_row_state],
         )
         search_result.select(
             fn=select_search_result,
             inputs=[search_result_state, search_query_state],
-            outputs=[search_result_detail, search_result],
+            outputs=[search_result_detail, search_result, search_selected_row_state],
+        )
+        search_export_button.click(
+            fn=export_search_results,
+            inputs=[search_result_state, search_selected_row_state, search_query_state],
+            outputs=[search_export_result],
         )
         quality_button.click(
             fn=run_quality_check,
@@ -2808,6 +3504,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[
                 quality_progress,
                 quality_result,
+                formatted_quality_result_state,
                 quality_claims,
                 selected_claim_state,
                 claim_detail_state,
@@ -2818,6 +3515,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 claim_evidence_detail,
                 recent_quality_state,
                 recent_quality_checks,
+                quality_evaluation_cases,
             ],
         )
         quality_template.change(
@@ -2830,6 +3528,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[
                 quality_progress,
                 quality_result,
+                formatted_quality_result_state,
                 quality_claims,
                 selected_claim_state,
                 claim_detail_state,
@@ -2838,8 +3537,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
-                recent_quality_checks,
                 recent_quality_state,
+                recent_quality_checks,
+                quality_evaluation_cases,
             ],
         )
         recent_quality_checks.select(
@@ -2848,6 +3548,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[
                 quality_progress,
                 quality_result,
+                formatted_quality_result_state,
                 quality_claims,
                 selected_claim_state,
                 claim_detail_state,
@@ -2856,17 +3557,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
+                quality_evaluation_cases,
             ],
         )
         quality_claims.select(
             fn=select_quality_claim,
-            inputs=[quality_claims, claim_detail_state],
-            outputs=[claim_detail_view, claim_evidence_table, quality_review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail],
+            inputs=[quality_claims, claim_detail_state, formatted_quality_result_state],
+            outputs=[claim_detail_view, claim_evidence_table, quality_review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail, quality_evaluation_cases],
         )
         claim_evidence_table.select(
             fn=select_quality_evidence,
             inputs=[evidence_items_state],
             outputs=[claim_evidence_detail],
+        )
+        quality_export_button.click(
+            fn=export_quality_results,
+            inputs=[formatted_quality_result_state, selected_claim_state, claim_detail_state, evidence_items_state],
+            outputs=[quality_export_result],
+        )
+        quality_evaluation_button.click(
+            fn=run_quality_evaluation,
+            inputs=[quality_evaluation_cases, quality_template],
+            outputs=[quality_evaluation_summary, quality_evaluation_table, quality_evaluation_result_state],
+        )
+        quality_evaluation_export_button.click(
+            fn=export_quality_evaluation_results,
+            inputs=[quality_evaluation_result_state],
+            outputs=[quality_evaluation_export_result],
         )
         settings_refresh_button.click(
             fn=refresh_settings_workspace,
@@ -3010,6 +3727,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_template_detail,
             ],
         )
+        settings_export_button.click(
+            fn=export_settings_result,
+            inputs=[settings_selected_template_state],
+            outputs=[settings_export_result],
+        )
         review_history_button.click(
             fn=list_review_workspace,
             inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
@@ -3031,13 +3753,23 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_record_detail,
             ],
         )
+        review_export_button.click(
+            fn=export_review_result,
+            inputs=[
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_evidence_items_state,
+                review_selected_record_state,
+                review_history_state,
+            ],
+            outputs=[review_export_result],
+        )
         review_scope_filter.change(
-            fn=list_review_workspace,
-            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            fn=change_review_filters,
+            inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_pending_candidates,
                 review_processed_candidates,
-                review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
@@ -3046,19 +3778,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
-                review_history,
-                review_history_state,
                 review_selected_record_state,
                 review_record_detail,
             ],
         )
         review_risk_filter.change(
-            fn=list_review_workspace,
-            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            fn=change_review_filters,
+            inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_pending_candidates,
                 review_processed_candidates,
-                review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
@@ -3067,8 +3796,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
-                review_history,
-                review_history_state,
                 review_selected_record_state,
                 review_record_detail,
             ],

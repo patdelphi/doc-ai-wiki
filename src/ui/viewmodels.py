@@ -125,17 +125,39 @@ def format_search_help_html() -> str:
 
     return _build_panel_html(
         title="功能说明",
-        description="当前为混合检索：会综合全文召回、向量召回和重排结果，适合日常知识查询。",
+        description="文档检索用于在当前知识库中查找相关内容，结果来自全文召回、向量召回和重排的综合排序。",
         cards=[
-            ("支持输入", "支持关键词、短语、整句输入"),
-            ("匹配方式", "混合召回，偏模糊"),
+            ("支持输入", "支持关键词、短语、整句和多组关键词"),
+            ("匹配方式", "混合召回，偏模糊，不是严格逐字匹配"),
             ("多组关键词", "支持，建议空格或逗号分隔"),
             ("正则表达式", "不支持正则表达式"),
         ],
         notes=[
-            "检索内容可以输入一个关键词，也可以输入一句完整问题。",
+            "可以输入一个关键词，也可以输入一句完整问题。",
             "如果输入多组关键词，系统会把它们合并成一次查询并综合排序。",
-            "更适合找相关内容，不保证逐字严格匹配。",
+            "点击结果列表后，右侧会展示原文详情、定位和关键词高亮内容。",
+        ],
+        tone="neutral",
+        min_height_px=260,
+    )
+
+
+def format_document_management_help_html() -> str:
+    """构建文档管理功能说明面板。"""
+
+    return _build_panel_html(
+        title="功能说明",
+        description="文档管理用于查看输入文档、执行入库与重建，并检查数据库和索引状态。",
+        cards=[
+            ("先看哪里", "先看文档概览、数据库状态和现有文档列表"),
+            ("常用操作", "刷新列表、注册当前文档、注册全部待处理、重建索引"),
+            ("入库质检", "可检查章节、分块、索引和文档内检索效果"),
+            ("适合场景", "日常入库、异常排查、批量质检和结果导出"),
+        ],
+        notes=[
+            "建议先刷新文档列表，再选择目标文档执行注册或重建。",
+            "入库质检区域位于文档管理页底部，默认折叠隐藏，需要时展开即可继续执行单文档检查、批量质检和阈值配置。",
+            "如果页面提示建议重建，通常说明索引未完成、部分失败或源内容已变化。",
         ],
         tone="neutral",
         min_height_px=260,
@@ -149,18 +171,53 @@ def format_quality_help_html() -> str:
         title="功能说明",
         description="AI 质检会把输入内容拆成多条 Claim，结合规则、知识库证据和模型判定给出初步结论。",
         cards=[
-            ("适合输入", "多条明确陈述、待核验说法、待复核段落"),
-            ("处理方式", "拆分 Claim -> 检索证据 -> 调用模型/规则判定"),
-            ("结果重点", "总体结论、风险等级、置信度、证据定位"),
-            ("后续动作", "高风险或需复核内容建议转人工审核"),
+            ("适合输入", "待核验陈述、成段描述、需要复核的业务内容"),
+            ("处理流程", "拆分 Claim -> 匹配规则 -> 检索证据 -> 模型或启发式判定"),
+            ("结果重点", "总体结论、风险等级、Claim 列表、证据链和历史记录"),
+            ("效果评测", "支持批量样例评测，验证结论、风险和 Claim 数是否符合预期"),
         ],
         notes=[
-            "建议一行或一句表达一个明确结论，便于系统逐条分析。",
-            "医学、古文、绝对化表述请优先选择更严格的模板。",
-            "如果当前未配置模型，系统会回退到规则与启发式判定。",
+            "建议一行或一句表达一个明确结论，便于系统逐条拆分和定位问题。",
+            "医学、古文、绝对化表述建议优先选择更严格的模板。",
+            "如果当前未配置模型，系统会回退到规则与启发式判定，因此结果应更保守地看待。",
         ],
         tone="neutral",
         min_height_px=260,
+    )
+
+
+def format_quality_evaluation_help_html() -> str:
+    """构建 AI 质检效果评测说明面板。"""
+
+    return _build_panel_html(
+        title="效果评测说明",
+        description="效果评测用于验证 AI 质检结果是否符合你的预期，不是再次做知识检索，而是用样例集批量比较“预期结果”和“实际质检结果”。建议先看核心命中，再看宽松命中，最后再看完全命中。",
+        cards=[
+            ("它在做什么", "逐条执行质检，再把实际结论与预期结论做比对"),
+            ("适合怎么用", "回归测试、模板调优、误判复现、版本前后效果对比"),
+            ("核心命中", "只看结论是否一致，适合先判断整体方向是否跑偏"),
+            ("宽松命中", "结论、风险、Claim 数三项里命中至少两项，适合日常验收"),
+            ("完全命中", "三项都一致才算通过，是最严格指标"),
+            ("为什么会出现 0 条完全命中", "常见原因是 Claim 拆分数量或风险等级与预期略有偏差，不一定代表整体不可用"),
+        ],
+        notes=[
+            "样例 JSON：每条至少提供 input_text；也可补预期结论、预期风险和预期 Claim 数。",
+            "看哪里：先看评测摘要里的核心命中、宽松命中和主要失败原因，再看评测明细里具体是哪一项没有命中。",
+            "样例 ID：当前评测样例的唯一标识，便于定位问题；如果来自当前 Claim，通常会直接使用 Claim ID。",
+            "预期结论 / 预期风险 / 预期 Claim 数：你认为这条输入理应得到的质检结果，用来做对照基准。",
+            "实际结论 / 实际风险 / 实际 Claim 数：系统本次真实跑出的结果，用于和预期逐项比较。",
+            "结论命中：实际结论是否和预期结论一致。",
+            "风险命中：实际风险等级是否和预期风险一致。",
+            "Claim 数命中：系统拆出的 Claim 数量是否和预期一致。",
+            "宽松命中：同一条样例中，结论、风险、Claim 数三项里至少两项一致。",
+            "完全命中：同一条样例的结论、风险、Claim 数三项都一致时记为完全命中。",
+            "差异说明：告诉你当前样例具体差在哪一项。",
+            "建议排查方向：帮助判断更像是模板判定问题、风险分级问题，还是 Claim 拆分问题。",
+            "输入摘要：该样例原始输入的简短预览，便于快速定位是哪条文本。",
+        ],
+        tone="neutral",
+        min_height_px=380,
+        badge_text="评测解释",
     )
 
 
@@ -169,16 +226,17 @@ def format_review_help_html() -> str:
 
     return _build_panel_html(
         title="功能说明",
-        description="人工审核用于先选择待审核 Claim，再查看证据并提交审核结论；已审核记录可在下方回看。",
+        description="人工审核用于处理 AI 质检产生的待审核 Claim，并沉淀最终人工结论。",
         cards=[
-            ("先选记录", "先从可审核记录列表中选择一条 Claim，再开始审核"),
-            ("查看证据", "选中记录后，可同步查看 Claim 详情、证据列表与证据详情"),
-            ("提交审核", "填写审核动作和备注后提交，列表与历史会自动刷新"),
+            ("先做什么", "先在待处理记录或已处理 Claim 中选择一条记录"),
+            ("看什么", "查看 Claim 详情、证据列表、证据详情和历史审核记录"),
+            ("怎么提交", "填写审核动作和备注后提交，页面会自动刷新"),
+            ("历史用途", "已审核记录用于回看、定位和复现之前的人工处理结果"),
         ],
         notes=[
-            "可审核列表优先显示待处理记录，并保留历史质检产生的 Claim。",
-            "审核动作、审核状态、审核结果均统一使用中文展示。",
-            "下方的已审核记录用于回看历史，不再作为主入口。",
+            "可审核列表优先显示待处理记录，并支持按范围和风险等级筛选。",
+            "审核动作、审核状态和页面展示结果都统一使用中文。",
+            "如果某条 Claim 已处理但需要再次确认，可从已处理 Claim 或审核历史中重新定位。",
         ],
         tone="neutral",
         min_height_px=260,
@@ -189,17 +247,18 @@ def format_settings_help_html() -> str:
     """构建功能设置说明面板。"""
 
     return _build_panel_html(
-        title="功能设置",
-        description="用于维护质检模板和查看关键运行配置，优先减少改代码频率。",
+        title="功能说明",
+        description="功能设置用于维护质检模板，并查看当前系统实际生效的关键运行配置。",
         cards=[
             ("模板管理", "支持新增、编辑、删除模板"),
-            ("配置查看", "展示当前路径、模型与检索关键配置"),
-            ("生效方式", "模板保存后可立即在质检页选择"),
+            ("可改内容", "模板名称、规则标签、检索策略、系统提示词、用户提示模板"),
+            ("配置查看", "展示输入目录、模板目录、模型与检索关键配置"),
+            ("生效方式", "模板保存后可立即在 AI 质检页选择"),
         ],
         notes=[
-            "建议优先维护模板名称、规则标签、检索策略和提示词。",
-            "内置模板在当前策略下也允许删除，删除后将从列表中隐藏。",
-            "运行配置当前以只读展示为主，便于确认实际生效参数。",
+            "建议先从现有模板复制或修改，避免直接大幅改动默认策略。",
+            "删除模板前请确认该模板是否仍被日常流程使用。",
+            "运行配置当前以只读展示为主，用于确认系统实际生效参数。",
         ],
         tone="neutral",
         min_height_px=260,
@@ -226,6 +285,24 @@ def format_settings_runtime_html(runtime_config: dict | None) -> str:
         ],
         tone="neutral",
         min_height_px=260,
+    )
+
+
+def format_settings_runtime_markdown(runtime_config: dict | None) -> str:
+    """将运行配置概览转换为 Markdown。"""
+
+    resolved = runtime_config or {}
+    return "\n".join(
+        [
+            "### 运行配置",
+            f'- 输入目录：{_display_text(resolved.get("input_root"))}',
+            f'- 模板目录：{_display_text(resolved.get("templates_dir"))}',
+            f'- LLM Provider：{_display_text(resolved.get("llm_provider"))}',
+            f'- Embedding：{_display_text(resolved.get("embedding_provider"))}',
+            f'- 重排：{_display_text(resolved.get("rerank_provider"))} / 启用={_display_text(resolved.get("rerank_enabled"))}',
+            f'- 最大输入长度：{_display_text(resolved.get("max_input_chars"))}',
+            f'- 审核候选抓取上限：{_display_text(resolved.get("review_candidate_limit"))}',
+        ]
     )
 
 
@@ -259,6 +336,29 @@ def format_settings_template_detail_html(template: dict | None) -> str:
             f'上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
         ],
         tone="neutral",
+    )
+
+
+def format_settings_template_detail_markdown(template: dict | None) -> str:
+    """将模板详情转换为 Markdown。"""
+
+    resolved = template or {}
+    if not resolved.get("template_id"):
+        return "### 模板详情\n- 当前状态：未选择模板"
+    retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+    return "\n".join(
+        [
+            "### 模板详情",
+            f'- 模板 ID：{_display_text(resolved.get("template_id"))}',
+            f'- 模板名称：{_display_text(resolved.get("template_name"))}',
+            f'- 模板来源：{_display_text(resolved.get("source_label") or resolved.get("source_type"))}',
+            f'- 规则标签：{_display_text(resolved.get("rule_tags"))}',
+            f'- 模板说明：{_display_text(resolved.get("description"))}',
+            f'- 全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
+            f'- 向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
+            f'- 最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
+            f'- 上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+        ]
     )
 
 
@@ -354,6 +454,253 @@ def format_quality_progress_html(progress: dict | None) -> str:
         notes=notes,
         tone=tone,
     )
+
+
+def format_quality_evaluation_summary_html(result: dict | None) -> str:
+    """构建 AI 质检效果评测摘要。"""
+
+    metrics = _build_quality_evaluation_metrics(result)
+    case_count = metrics["case_count"]
+    exact_match_count = metrics["exact_match_count"]
+    description = "用于批量验证 AI 质检的结论、风险等级和 Claim 拆分是否符合预期。建议先看核心命中，再看宽松命中。"
+    if case_count > 0:
+        description = (
+            f'本次共评测 {case_count} 条样例，核心命中 {metrics["core_match_count"]} 条，'
+            f'宽松命中 {metrics["loose_match_count"]} 条，完全命中 {exact_match_count} 条。'
+        )
+    return _build_panel_html(
+        title="效果评测",
+        description=description,
+        cards=[
+            ("样例总数", _format_number(case_count)),
+            ("核心命中", f'{metrics["core_match_count"]} / {case_count} ({metrics["core_match_rate"]})' if case_count > 0 else "0"),
+            ("宽松命中", f'{metrics["loose_match_count"]} / {case_count} ({metrics["loose_match_rate"]})' if case_count > 0 else "0"),
+            ("完全命中", f'{exact_match_count} / {case_count} ({metrics["exact_match_rate"]})' if case_count > 0 else "0"),
+            ("结论命中率", metrics["overall_verdict_match_rate"]),
+            ("风险命中率", metrics["risk_level_match_rate"]),
+            ("Claim 数命中率", metrics["claim_count_match_rate"]),
+            ("主要失败原因", metrics["primary_failure_reason"]),
+        ],
+        notes=[
+            "核心命中：只看结论是否一致，适合先判断系统有没有明显跑偏。",
+            "宽松命中：三项里至少两项一致，适合日常验收和模板迭代。",
+            "完全命中：三项都一致才算命中，口径最严格。",
+            "建议优先关注差异说明和排查方向，不要只看完全命中是否为 0。",
+        ],
+        tone="success" if case_count > 0 and metrics["core_match_count"] == case_count else "warning" if case_count > 0 else "neutral",
+    )
+
+
+def build_quality_evaluation_rows(result: dict | None) -> list[list[str]]:
+    """将 AI 质检效果评测结果转换为表格行。"""
+
+    rows = (result or {}).get("rows") or []
+    return [
+        [
+            _display_text(item.get("case_id")),
+            _format_verdict_label(item.get("expected_overall_verdict")),
+            _format_verdict_label(item.get("actual_overall_verdict")),
+            _format_match_label(_get_quality_evaluation_match_state(item, "overall_verdict")),
+            _format_risk_level_label(item.get("expected_risk_level")),
+            _format_risk_level_label(item.get("actual_risk_level")),
+            _format_match_label(_get_quality_evaluation_match_state(item, "risk_level")),
+            _display_text(item.get("expected_claim_count")),
+            _display_text(item.get("actual_claim_count")),
+            _format_match_label(_get_quality_evaluation_match_state(item, "claim_count")),
+            _format_match_label(_is_quality_evaluation_loose_match(item)),
+            "是" if item.get("all_matched") else "否",
+            _describe_quality_evaluation_diff(item),
+            _suggest_quality_evaluation_troubleshooting(item),
+            _truncate_text(item.get("input_text"), limit=80),
+        ]
+        for item in rows
+    ]
+
+
+def format_quality_evaluation_result_markdown(result: dict | None) -> str:
+    """将效果评测摘要转换为 Markdown 文本。"""
+
+    metrics = _build_quality_evaluation_metrics(result)
+    return "\n".join(
+        [
+            "### 效果评测",
+            f'- 样例总数：{_format_number(metrics["case_count"])}',
+            f'- 核心命中：{_format_number(metrics["core_match_count"])} / {metrics["case_count"]}（{metrics["core_match_rate"]}）' if metrics["case_count"] else "- 核心命中：0",
+            f'- 宽松命中：{_format_number(metrics["loose_match_count"])} / {metrics["case_count"]}（{metrics["loose_match_rate"]}）' if metrics["case_count"] else "- 宽松命中：0",
+            f'- 完全命中：{_format_number(metrics["exact_match_count"])} / {metrics["case_count"]}（{metrics["exact_match_rate"]}）' if metrics["case_count"] else "- 完全命中：0",
+            f'- 结论命中率：{metrics["overall_verdict_match_rate"]}',
+            f'- 风险命中率：{metrics["risk_level_match_rate"]}',
+            f'- Claim 数命中率：{metrics["claim_count_match_rate"]}',
+            f'- 主要失败原因：{metrics["primary_failure_reason"]}',
+        ]
+    )
+
+
+def format_quality_evaluation_summary_markdown(result: dict | None) -> str:
+    """兼容旧调用，输出细化后的效果评测摘要 Markdown。"""
+
+    return format_quality_evaluation_result_markdown(result)
+
+
+def format_quality_evaluation_export_markdown(result: dict | None) -> str:
+    """汇总效果评测摘要与明细，用于导出。"""
+
+    sections = [format_quality_evaluation_result_markdown(result), "", "#### 评测明细"]
+    rows = build_quality_evaluation_rows(result)
+    if rows:
+        sections.append(
+            _build_markdown_table(
+                [
+                    "样例 ID",
+                    "预期结论",
+                    "实际结论",
+                    "结论命中",
+                    "预期风险",
+                    "实际风险",
+                    "风险命中",
+                    "预期 Claim 数",
+                    "实际 Claim 数",
+                    "Claim 数命中",
+                    "宽松命中",
+                    "完全命中",
+                    "差异说明",
+                    "建议排查方向",
+                    "输入摘要",
+                ],
+                rows,
+            )
+        )
+    else:
+        sections.append("- 暂无评测结果")
+    return "\n".join(sections)
+
+
+def _build_quality_evaluation_metrics(result: dict | None) -> dict[str, object]:
+    """基于评测结果构建更适合展示的统计指标。"""
+
+    resolved = result or {}
+    summary = resolved.get("summary") or {}
+    rows = resolved.get("rows") or []
+    case_count = int(summary.get("case_count") or len(rows) or 0)
+    overall_count = int(summary.get("overall_verdict_match_count") or 0)
+    risk_count = int(summary.get("risk_level_match_count") or 0)
+    claim_count = int(summary.get("claim_count_match_count") or 0)
+    exact_count = int(summary.get("exact_match_count") or 0)
+    loose_count = sum(1 for item in rows if _is_quality_evaluation_loose_match(item))
+    if not rows:
+        loose_count = exact_count
+    failure_reason = _summarize_quality_evaluation_failure_reason(rows)
+    return {
+        "case_count": case_count,
+        "core_match_count": overall_count,
+        "loose_match_count": loose_count,
+        "exact_match_count": exact_count,
+        "overall_verdict_match_rate": _format_ratio(overall_count, case_count),
+        "risk_level_match_rate": _format_ratio(risk_count, case_count),
+        "claim_count_match_rate": _format_ratio(claim_count, case_count),
+        "core_match_rate": _format_ratio(overall_count, case_count),
+        "loose_match_rate": _format_ratio(loose_count, case_count),
+        "exact_match_rate": _format_ratio(exact_count, case_count),
+        "primary_failure_reason": failure_reason,
+    }
+
+
+def _get_quality_evaluation_match_state(item: dict, field_name: str) -> bool:
+    """读取或回推效果评测某一项的命中状态。"""
+
+    explicit_key = f"{field_name}_matched"
+    if explicit_key in item:
+        return bool(item.get(explicit_key))
+    expected = item.get(f"expected_{field_name}")
+    actual = item.get(f"actual_{field_name}")
+    if expected in (None, ""):
+        return True
+    return str(expected) == str(actual)
+
+
+def _is_quality_evaluation_loose_match(item: dict) -> bool:
+    """判断一条效果评测样例是否达到宽松命中。"""
+
+    matched_count = sum(
+        1
+        for field_name in ("overall_verdict", "risk_level", "claim_count")
+        if _get_quality_evaluation_match_state(item, field_name)
+    )
+    return matched_count >= 2
+
+
+def _describe_quality_evaluation_diff(item: dict) -> str:
+    """生成当前样例的差异说明。"""
+
+    diff_parts: list[str] = []
+    if not _get_quality_evaluation_match_state(item, "overall_verdict"):
+        diff_parts.append("结论不一致")
+    if not _get_quality_evaluation_match_state(item, "risk_level"):
+        diff_parts.append("风险等级不一致")
+    if not _get_quality_evaluation_match_state(item, "claim_count"):
+        diff_parts.append("Claim 拆分不一致")
+    if not diff_parts:
+        return "三项均命中"
+    return "；".join(diff_parts)
+
+
+def _suggest_quality_evaluation_troubleshooting(item: dict) -> str:
+    """根据差异类型给出优先排查方向。"""
+
+    overall_miss = not _get_quality_evaluation_match_state(item, "overall_verdict")
+    risk_miss = not _get_quality_evaluation_match_state(item, "risk_level")
+    claim_miss = not _get_quality_evaluation_match_state(item, "claim_count")
+    if not any((overall_miss, risk_miss, claim_miss)):
+        return "无需排查"
+    if overall_miss and claim_miss:
+        return "优先排查模板判定、证据召回和 Claim 拆分"
+    if overall_miss and risk_miss:
+        return "优先排查模板判定与风险分级策略"
+    if claim_miss and risk_miss:
+        return "优先排查 Claim 拆分与风险分级策略"
+    if overall_miss:
+        return "优先排查模板判定、证据召回和提示词"
+    if claim_miss:
+        return "优先排查输入切分、句式拆分和 Claim 生成"
+    return "优先排查风险分级阈值与保守策略"
+
+
+def _summarize_quality_evaluation_failure_reason(rows: list[dict]) -> str:
+    """汇总评测中最主要的失败原因。"""
+
+    if not rows:
+        return "-"
+    reason_counts = {
+        "结论不一致": 0,
+        "风险等级不一致": 0,
+        "Claim 拆分不一致": 0,
+    }
+    for item in rows:
+        if not _get_quality_evaluation_match_state(item, "overall_verdict"):
+            reason_counts["结论不一致"] += 1
+        if not _get_quality_evaluation_match_state(item, "risk_level"):
+            reason_counts["风险等级不一致"] += 1
+        if not _get_quality_evaluation_match_state(item, "claim_count"):
+            reason_counts["Claim 拆分不一致"] += 1
+    max_count = max(reason_counts.values())
+    if max_count <= 0:
+        return "无明显失败项"
+    top_reasons = [name for name, count in reason_counts.items() if count == max_count]
+    return " / ".join(top_reasons) + f"（{max_count} 条）"
+
+
+def _format_match_label(value: bool) -> str:
+    """格式化命中状态。"""
+
+    return "是" if value else "否"
+
+
+def _format_ratio(numerator: int, denominator: int) -> str:
+    """将命中数格式化为百分比文本。"""
+
+    if denominator <= 0:
+        return "0.0%"
+    return f"{(numerator / denominator) * 100:.1f}%"
 
 
 def format_search_result_detail_html(item: dict | None, *, query_text: str = "") -> str:
@@ -554,6 +901,33 @@ def format_document_quality_report_html(report: dict | None) -> str:
     )
 
 
+def format_document_quality_report_markdown(report: dict | None) -> str:
+    """将单文档入库质检总览转换为 Markdown。"""
+
+    resolved = report or {}
+    document = resolved.get("document") or {}
+    metrics = resolved.get("metrics") or {}
+    summary = resolved.get("summary") or {}
+    if not document:
+        return "### 入库质检\n- 当前状态：未执行"
+    return "\n".join(
+        [
+            "### 入库质检",
+            f'- 文档名称：{_display_text(document.get("doc_title"))}',
+            f'- 文档 UID：{_display_text(document.get("doc_uid"))}',
+            f'- 质检结论：{_display_text(summary.get("message"))}',
+            f'- 章节数：{_format_number(metrics.get("section_count"))}',
+            f'- 分块数：{_format_number(metrics.get("chunk_count"))}',
+            f'- 全文索引数：{_format_number(metrics.get("fts_chunk_count"))}',
+            f'- 向量数：{_format_number(metrics.get("vector_chunk_count"))}',
+            f'- 平均分块长度：{_display_text(metrics.get("avg_chunk_chars"))} 字',
+            f'- 首章标题：{_display_text(resolved.get("first_section_title"))}',
+            f'- 末章标题：{_display_text(resolved.get("last_section_title"))}',
+            f'- 平均每章分块数：{_display_text(metrics.get("avg_chunks_per_section"))}',
+        ]
+    )
+
+
 def format_document_quality_checks_html(report: dict | None) -> str:
     """将单文档入库质检检查项与风险提示转换为卡片。"""
 
@@ -589,6 +963,34 @@ def format_document_quality_checks_html(report: dict | None) -> str:
         notes=check_notes + issue_notes,
         tone="danger" if failed_count > 0 else "warning" if warning_count > 0 or issues else "success",
     )
+
+
+def format_document_quality_checks_markdown(report: dict | None) -> str:
+    """将单文档质检结论转换为 Markdown。"""
+
+    resolved = report or {}
+    checks = resolved.get("checks") or []
+    issues = resolved.get("issues") or []
+    lines = [
+        "### 质检结论",
+        f"- 检查项总数：{len(checks)}",
+        f"- 风险提示数：{len(issues)}",
+        "",
+        "#### 检查项",
+    ]
+    if checks:
+        lines.extend(
+            f'- {_display_text(item.get("name"))}：{_display_text(item.get("message"))}'
+            for item in checks
+        )
+    else:
+        lines.append("- 暂无检查项")
+    lines.extend(["", "#### 风险提示"])
+    if issues:
+        lines.extend(f'- {_display_text(item.get("message"))}' for item in issues)
+    else:
+        lines.append("- 暂无风险提示")
+    return "\n".join(lines)
 
 
 def build_document_quality_section_rows(report: dict | None) -> list[list[str]]:
@@ -645,6 +1047,20 @@ def format_document_quality_search_summary_html(formatted: dict | None, *, doc_t
     )
 
 
+def format_document_quality_search_summary_markdown(formatted: dict | None, *, doc_title: str = "") -> str:
+    """将单文档检索验证摘要转换为 Markdown。"""
+
+    resolved = formatted or {}
+    return "\n".join(
+        [
+            "### 文档内检索验证",
+            f"- 当前文档：{_display_text(doc_title)}",
+            f'- 命中条数：{_format_number(resolved.get("count"))}',
+            f'- 当前查询：{_display_text(resolved.get("query_text"))}',
+        ]
+    )
+
+
 def format_document_quality_batch_summary_html(batch_result: dict | None) -> str:
     """构建批量入库质检摘要。"""
 
@@ -664,6 +1080,21 @@ def format_document_quality_batch_summary_html(batch_result: dict | None) -> str
             "导出 CSV 后可进一步人工筛查和留档。",
         ],
         tone="danger" if int(summary.get("danger_count") or 0) > 0 else "warning" if int(summary.get("warning_count") or 0) > 0 else "neutral",
+    )
+
+
+def format_document_quality_batch_summary_markdown(batch_result: dict | None) -> str:
+    """将批量入库质检摘要转换为 Markdown。"""
+
+    summary = (batch_result or {}).get("summary") or {}
+    return "\n".join(
+        [
+            "### 批量入库质检",
+            f'- 文档总数：{_format_number(summary.get("document_count"))}',
+            f'- 正常：{_format_number(summary.get("success_count"))}',
+            f'- 警告：{_format_number(summary.get("warning_count"))}',
+            f'- 失败：{_format_number(summary.get("danger_count"))}',
+        ]
     )
 
 
@@ -707,6 +1138,25 @@ def format_document_quality_config_html(config: dict | None) -> str:
             f'配置文件：{_display_text(resolved.get("config_path"))}',
         ],
         tone="neutral",
+    )
+
+
+def format_document_quality_config_markdown(config: dict | None) -> str:
+    """将入库质检阈值配置转换为 Markdown。"""
+
+    resolved = config or {}
+    return "\n".join(
+        [
+            "### 质检阈值",
+            f'- 抽样数量：{_format_number(resolved.get("sample_limit"))}',
+            f'- 长文阈值：{_format_number(resolved.get("long_document_char_threshold"))} 字',
+            f'- 长文最少章节：{_format_number(resolved.get("min_sections_for_long_doc"))}',
+            f'- 每章分块上限：{_format_number(resolved.get("max_avg_chunks_per_section"))}',
+            f'- 超长分块阈值：{_format_number(resolved.get("max_chunk_chars"))} 字',
+            f'- 过短分块阈值：{_format_number(resolved.get("short_chunk_chars"))} 字',
+            f'- 过短分块告警起点：{_format_number(resolved.get("short_chunk_warn_min_chunk_count"))}',
+            f'- 配置文件：{_display_text(resolved.get("config_path"))}',
+        ]
     )
 
 
@@ -870,6 +1320,13 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
         notes.append(f'关联 Claim：{_display_text(resolved.get("linked_claim_id"))}')
     if resolved.get("linked_check_id"):
         notes.append(f'关联质检：{_display_text(resolved.get("linked_check_id"))}')
+    footer_html = None
+    if resolved.get("download_url"):
+        file_name = _display_text(resolved.get("download_file_name") or "点击下载")
+        footer_html = (
+            f'<a href="{escape(str(resolved.get("download_url")))}" '
+            f'target="_blank" rel="noopener noreferrer">下载文件：{escape(file_name)}</a>'
+        )
 
     cards = [("执行状态", "成功" if success else "失败")]
     if jobs:
@@ -889,6 +1346,7 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
         description=description,
         cards=cards,
         notes=notes,
+        footer_html=footer_html,
         tone="success" if success else "danger",
     )
 
@@ -943,6 +1401,66 @@ def format_search_summary_markdown(formatted: dict | None) -> str:
             f"- 当前状态：{status_text}",
         ]
     )
+
+
+def format_search_result_detail_markdown(item: dict | None, *, query_text: str = "") -> str:
+    """将检索结果详情转换为 Markdown 文本。"""
+
+    resolved = item or {}
+    if not resolved:
+        return "#### 原文详情\n- 当前状态：未选择结果"
+
+    return "\n".join(
+        [
+            "#### 原文详情",
+            f'- 当前查询：{_display_text(query_text)}',
+            f'- 文档名称：{_display_text(resolved.get("doc_title") or resolved.get("source_name"))}',
+            f'- 片段 ID：{_display_text(resolved.get("chunk_id"))}',
+            f'- 片段序号：{_display_text(resolved.get("chunk_index"))}',
+            f'- 定位：{_display_text(resolved.get("source_span"))}',
+            f'- 检索来源：{_display_text(resolved.get("retrieval_source"))}',
+            f'- 匹配来源：{_display_text(resolved.get("matched_sources"))}',
+            f'- 相关度：{_format_score(resolved.get("score"))}',
+            f'- 重排分：{_format_score(resolved.get("rerank_score"))}',
+            f'- 章节：{_display_text(resolved.get("section_title"))}',
+            f'- 作者：{_display_text(resolved.get("author"))}',
+            "",
+            "```text",
+            _display_text(resolved.get("content") or resolved.get("expanded_content")),
+            "```",
+        ]
+    )
+
+
+def format_search_export_markdown(formatted: dict | None, selected_item: dict | None, *, query_text: str = "") -> str:
+    """汇总检索结果摘要、列表和详情，用于导出。"""
+
+    rows = (formatted or {}).get("table") or []
+    sections = [format_search_summary_markdown(formatted), "", "#### 结果列表"]
+    if rows:
+        sections.append(
+            _build_markdown_table(
+                ["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                [
+                    [
+                        index + 1,
+                        item.get("doc_title") or item.get("source_name"),
+                        item.get("source_span"),
+                        item.get("chunk_id"),
+                        item.get("retrieval_source"),
+                        _format_score(item.get("score")),
+                        _format_score(item.get("rerank_score")),
+                        _display_text(item.get("matched_sources")),
+                        item.get("content_preview_highlighted") or item.get("content_preview"),
+                    ]
+                    for index, item in enumerate(rows)
+                ],
+            )
+        )
+    else:
+        sections.append("- 暂无检索结果")
+    sections.extend(["", format_search_result_detail_markdown(selected_item, query_text=query_text)])
+    return "\n".join(sections)
 
 
 def format_search_summary_html(formatted: dict | None) -> str:
@@ -1124,6 +1642,24 @@ def _normalize_source_path(source_path: str | Path | None) -> str:
     return str(Path(source_path).resolve())
 
 
+def _build_markdown_table(headers: list[object], rows: list[list[object]]) -> str:
+    """将表头和行数据转换为 Markdown 表格。"""
+
+    header_row = "| " + " | ".join(_escape_markdown_table_cell(item) for item in headers) + " |"
+    separator_row = "| " + " | ".join("---" for _ in headers) + " |"
+    body_rows = [
+        "| " + " | ".join(_escape_markdown_table_cell(cell) for cell in row) + " |"
+        for row in rows
+    ]
+    return "\n".join([header_row, separator_row, *body_rows])
+
+
+def _escape_markdown_table_cell(value: object) -> str:
+    """转义 Markdown 表格单元格中的特殊字符。"""
+
+    return str(value if value not in (None, "") else "-").replace("\r", " ").replace("\n", "<br>").replace("|", "\\|")
+
+
 def format_ingest_result(payload: dict, progress_events: list[dict]) -> dict:
     """整理文档管理操作结果与进度快照。"""
 
@@ -1152,6 +1688,7 @@ def format_quality_result(result: dict) -> dict:
             "verdict": item["verdict"],
             "risk_level": item.get("risk_level", ""),
             "confidence": item["confidence"],
+            "evidence_judgement": item.get("evidence_judgement", "insufficient"),
             "source_doc": item.get("source_doc"),
             "source_span": item.get("source_span"),
             "evidence_details": item.get("evidence_details", []),
@@ -1185,6 +1722,35 @@ def format_quality_result_markdown(formatted: dict | None) -> str:
             f'- 摘要说明：{_display_text(resolved.get("summary"))}',
         ]
     )
+
+
+def format_quality_export_markdown(
+    formatted: dict | None,
+    claim_detail: dict | None,
+    evidence_detail: dict | None,
+) -> str:
+    """汇总 AI 质检摘要、Claim 列表和当前详情，用于导出。"""
+
+    sections = [format_quality_result_markdown(formatted), "", "#### Claim 列表"]
+    claim_rows = build_quality_claim_rows(formatted)
+    if claim_rows:
+        sections.append(
+            _build_markdown_table(
+                ["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
+                claim_rows,
+            )
+        )
+    else:
+        sections.append("- 暂无 Claim")
+    sections.extend(
+        [
+            "",
+            format_claim_detail_markdown(claim_detail),
+            "",
+            format_evidence_detail_markdown(evidence_detail),
+        ]
+    )
+    return "\n".join(sections)
 
 
 def format_quality_result_html(formatted: dict | None) -> str:
@@ -1221,6 +1787,7 @@ def build_quality_claim_rows(formatted: dict | None) -> list[list[str]]:
             _format_verdict_label(item.get("verdict")),
             _format_risk_level_label(item.get("risk_level")),
             _format_score(item.get("confidence")),
+            _format_evidence_relation_label(item.get("evidence_judgement")),
             _display_text(item.get("source_doc")),
             _display_text(item.get("source_span")),
         ]
@@ -1248,6 +1815,7 @@ def build_claim_detail_map(claims: list[dict]) -> dict:
             "verdict": item.get("verdict", ""),
             "risk_level": item.get("risk_level", ""),
             "confidence": item.get("confidence"),
+            "evidence_judgement": item.get("evidence_judgement", "insufficient"),
             "review_status": item.get("review_status", "pending"),
             "source_doc": item.get("source_doc"),
             "source_span": item.get("source_span"),
@@ -1266,8 +1834,11 @@ def build_claim_detail_map(claims: list[dict]) -> dict:
                         "source_span": item.get("source_span", ""),
                         "retrieval_source": item.get("retrieval_source", "history"),
                         "matched_sources": item.get("matched_sources", ["history"]),
+                        "matched_queries": item.get("matched_queries", ["history"]),
                         "rerank_score": item.get("rerank_score"),
                         "context_mode": item.get("context_mode", "history_record"),
+                        "evidence_relation": item.get("evidence_judgement", "insufficient"),
+                        "relation_reason": item.get("evidence_reason", ""),
                         "section_title": item.get("section_title", ""),
                         "content_preview": item.get("evidence", "") or item.get("claim_text", ""),
                     }
@@ -1305,9 +1876,12 @@ def format_claim_detail_for_review(claim_choice: str, claim_detail_map: dict | N
             "doc_title": item.get("doc_title", ""),
             "source_span": item.get("source_span"),
             "retrieval_source": item.get("retrieval_source", ""),
-            "matched_sources": item.get("matched_sources", []),
+            "matched_sources": _format_string_list(item.get("matched_sources", [])),
+            "matched_queries": _format_string_list(item.get("matched_queries", [])),
             "rerank_score": item.get("rerank_score"),
             "context_mode": item.get("context_mode", ""),
+            "evidence_relation": item.get("evidence_relation", "insufficient"),
+            "relation_reason": item.get("relation_reason", ""),
             "section_title": item.get("section_title", ""),
             "content_preview": item.get("content_preview", ""),
         }
@@ -1320,6 +1894,7 @@ def format_claim_detail_for_review(claim_choice: str, claim_detail_map: dict | N
             "verdict": detail.get("verdict", ""),
             "risk_level": detail.get("risk_level", ""),
             "confidence": detail.get("confidence"),
+            "evidence_judgement": detail.get("evidence_judgement", "insufficient"),
             "review_status": detail.get("review_status", "pending"),
             "source_doc": detail.get("source_doc"),
             "source_span": detail.get("source_span"),
@@ -1349,6 +1924,7 @@ def format_claim_detail_markdown(detail: dict | None) -> str:
             f'- 当前判定：{_format_verdict_label(summary.get("verdict"))}',
             f'- 风险等级：{_format_risk_level_label(summary.get("risk_level"))}',
             f'- 置信度：{_format_score(summary.get("confidence"))}',
+            f'- 证据关系：{_format_evidence_relation_label(summary.get("evidence_judgement"))}',
             f'- 审核状态：{_format_review_status_label(summary.get("review_status"))}',
             f'- 来源文档：{_display_text(summary.get("source_doc"))}',
             f'- 来源位置：{_display_text(summary.get("source_span"))}',
@@ -1374,13 +1950,16 @@ def format_claim_detail_html(detail: dict | None) -> str:
     raw_verdict = _display_text(summary.get("verdict"))
     verdict = _format_verdict_label(raw_verdict)
     review_status = _format_review_status_label(summary.get("review_status"))
-    tone = "warning" if "review" in raw_verdict.lower() or review_status == "pending" else "success"
+    evidence_relation = _format_evidence_relation_label(summary.get("evidence_judgement"))
+    relation_tone = _get_evidence_relation_tone(summary.get("evidence_judgement"))
+    tone = relation_tone if relation_tone != "neutral" else ("warning" if "review" in raw_verdict.lower() or review_status == "pending" else "success")
     return _build_panel_html(
         title="Claim 详情",
         description=_display_text(summary.get("claim_text")),
         cards=[
             ("Claim ID", _display_text(summary.get("claim_id"))),
             ("当前判定", verdict),
+            ("证据关系", evidence_relation),
             ("风险等级", _format_risk_level_label(summary.get("risk_level"))),
             ("置信度", _format_score(summary.get("confidence"))),
             ("审核状态", review_status),
@@ -1392,7 +1971,13 @@ def format_claim_detail_html(detail: dict | None) -> str:
             f'证据摘要：{_display_text(summary.get("evidence"))}',
             f'证据说明：{_display_text(summary.get("evidence_reason"))}',
         ],
+        footer_html=(
+            f'<div><strong>关系解读：</strong>{escape(_display_text(summary.get("evidence_reason")))}</div>'
+            if summary.get("evidence_reason")
+            else None
+        ),
         tone=tone,
+        badge_text=evidence_relation,
     )
 
 
@@ -1427,6 +2012,29 @@ def format_review_record_detail_html(record: dict | None) -> str:
     )
 
 
+def format_review_record_detail_markdown(record: dict | None) -> str:
+    """将审核记录详情转换为 Markdown。"""
+
+    resolved = record or {}
+    if not resolved.get("review_id"):
+        return "### 审核记录详情\n- 当前状态：未选择审核记录"
+    return "\n".join(
+        [
+            "### 审核记录详情",
+            f'- 审核 ID：{_display_text(resolved.get("review_id"))}',
+            f'- 关联 Claim：{_display_text(resolved.get("claim_id"))}',
+            f'- 关联质检：{_display_text(resolved.get("check_id"))}',
+            f'- 审核动作：{_format_review_action_label(resolved.get("review_action"))}',
+            f'- 审核状态：{_format_review_status_label(resolved.get("review_status"))}',
+            f'- 审核人：{_display_text(resolved.get("reviewer"))}',
+            f'- 审核时间：{_display_text(resolved.get("created_at"))}',
+            f'- 关联模板：{_display_text(resolved.get("template_name"))}',
+            f'- Claim 摘要：{_display_text(resolved.get("claim_text"))}',
+            f'- 审核备注：{_display_text(resolved.get("review_note"))}',
+        ]
+    )
+
+
 def build_claim_evidence_rows(detail: dict | None) -> list[list[str]]:
     """将 Claim 证据转换为表格行。"""
 
@@ -1436,8 +2044,9 @@ def build_claim_evidence_rows(detail: dict | None) -> list[list[str]]:
             _display_text(item.get("chunk_id")),
             _display_text(item.get("doc_title") or item.get("doc_uid")),
             _display_text(item.get("source_span")),
+            _format_evidence_relation_label(item.get("evidence_relation")),
             _display_text(item.get("retrieval_source")),
-            _display_text(item.get("matched_sources")),
+            _format_string_list(item.get("matched_queries") or item.get("matched_sources")),
             _format_score(item.get("rerank_score")),
             _display_text(item.get("content_preview")),
         ]
@@ -1456,6 +2065,7 @@ def format_evidence_detail_html(evidence: dict | None) -> str:
             cards=[("当前状态", "未选择证据")],
             tone="neutral",
         )
+    relation_label = _format_evidence_relation_label(resolved.get("evidence_relation"))
     return _build_panel_html(
         title="证据详情",
         description=_display_text(resolved.get("content_preview")),
@@ -1463,16 +2073,46 @@ def format_evidence_detail_html(evidence: dict | None) -> str:
             ("片段 ID", _display_text(resolved.get("chunk_id"))),
             ("文档", _display_text(resolved.get("doc_title") or resolved.get("doc_uid"))),
             ("定位", _display_text(resolved.get("source_span"))),
+            ("证据关系", relation_label),
             ("检索来源", _display_text(resolved.get("retrieval_source"))),
-            ("匹配来源", _display_text(resolved.get("matched_sources"))),
+            ("检索路径", _format_string_list(resolved.get("matched_queries") or resolved.get("matched_sources"))),
             ("重排分", _format_score(resolved.get("rerank_score"))),
         ],
         notes=[
             f'章节：{_display_text(resolved.get("section_title"))}',
             f'上下文模式：{_display_text(resolved.get("context_mode"))}',
+            f'关系说明：{_display_text(resolved.get("relation_reason"))}',
             f'证据摘要：{_display_text(resolved.get("content_preview"))}',
         ],
-        tone="neutral",
+        tone=_get_evidence_relation_tone(resolved.get("evidence_relation")),
+        badge_text=relation_label,
+    )
+
+
+def format_evidence_detail_markdown(evidence: dict | None) -> str:
+    """将单条证据详情转换为 Markdown 文本。"""
+
+    resolved = evidence or {}
+    if not resolved:
+        return "#### 当前证据详情\n- 当前状态：未选择证据"
+    return "\n".join(
+        [
+            "#### 当前证据详情",
+            f'- 片段 ID：{_display_text(resolved.get("chunk_id"))}',
+            f'- 文档：{_display_text(resolved.get("doc_title") or resolved.get("doc_uid"))}',
+            f'- 定位：{_display_text(resolved.get("source_span"))}',
+            f'- 证据关系：{_format_evidence_relation_label(resolved.get("evidence_relation"))}',
+            f'- 检索来源：{_display_text(resolved.get("retrieval_source"))}',
+            f'- 检索路径：{_format_string_list(resolved.get("matched_queries") or resolved.get("matched_sources"))}',
+            f'- 重排分：{_format_score(resolved.get("rerank_score"))}',
+            f'- 章节：{_display_text(resolved.get("section_title"))}',
+            f'- 上下文模式：{_display_text(resolved.get("context_mode"))}',
+            f'- 关系说明：{_display_text(resolved.get("relation_reason"))}',
+            "",
+            "```text",
+            _display_text(resolved.get("content_preview")),
+            "```",
+        ]
     )
 
 
@@ -1603,6 +2243,7 @@ def format_review_candidates(candidate_items: list[dict]) -> dict:
             "verdict": item.get("verdict"),
             "risk_level": item.get("risk_level"),
             "confidence": item.get("confidence"),
+            "evidence_judgement": item.get("evidence_judgement", "insufficient"),
             "review_status": item.get("review_status", "pending"),
             "source_doc": item.get("source_doc"),
             "source_span": item.get("source_span"),
@@ -1855,6 +2496,7 @@ def _format_verdict_label(verdict: object) -> str:
 
     mapping = {
         "verified": "通过",
+        "passed": "通过",
         "approved": "通过",
         "rejected": "不通过",
         "needs_review": "需复核",
@@ -1905,8 +2547,10 @@ def _build_panel_html(
     description: str,
     cards: list[tuple[str, str]],
     notes: list[str] | None = None,
+    footer_html: str | None = None,
     tone: str = "neutral",
     min_height_px: int = 0,
+    badge_text: str = "状态模块",
 ) -> str:
     """生成统一风格的卡片面板 HTML。"""
 
@@ -1934,6 +2578,13 @@ def _build_panel_html(
                 {notes_html}
             </ul>
             """
+    footer_section_html = ""
+    if footer_html:
+        footer_section_html = f"""
+        <div style="margin-top:14px;font-size:13px;line-height:1.7;color:{palette['text']};">
+            {footer_html}
+        </div>
+        """
     return f"""
     <div style="border:1px solid {palette['border']};background:{palette['panel_bg']};border-radius:16px;padding:16px 18px;margin:0 0 12px 0;box-shadow:none;{min_height_style}">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -1942,13 +2593,14 @@ def _build_panel_html(
                 <div style="font-size:13px;line-height:1.7;color:{palette['text']};">{escape(description)}</div>
             </div>
             <div style="padding:4px 10px;border-radius:999px;background:{palette['badge_bg']};color:{palette['badge_text']};font-size:12px;font-weight:600;">
-                状态模块
+                {escape(badge_text)}
             </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:14px;">
             {card_html}
         </div>
         {notes_html}
+        {footer_section_html}
     </div>
     """
 
@@ -1968,3 +2620,34 @@ def _get_panel_palette(tone: str) -> dict[str, str]:
         "badge_bg": "var(--body-background-fill)",
         "badge_text": "var(--body-text-color-subdued)",
     }
+
+
+def _format_evidence_relation_label(value: object) -> str:
+    """格式化证据关系标签。"""
+
+    mapping = {
+        "support": "支持",
+        "contradict": "矛盾",
+        "insufficient": "证据不足",
+    }
+    return mapping.get(str(value or "").lower(), _display_text(value))
+
+
+def _get_evidence_relation_tone(value: object) -> str:
+    """根据证据关系返回展示色。"""
+
+    mapping = {
+        "support": "success",
+        "contradict": "danger",
+        "insufficient": "warning",
+    }
+    return mapping.get(str(value or "").lower(), "neutral")
+
+
+def _format_string_list(value: object) -> str:
+    """将字符串列表格式化为更适合 UI 展示的文本。"""
+
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return "、".join(items) if items else "-"
+    return _display_text(value)

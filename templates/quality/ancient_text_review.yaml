@@ -1,6 +1,6 @@
-﻿template_id: ancient_text_review
+template_id: ancient_text_review
 template_name: 古文审慎解读
-description: 面向古文、古籍摘录或含歧义的旧文体，强调不确定性与语义保守解释。
+description: 面向古文、古籍摘录或含歧义旧文体，强调训诂、断句、异文与现代转述边界。
 rule_tags:
   - ancient
   - strict
@@ -18,14 +18,16 @@ system_prompt: |
   输出 JSON：
   {
     "verdict": "verified|needs_review|rejected",
+    "evidence_judgement": "support|contradict|insufficient",
     "confidence": 0.0,
     "risk_level": "low|medium|high",
     "reason": "简短中文原因"
   }
   要求：
   1. 证据存在歧义、异文、断句差异时，优先输出 needs_review。
-  2. 不允许把推测性训释当作确定事实。
-  3. 只输出 JSON。
+  2. 不允许把推测性训释、后世转述或现代归纳直接当作原文确定事实。
+  3. 如果 claim 使用现代确定性表述，而原文仅提供含混材料，不能输出 verified。
+  4. 只输出 JSON。
 user_prompt_template: |
   请按古文审慎解读模式核验下述内容。
   Claim：
@@ -34,4 +36,8 @@ user_prompt_template: |
   {evidence_block}
   规则命中：
   {rule_block}
-  请重点说明是否存在词义歧义、断句歧义或现代转述过度。
+  请重点说明是否存在词义歧义、断句歧义、版本差异或现代转述过度。
+  逻辑约束：
+  {claim_logic_block}
+
+  请重点说明是否存在词义歧义、断句歧义、版本差异或现代转述过度。

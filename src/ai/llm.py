@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 
@@ -14,14 +15,17 @@ DEFAULT_SYSTEM_PROMPT = """你是中文知识库质检助手。
 请基于给定 claim、证据片段与规则命中结果，输出 JSON：
 {
   "verdict": "verified|needs_review|rejected",
+  "evidence_judgement": "support|contradict|insufficient",
   "confidence": 0.0,
   "risk_level": "low|medium|high",
   "reason": "简短中文原因"
 }
 要求：
-1. 没有足够证据时不要输出 verified。
-2. 命中高风险规则时，风险等级不能低于规则等级。
-3. 只输出 JSON，不要输出额外说明。"""
+1. 先判断证据对 claim 是 support、contradict 还是 insufficient，再给 verdict。
+2. 没有足够证据时不要输出 verified；存在反证时优先输出 rejected。
+3. 若 claim 含唯一化、绝对化、全称化、否定化限制，必须核对这些限制本身是否被证据直接支持。
+4. 命中高风险规则时，风险等级不能低于规则等级。
+5. 只输出 JSON，不要输出额外说明。"""
 
 DEFAULT_USER_PROMPT_TEMPLATE = """任务：请核验以下 claim 是否能被知识库证据支持。
 
@@ -30,6 +34,9 @@ Claim:
 
 证据：
 {evidence_block}
+
+逻辑约束：
+{claim_logic_block}
 
 规则命中：
 {rule_block}
@@ -261,8 +268,13 @@ def _build_quality_prompts(
     resolved_template = prompt_template or {}
     system_prompt = resolved_template.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
     user_prompt_template = resolved_template.get("user_prompt_template") or DEFAULT_USER_PROMPT_TEMPLATE
+    claim_logic = _build_claim_logic_block(claim_text)
     evidence_lines = [
-        f'- 文档: {item.get("doc_uid")} | 位置: {item.get("source_span")} | 内容: {item.get("content", "")[:300]}'
+        (
+            f'- 文档: {item.get("doc_uid")} | 位置: {item.get("source_span")} | '
+            f'查询来源: {"/".join(item.get("matched_queries", [])) or "-"} | '
+            f'内容: {str(item.get("expanded_content") or item.get("content") or "")[:400]}'
+        )
         for item in evidence_list
     ] or ["- 无证据"]
     rule_lines = [
@@ -272,6 +284,7 @@ def _build_quality_prompts(
     user_prompt = user_prompt_template.format(
         claim_text=claim_text,
         evidence_block="\n".join(evidence_lines),
+        claim_logic_block=claim_logic,
         rule_block="\n".join(rule_lines),
     )
     return system_prompt, user_prompt
@@ -285,7 +298,30 @@ def _parse_llm_result(content: str) -> dict:
         payload = payload["interpretation"]
     return {
         "verdict": payload.get("verdict", "needs_review"),
+        "evidence_judgement": payload.get("evidence_judgement", "insufficient"),
         "confidence": float(payload.get("confidence", 0.2)),
         "risk_level": payload.get("risk_level", "medium"),
         "reason": str(payload.get("reason", "")),
     }
+
+
+def _build_claim_logic_block(claim_text: str) -> str:
+    """提炼 claim 中的逻辑约束，提醒模型重点核对限制条件。"""
+
+    text = str(claim_text or "")
+    logic_labels: list[str] = []
+    if any(marker in text for marker in ("只有", "唯一", "仅有", "仅限", "独家")):
+        logic_labels.append("唯一化/排他性表述")
+    if any(marker in text for marker in ("全部", "所有", "一律", "必然", "总是", "完全")):
+        logic_labels.append("全称或绝对化表述")
+    if any(marker in text for marker in ("不会", "不能", "没有", "不存在", "绝不", "从不")):
+        logic_labels.append("否定性表述")
+    if not logic_labels:
+        logic_labels.append("普通事实陈述")
+
+    normalized = text
+    for marker in ("只有", "唯一", "仅有", "仅限", "独家", "全部", "所有", "一律", "必然", "总是", "完全", "不会", "不能", "没有", "不存在", "绝不", "从不"):
+        normalized = normalized.replace(marker, " ")
+    normalized = re.sub(r"[，。！？；：、“”‘’\"'（）()\[\]{}<>《》]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return f'- 识别结果：{"、".join(logic_labels)}\n- 放宽检索主题：{normalized or text}'
