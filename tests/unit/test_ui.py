@@ -372,6 +372,11 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
         for component in components
         if component.get("type") == "html"
     ]
+    dataframes = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe"
+    }
 
     assert "document-current-panel" in elem_ids
     assert "document-current-title" in elem_ids
@@ -393,6 +398,12 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-quality-export-result" in elem_ids
     assert "document-quality-batch-export-result" in elem_ids
     assert "document-quality-config-export-result" in elem_ids
+    assert "database-page-info" in elem_ids
+    assert "document-page-info" in elem_ids
+    assert "document-quality-sections-page-info" in elem_ids
+    assert "document-quality-chunks-page-info" in elem_ids
+    assert "document-quality-search-page-info" in elem_ids
+    assert "document-quality-batch-page-info" in elem_ids
     assert "章节抽样" in labels
     assert "分块抽样" in labels
     assert "文档内检索验证" in labels
@@ -406,6 +417,9 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "过短分块告警起点" in labels
     assert any("入库质检" in value for value in html_values)
     assert any("当前选中文档" in str(component.get("props", {}).get("value", "")) for component in components)
+    assert dataframes["document-quality-sections-table"]["headers"][0] == "序号"
+    assert dataframes["document-quality-chunks-table"]["headers"][0] == "序号"
+    assert dataframes["document-quality-batch-table"]["headers"][0] == "序号"
 
 
 def test_create_ui_app_should_include_quality_evaluation_workspace(tmp_path: Path) -> None:
@@ -511,7 +525,7 @@ def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp
     assert candidate_tables
     assert claim_details
     assert candidate_tables[0].get("value")
-    assert candidate_tables[0]["value"]["data"][0][0] == "claim_review_demo"
+    assert candidate_tables[0]["value"]["data"][0][1] == "claim_review_demo"
     assert "Claim 详情" in str(claim_details[0].get("value", ""))
     assert "阿胶源于驴皮熬制" in str(claim_details[0].get("value", ""))
 
@@ -576,9 +590,9 @@ def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> 
     assert recent_tables
     assert claim_tables
     assert recent_tables[0].get("value")
-    assert recent_tables[0]["value"]["data"][0][0] == "chkres_demo_001"
+    assert recent_tables[0]["value"]["data"][0][1] == "chkres_demo_001"
     assert claim_tables[0].get("value")
-    assert claim_tables[0]["value"]["data"][0][0] == "claim_demo_001"
+    assert claim_tables[0]["value"]["data"][0][1] == "claim_demo_001"
 
 
 def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path: Path) -> None:
@@ -666,13 +680,25 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
     event = gr.SelectData(None, {"index": [1, 0], "value": "claim_2"})
     formatted_result = {"check": {"overall_verdict": "needs_review", "risk_level": "medium"}}
 
-    claim_view, evidence_rows, review_view, selected_claim_id, evidence_items, evidence_detail, evaluation_cases = select_handler(
+    (
+        claim_view,
+        evidence_rows,
+        evidence_page,
+        evidence_page_info,
+        review_view,
+        selected_claim_id,
+        evidence_items,
+        evidence_detail,
+        evaluation_cases,
+    ) = select_handler(
         claim_rows,
         claim_detail_map,
         formatted_result,
         event,
     )
 
+    assert evidence_page == 1
+    assert "第 1 / 1 页" in evidence_page_info
     assert selected_claim_id == "claim_2"
     assert "第二条 Claim" in claim_view
     assert "证据关系" in claim_view
@@ -681,7 +707,7 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
     assert "第二条 Claim" in review_view
     assert len(evidence_items) == 1
     assert "第二条证据内容" in evidence_detail
-    assert evidence_rows == [["chunk_2", "标题二", "section-2:chunk-2", "证据不足", "fulltext", "logic_relaxed", "0.700", "第二条证据内容"]]
+    assert evidence_rows == [["1", "chunk_2", "标题二", "section-2:chunk-2", "证据不足", "fulltext", "logic_relaxed", "0.700", "第二条证据内容"]]
     assert "claim_2" in evaluation_cases
     assert "第二条 Claim" in evaluation_cases
 
@@ -733,7 +759,11 @@ def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path:
     ]
     event = gr.SelectData(None, {"index": [1, 0], "value": "chunk_2"})
 
-    evidence_detail = select_handler(evidence_items, event)
+    current_page_rows = [
+        ["1", "chunk_1", "标题一", "section-1:chunk-1", "支持", "vector", "claim_literal", "-", "第一条证据内容"],
+        ["2", "chunk_2", "标题二", "section-2:chunk-2", "矛盾", "fulltext", "logic_relaxed", "0.700", "第二条证据内容"],
+    ]
+    evidence_detail = select_handler(evidence_items, event, current_page_rows)
 
     assert "证据详情" in evidence_detail
     assert "标题二" in evidence_detail
@@ -841,21 +871,38 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     ]
     event = gr.SelectData(None, {"index": [1, 0], "value": "chkres_b"})
 
+    current_page_rows = [["1", "chkres_a", "模板一", "通过", "1", "2026-05-01T12:00:00+00:00", "第一条输入"], ["2", "chkres_b", "模板二", "需复核", "1", "2026-05-01T13:00:00+00:00", "第二条输入"]]
     (
         progress_html,
         result_html,
         formatted_result,
         claim_rows,
+        claim_page,
+        claim_page_info,
         selected_claim_id,
         claim_detail_map,
         claim_detail_html,
         evidence_rows,
+        evidence_page,
+        evidence_page_info,
         review_view,
         evidence_items,
         evidence_detail_html,
+        recent_state,
+        recent_rows,
+        recent_page,
+        recent_page_info,
         evaluation_cases,
-    ) = select_handler(recent_results, event)
+    ) = select_handler(current_page_rows, recent_results, event)
 
+    assert claim_page == 1
+    assert evidence_page == 1
+    assert recent_page == 1
+    assert "第 1 / 1 页" in claim_page_info
+    assert "第 1 / 1 页" in evidence_page_info
+    assert "第 1 / 1 页" in recent_page_info
+    assert recent_state == recent_results
+    assert recent_rows[0][1] == "chkres_a"
     assert "已加载历史质检记录" in progress_html
     assert "模板二" in result_html
     assert formatted_result["check"]["check_id"] == "chkres_b"
@@ -864,8 +911,8 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     assert "第二条 Claim" in review_view
     assert selected_claim_id.startswith("claim_b1 |")
     assert "claim_b1" in claim_detail_map
-    assert claim_rows == [["claim_b1", "第二条 Claim", "需复核", "中级", "0.820", "证据不足", "文档二", "section-2"]]
-    assert evidence_rows == [["chunk_b1", "文档二", "section-2", "矛盾", "fulltext", "logic_relaxed", "0.730", "第二条证据内容"]]
+    assert claim_rows == [["1", "claim_b1", "第二条 Claim", "需复核", "中级", "0.820", "证据不足", "文档二", "section-2"]]
+    assert evidence_rows == [["1", "chunk_b1", "文档二", "section-2", "矛盾", "fulltext", "logic_relaxed", "0.730", "第二条证据内容"]]
     assert len(evidence_items) == 1
     assert "claim_b1" in evaluation_cases
     assert "第二条证据内容" in evidence_detail_html
@@ -948,6 +995,8 @@ def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path:
         review_claim_detail_map,
         review_claim_detail_html,
         review_evidence_rows,
+        review_evidence_page,
+        review_evidence_page_info,
         review_evidence_items,
         review_evidence_detail_html,
         review_action_value,
@@ -959,7 +1008,9 @@ def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path:
     assert selected_claim_id == "claim_review_b"
     assert "claim_review_b" in review_claim_detail_map
     assert "第二条 Claim" in review_claim_detail_html
-    assert review_evidence_rows == [["section-2", "文档二", "section-2", "证据不足", "history", "history", "-", "第二条证据摘要"]]
+    assert review_evidence_page == 1
+    assert "第 1 / 1 页" in review_evidence_page_info
+    assert review_evidence_rows == [["1", "section-2", "文档二", "section-2", "证据不足", "history", "history", "-", "第二条证据摘要"]]
     assert len(review_evidence_items) == 1
     assert "第二条证据摘要" in review_evidence_detail_html
     assert review_action_value == "通过"
@@ -1048,29 +1099,51 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
 
     (
         pending_rows,
+        pending_page,
+        pending_page_info,
         processed_rows,
+        processed_page,
+        processed_page_info,
+        review_candidate_state,
         selected_claim_id,
         review_claim_detail_map,
         review_claim_detail_html,
         review_evidence_rows,
+        review_evidence_page,
+        review_evidence_page_info,
         review_evidence_items,
         review_evidence_detail_html,
         review_action_value,
         review_note_value,
+        review_history_rows,
+        review_history_page,
+        review_history_page_info,
+        review_history_state,
         selected_review_id,
         review_record_detail_html,
     ) = filter_handler(review_candidates, review_items, "", "全部记录", "仅高风险")
 
-    assert pending_rows == [["claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "2026-05-01T12:00:00+00:00"]]
-    assert processed_rows == [["claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "2026-05-01T14:00:00+00:00"]]
+    assert pending_page == 1
+    assert processed_page == 1
+    assert review_evidence_page == 1
+    assert review_history_page == 1
+    assert "第 1 / 1 页" in pending_page_info
+    assert "第 1 / 1 页" in processed_page_info
+    assert "第 1 / 1 页" in review_evidence_page_info
+    assert "第 1 / 1 页" in review_history_page_info
+    assert pending_rows == [["1", "claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "2026-05-01T12:00:00+00:00"]]
+    assert processed_rows == [["1", "claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "2026-05-01T14:00:00+00:00"]]
+    assert review_candidate_state == review_candidates
     assert selected_claim_id == "claim_pending_high"
     assert "claim_pending_high" in review_claim_detail_map
     assert "高风险待处理 Claim" in review_claim_detail_html
-    assert review_evidence_rows == [["section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "高风险证据"]]
+    assert review_evidence_rows == [["1", "section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "高风险证据"]]
     assert len(review_evidence_items) == 1
     assert "高风险证据" in review_evidence_detail_html
     assert review_action_value == "通过"
     assert review_note_value == ""
+    assert review_history_rows == [["1", "rev_processed_high", "claim_processed_high", "通过", "已通过", "ui_user", "2026-05-01T14:10:00+00:00", "已通过", "高风险已处理 Claim"]]
+    assert review_history_state == review_items
     assert selected_review_id == ""
     assert "未选择审核记录" in review_record_detail_html
 
@@ -1138,21 +1211,32 @@ def test_submit_review_then_switch_to_processed_scope_should_show_latest_record(
         "仅待处理",
         "全部风险",
     )
-    review_candidate_state = submit_outputs[3]
-    review_selected_claim_state = submit_outputs[4]
-    review_history_state = submit_outputs[13]
+    review_candidate_state = submit_outputs[7]
+    review_selected_claim_state = submit_outputs[8]
+    review_history_state = submit_outputs[21]
 
     (
         pending_rows,
+        _pending_page,
+        _pending_page_info,
         processed_rows,
+        _processed_page,
+        _processed_page_info,
+        _review_candidate_state,
         selected_claim_id,
         review_claim_detail_map,
         review_claim_detail_html,
         _review_evidence_rows,
+        _review_evidence_page,
+        _review_evidence_page_info,
         _review_evidence_items,
         _review_evidence_detail_html,
         review_action_value,
         review_note_value,
+        _review_history_rows,
+        _review_history_page,
+        _review_history_page_info,
+        _review_history_state,
         selected_review_id,
         review_record_detail_html,
     ) = filter_handler(
@@ -1165,6 +1249,7 @@ def test_submit_review_then_switch_to_processed_scope_should_show_latest_record(
 
     assert pending_rows == []
     assert processed_rows == [[
+        "1",
         "claim_submit_review_demo",
         "这是一条刚提交审核的 Claim",
         "需复核",
@@ -1351,13 +1436,15 @@ def test_review_history_select_handler_should_restore_selected_record(tmp_path: 
         review_claim_detail_map,
         review_claim_detail_html,
         review_evidence_rows,
+        review_evidence_page,
+        review_evidence_page_info,
         review_evidence_items,
         review_evidence_detail_html,
         review_action_value,
         review_note_value,
         selected_review_id,
         review_record_detail,
-    ) = select_handler(review_items, review_candidates, event, "全部记录", "全部风险")
+    ) = select_handler(review_items, review_candidates, "全部记录", "全部风险", build_review_history_dataframe := [["1", "rev_review_b", "claim_review_b", "不通过", "已驳回", "ui_user", "2026-05-01T13:10:00+00:00", "需要驳回", "第二条 Claim"], ["2", "rev_review_a", "claim_review_a", "通过", "已通过", "ui_user", "2026-05-01T12:10:00+00:00", "确认通过", "第一条 Claim"]], event)
 
     assert selected_claim_id == "claim_review_a"
     assert selected_review_id == "rev_review_a"
@@ -1366,7 +1453,9 @@ def test_review_history_select_handler_should_restore_selected_record(tmp_path: 
     assert "第一条 Claim" in review_claim_detail_html
     assert review_action_value == "通过"
     assert review_note_value == "确认通过"
-    assert review_evidence_rows == [["section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "第一条证据摘要"]]
+    assert review_evidence_page == 1
+    assert "第 1 / 1 页" in review_evidence_page_info
+    assert review_evidence_rows == [["1", "section-1", "文档一", "section-1", "证据不足", "history", "history", "-", "第一条证据摘要"]]
     assert len(review_evidence_items) == 1
     assert "第一条证据摘要" in review_evidence_detail_html
 

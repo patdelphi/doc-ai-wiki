@@ -83,6 +83,9 @@ from src.ui.viewmodels import (
 )
 
 
+TABLE_PAGE_SIZE = 10
+
+
 UI_CSS = """
 #search-top-row {
   align-items: stretch !important;
@@ -774,6 +777,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ]:
         return build_document_page_outputs(get_document_management_state())
 
+    def load_document_management_state_ui() -> tuple:
+        """加载文档管理页，并返回分页后的界面输出。"""
+
+        return build_document_page_ui_outputs(load_document_management_state())
+
     def refresh_document_management_state(
         selected_choice: str | None = None,
     ) -> tuple[
@@ -808,6 +816,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ]:
         return build_document_page_outputs(get_document_management_state(selected_choice))
 
+    def refresh_document_management_state_ui(selected_choice: str | None = None) -> tuple:
+        """刷新文档管理页，并返回分页后的界面输出。"""
+
+        return build_document_page_ui_outputs(refresh_document_management_state(selected_choice))
+
     def inspect_document(choice: str) -> tuple[
         str,
         gr.Button,
@@ -835,6 +848,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ]:
         page_outputs = build_document_page_outputs(get_document_management_state(choice))
         return page_outputs[5:]
+
+    def inspect_document_ui(choice: str) -> tuple:
+        """切换文档后，返回分页后的文档详情输出。"""
+
+        outputs = build_document_page_ui_outputs(build_document_page_outputs(get_document_management_state(choice)))
+        return outputs[9:]
 
     def register_selected_document(
         choice: str,
@@ -939,6 +958,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             qc_config_result,
             qc_export_result,
         )
+
+    def register_selected_document_ui(
+        choice: str,
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple:
+        """注册当前文档，并返回分页后的文档管理界面输出。"""
+
+        outputs = register_selected_document(choice, progress)
+        return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
     def register_all_documents(
         progress=gr.Progress(track_tqdm=False),
@@ -1049,6 +1077,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             qc_export_result,
         )
 
+    def register_all_documents_ui(
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple:
+        """批量注册文档，并返回分页后的文档管理界面输出。"""
+
+        outputs = register_all_documents(progress)
+        return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
+
     def query_ingest_status() -> tuple[
         str,
         str,
@@ -1068,6 +1104,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         str,
     ]:
         return refresh_document_management_state()
+
+    def query_ingest_status_ui() -> tuple:
+        """刷新入库状态，并返回分页后的文档管理界面输出。"""
+
+        return build_document_page_ui_outputs(query_ingest_status())
 
     def rebuild_selected_document(
         choice: str,
@@ -1175,11 +1216,53 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             qc_export_result,
         )
 
+    def rebuild_selected_document_ui(
+        choice: str,
+        progress=gr.Progress(track_tqdm=False),
+    ) -> tuple:
+        """重建当前文档，并返回分页后的文档管理界面输出。"""
+
+        outputs = rebuild_selected_document(choice, progress)
+        return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
+
     def inspect_selected_document_quality(choice: str) -> tuple[str, str, list[list[str]], list[list[str]], str, list[list[str]], list[dict], str]:
         """执行当前文档的入库质检，并返回总览、抽样与检索验证默认视图。"""
 
         state = get_document_management_state(choice)
         return build_document_quality_outputs(state["selected_detail"])
+
+    def inspect_selected_document_quality_ui(choice: str) -> tuple[str, str, list[list[object]], int, str, list[list[object]], int, str, str, list[list[object]], int, str, list[dict], str]:
+        """执行当前文档入库质检，并返回分页后的相关表格。"""
+
+        report_html, checks_html, section_rows, chunk_rows, search_summary, search_rows, search_state, search_detail = inspect_selected_document_quality(choice)
+        section_page_rows, section_page, section_page_info = build_document_table_page_outputs(
+            section_rows,
+            prepend_sequence=True,
+        )
+        chunk_page_rows, chunk_page, chunk_page_info = build_document_table_page_outputs(
+            chunk_rows,
+            prepend_sequence=True,
+        )
+        search_page_rows, search_page, search_page_info = build_document_table_page_outputs(
+            search_rows,
+            prepend_sequence=False,
+        )
+        return (
+            report_html,
+            checks_html,
+            section_page_rows,
+            section_page,
+            section_page_info,
+            chunk_page_rows,
+            chunk_page,
+            chunk_page_info,
+            search_summary,
+            search_page_rows,
+            search_page,
+            search_page_info,
+            search_state,
+            search_detail,
+        )
 
     def run_document_quality_search(choice: str, query_text: str) -> tuple[str, list[list[str]], list[dict], str, str]:
         """在当前文档范围内执行检索验证。"""
@@ -1189,10 +1272,79 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         normalized_query = normalize_search_query(query_text)
         return outputs[4], outputs[5], outputs[6], normalized_query, outputs[7]
 
+    def run_document_quality_search_ui(choice: str, query_text: str) -> tuple[str, list[list[object]], int, str, list[dict], str, str]:
+        """在当前文档范围内执行检索验证，并返回分页后的表格输出。"""
+
+        summary_html, search_rows, search_state, normalized_query, detail_html = run_document_quality_search(choice, query_text)
+        page_rows, page_value, page_info = build_document_table_page_outputs(
+            search_rows,
+            prepend_sequence=False,
+        )
+        return summary_html, page_rows, page_value, page_info, search_state, normalized_query, detail_html
+
     def run_batch_document_quality() -> tuple[str, list[list[str]]]:
         """执行全部文档的批量入库质检。"""
 
         return build_document_quality_batch_outputs()
+
+    def run_batch_document_quality_ui() -> tuple[str, list[list[object]], int, str]:
+        """执行全部文档质检，并返回分页后的批量结果。"""
+
+        summary_html, batch_rows = run_batch_document_quality()
+        page_rows, page_value, page_info = build_document_table_page_outputs(
+            batch_rows,
+            prepend_sequence=True,
+        )
+        return summary_html, page_rows, page_value, page_info
+
+    def change_database_summary_page(
+        choice: str,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换数据库统计表分页。"""
+
+        rows = build_database_summary_rows(get_document_management_state(choice)["database_summary"])
+        return change_document_table_page(rows, current_page, action, prepend_sequence=True)
+
+    def change_document_list_page(
+        choice: str,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换文档列表分页。"""
+
+        rows = get_document_management_state(choice)["table_rows"]
+        return change_document_table_page(rows, current_page, action, prepend_sequence=True)
+
+    def change_document_quality_sections_page(
+        choice: str,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换章节抽样分页。"""
+
+        rows = build_document_quality_outputs(get_document_management_state(choice)["selected_detail"])[2]
+        return change_document_table_page(rows, current_page, action, prepend_sequence=True)
+
+    def change_document_quality_chunks_page(
+        choice: str,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换分块抽样分页。"""
+
+        rows = build_document_quality_outputs(get_document_management_state(choice)["selected_detail"])[3]
+        return change_document_table_page(rows, current_page, action, prepend_sequence=True)
+
+    def change_document_quality_batch_page(
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换批量质检结果分页。"""
+
+        rows = build_document_quality_batch_outputs()[1]
+        return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
     def export_document_quality_csv() -> str:
         """导出全部文档的入库质检结果。"""
@@ -1285,6 +1437,454 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         ]
         return "\n".join([header_row, separator_row, *body_rows])
 
+    def normalize_table_rows(rows: object) -> list[list[object]]:
+        """将 DataFrame 或任意二维列表规范化为列表行。"""
+
+        if hasattr(rows, "values"):
+            return rows.values.tolist()
+        normalized_rows = rows or []
+        return list(normalized_rows)
+
+    def paginate_table_rows(
+        rows: object,
+        page: int | float | None,
+        *,
+        prepend_sequence: bool,
+    ) -> tuple[list[list[object]], int, int, str]:
+        """按固定页大小裁剪表格行，并按需补自然序号。"""
+
+        normalized_rows = normalize_table_rows(rows)
+        total_rows = len(normalized_rows)
+        total_pages = max(1, (total_rows + TABLE_PAGE_SIZE - 1) // TABLE_PAGE_SIZE)
+        try:
+            resolved_page = int(page or 1)
+        except (TypeError, ValueError):
+            resolved_page = 1
+        resolved_page = max(1, min(resolved_page, total_pages))
+        start_index = (resolved_page - 1) * TABLE_PAGE_SIZE
+        end_index = start_index + TABLE_PAGE_SIZE
+        page_rows = normalized_rows[start_index:end_index]
+        if prepend_sequence:
+            page_rows = [[str(start_index + offset + 1), *list(row)] for offset, row in enumerate(page_rows)]
+        page_info = f"第 {resolved_page} / {total_pages} 页，共 {total_rows} 条，每页最多 {TABLE_PAGE_SIZE} 行"
+        return page_rows, resolved_page, total_pages, page_info
+
+    def change_table_page(
+        rows: object,
+        current_page: int | float | None,
+        *,
+        action: str,
+        prepend_sequence: bool,
+    ) -> tuple[list[list[object]], int, str]:
+        """根据上一页/下一页动作切换表格分页。"""
+
+        normalized_rows = normalize_table_rows(rows)
+        _current_rows, resolved_page, total_pages, _page_info = paginate_table_rows(
+            normalized_rows,
+            current_page,
+            prepend_sequence=prepend_sequence,
+        )
+        target_page = resolved_page - 1 if action == "prev" else resolved_page + 1
+        if action not in {"prev", "next"}:
+            target_page = resolved_page
+        target_page = max(1, min(target_page, total_pages))
+        page_rows, final_page, _final_total_pages, page_info = paginate_table_rows(
+            normalized_rows,
+            target_page,
+            prepend_sequence=prepend_sequence,
+        )
+        return page_rows, final_page, page_info
+
+    def reset_table_pagination(
+        rows: object,
+        *,
+        prepend_sequence: bool,
+    ) -> tuple[list[list[object]], int, str]:
+        """将表格重置到第一页。"""
+
+        page_rows, page, _total_pages, page_info = paginate_table_rows(
+            rows,
+            1,
+            prepend_sequence=prepend_sequence,
+        )
+        return page_rows, page, page_info
+
+    def get_row_from_paged_table(
+        rows: object,
+        evt: gr.SelectData,
+        *,
+        id_column_index: int,
+    ) -> list[object]:
+        """从当前页表格中取出被点击的整行。"""
+
+        normalized_rows = normalize_table_rows(rows)
+        if not normalized_rows:
+            return []
+        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
+        try:
+            row_index = int(index)
+        except (TypeError, ValueError):
+            row_index = 0
+        if row_index < 0 or row_index >= len(normalized_rows):
+            row_index = 0
+        selected_row = normalized_rows[row_index] if normalized_rows else []
+        if not selected_row:
+            return []
+        if id_column_index >= len(selected_row):
+            return []
+        return list(selected_row)
+
+    def format_table_pagination_html(page_info: str) -> str:
+        """格式化表格分页提示。"""
+
+        return f"<div style='padding: 6px 2px 0 2px; color: #6b7280; font-size: 12px;'>{page_info}</div>"
+
+    def build_document_table_page_outputs(
+        rows: object,
+        page: int | float | None = 1,
+        *,
+        prepend_sequence: bool,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建文档管理页表格的分页输出。"""
+
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            rows,
+            page,
+            prepend_sequence=prepend_sequence,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def change_document_table_page(
+        rows: object,
+        current_page: int | float,
+        action: str,
+        *,
+        prepend_sequence: bool,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换文档管理页表格分页。"""
+
+        page_rows, new_page, page_info = change_table_page(
+            rows,
+            current_page,
+            action=action,
+            prepend_sequence=prepend_sequence,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def build_document_page_ui_outputs(base_outputs: tuple) -> tuple:
+        """将文档管理基础输出扩展为带分页状态的界面输出。"""
+
+        database_rows = base_outputs[2]
+        document_rows = base_outputs[3]
+        section_rows = base_outputs[10]
+        chunk_rows = base_outputs[11]
+        search_rows = base_outputs[13]
+        batch_rows = base_outputs[17]
+        database_page_rows, database_page, database_page_info = build_document_table_page_outputs(
+            database_rows,
+            prepend_sequence=True,
+        )
+        document_page_rows, document_page, document_page_info = build_document_table_page_outputs(
+            document_rows,
+            prepend_sequence=True,
+        )
+        section_page_rows, section_page, section_page_info = build_document_table_page_outputs(
+            section_rows,
+            prepend_sequence=True,
+        )
+        chunk_page_rows, chunk_page, chunk_page_info = build_document_table_page_outputs(
+            chunk_rows,
+            prepend_sequence=True,
+        )
+        search_page_rows, search_page, search_page_info = build_document_table_page_outputs(
+            search_rows,
+            prepend_sequence=False,
+        )
+        batch_page_rows, batch_page, batch_page_info = build_document_table_page_outputs(
+            batch_rows,
+            prepend_sequence=True,
+        )
+        return (
+            base_outputs[0],
+            base_outputs[1],
+            database_page_rows,
+            database_page,
+            database_page_info,
+            document_page_rows,
+            document_page,
+            document_page_info,
+            base_outputs[4],
+            base_outputs[5],
+            base_outputs[6],
+            base_outputs[7],
+            base_outputs[8],
+            base_outputs[9],
+            section_page_rows,
+            section_page,
+            section_page_info,
+            chunk_page_rows,
+            chunk_page,
+            chunk_page_info,
+            base_outputs[12],
+            search_page_rows,
+            search_page,
+            search_page_info,
+            base_outputs[14],
+            base_outputs[15],
+            base_outputs[16],
+            batch_page_rows,
+            batch_page,
+            batch_page_info,
+            base_outputs[18],
+            base_outputs[19],
+            base_outputs[20],
+            base_outputs[21],
+            base_outputs[22],
+            base_outputs[23],
+            base_outputs[24],
+            base_outputs[25],
+            base_outputs[26],
+            base_outputs[27],
+        )
+
+    def build_search_table_page_outputs(search_rows: list[dict] | None, page: int | float | None = 1) -> tuple[list[list[object]], int, str]:
+        """构建检索结果表格分页输出。"""
+
+        full_rows = build_search_result_rows({"table": search_rows or []})
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=False,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_quality_claim_table_page_outputs(
+        formatted_result: dict | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建 AI 质检 Claim 表格分页输出。"""
+
+        full_rows = build_quality_claim_rows(formatted_result)
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_quality_evidence_rows_from_items(evidence_items: list[dict] | None) -> list[list[str]]:
+        """根据证据项直接构建证据表格行，避免分页后依赖详情对象。"""
+
+        return build_claim_evidence_rows({"evidence_table": evidence_items or []})
+
+    def build_quality_evidence_table_page_outputs(
+        evidence_items: list[dict] | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建 AI 质检证据表格分页输出。"""
+
+        full_rows = build_quality_evidence_rows_from_items(evidence_items)
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_recent_quality_table_page_outputs(
+        recent_results: list[dict] | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建最近质检记录分页输出。"""
+
+        recent_payload = format_recent_quality_checks(recent_results or [])
+        full_rows = build_recent_quality_rows(recent_payload)
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_quality_evaluation_table_page_outputs(
+        evaluation_result: dict | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建效果评测明细分页输出。"""
+
+        full_rows = build_quality_evaluation_rows(evaluation_result)
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_settings_template_table_page_outputs(
+        template_items: list[dict] | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建功能设置模板表分页输出。"""
+
+        full_rows = build_settings_template_rows(template_items or [])
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_quality_ui_outputs(
+        base_outputs: tuple,
+        *,
+        claim_page: int | float | None = 1,
+        evidence_page: int | float | None = 1,
+        recent_page: int | float | None = 1,
+    ) -> tuple:
+        """将 AI 质检基础输出扩展为带分页状态的 UI 输出。"""
+
+        (
+            progress_html,
+            result_html,
+            formatted_result,
+            claim_rows,
+            selected_claim,
+            claim_detail_map,
+            claim_view,
+            evidence_rows,
+            review_view,
+            evidence_items,
+            evidence_detail_html,
+            recent_results,
+            recent_rows,
+            evaluation_cases_text,
+        ) = base_outputs
+        claim_page_rows, claim_page_value, claim_page_info = build_quality_claim_table_page_outputs(
+            formatted_result,
+            claim_page,
+        )
+        evidence_page_rows, evidence_page_value, evidence_page_info = build_quality_evidence_table_page_outputs(
+            evidence_items,
+            evidence_page,
+        )
+        recent_page_rows, recent_page_value, recent_page_info = build_recent_quality_table_page_outputs(
+            recent_results,
+            recent_page,
+        )
+        return (
+            progress_html,
+            result_html,
+            formatted_result,
+            claim_page_rows,
+            claim_page_value,
+            claim_page_info,
+            selected_claim,
+            claim_detail_map,
+            claim_view,
+            evidence_page_rows,
+            evidence_page_value,
+            evidence_page_info,
+            review_view,
+            evidence_items,
+            evidence_detail_html,
+            recent_results,
+            recent_page_rows,
+            recent_page_value,
+            recent_page_info,
+            evaluation_cases_text,
+        )
+
+    def build_review_workspace_ui_outputs(
+        base_outputs: tuple,
+        *,
+        pending_page: int | float | None = 1,
+        processed_page: int | float | None = 1,
+        evidence_page: int | float | None = 1,
+        history_page: int | float | None = 1,
+    ) -> tuple:
+        """将人工审核基础输出扩展为带分页状态的 UI 输出。"""
+
+        (
+            pending_rows,
+            processed_rows,
+            candidate_items,
+            selected_claim_id,
+            claim_detail_map,
+            claim_view,
+            evidence_rows,
+            evidence_items,
+            evidence_detail_html,
+            action_value,
+            note_value,
+            review_rows,
+            review_items,
+            selected_review_id,
+            review_detail_html,
+        ) = base_outputs
+        pending_page_rows, pending_page_value, _pending_total_pages, pending_page_info = paginate_table_rows(
+            pending_rows,
+            pending_page,
+            prepend_sequence=True,
+        )
+        processed_page_rows, processed_page_value, _processed_total_pages, processed_page_info = paginate_table_rows(
+            processed_rows,
+            processed_page,
+            prepend_sequence=True,
+        )
+        evidence_page_rows, evidence_page_value, _evidence_total_pages, evidence_page_info = paginate_table_rows(
+            evidence_rows,
+            evidence_page,
+            prepend_sequence=True,
+        )
+        review_page_rows, review_page_value, _review_total_pages, review_page_info = paginate_table_rows(
+            review_rows,
+            history_page,
+            prepend_sequence=True,
+        )
+        return (
+            pending_page_rows,
+            pending_page_value,
+            format_table_pagination_html(pending_page_info),
+            processed_page_rows,
+            processed_page_value,
+            format_table_pagination_html(processed_page_info),
+            candidate_items,
+            selected_claim_id,
+            claim_detail_map,
+            claim_view,
+            evidence_page_rows,
+            evidence_page_value,
+            format_table_pagination_html(evidence_page_info),
+            evidence_items,
+            evidence_detail_html,
+            action_value,
+            note_value,
+            review_page_rows,
+            review_page_value,
+            format_table_pagination_html(review_page_info),
+            review_items,
+            selected_review_id,
+            review_detail_html,
+        )
+
+    def build_settings_workspace_ui_outputs(
+        base_outputs: tuple,
+        *,
+        page: int | float | None = 1,
+    ) -> tuple:
+        """将功能设置基础输出扩展为带分页状态的 UI 输出。"""
+
+        page_rows, page_value, page_info = build_settings_template_table_page_outputs(
+            base_outputs[1],
+            page,
+        )
+        return (
+            page_rows,
+            page_value,
+            page_info,
+            *base_outputs[1:],
+        )
+
     def build_search_detail_payload(search_row: dict | None) -> dict | None:
         """根据检索结果行补齐原文详情。"""
 
@@ -1318,22 +1918,24 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         selected_chunk_id = str((selected_search_row or {}).get("chunk_id") or "")
         return export_markdown_result("文档检索", "检索结果", markdown_text, linked_id=selected_chunk_id or None)
 
-    def select_document_quality_search_result(results: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]]]:
+    def select_document_quality_search_result(
+        results: list[dict],
+        query_text: str,
+        evt: gr.SelectData,
+        current_page_rows: list[list[object]] | None = None,
+    ) -> tuple[str, list[list[object]]]:
         """点击文档内检索结果后，展示对应原文详情。"""
 
-        rows = results or []
-        if not rows:
-            return format_search_result_detail_html(None, query_text=query_text), []
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            row_index = 0
-        if row_index < 0 or row_index >= len(rows):
-            row_index = 0
-        selected_row = rows[row_index]
-        formatted = {"table": rows}
-        return build_search_detail(selected_row, query_text), build_search_result_rows(formatted, selected_row_index=row_index)
+        page_rows = normalize_table_rows(current_page_rows) if current_page_rows is not None else build_search_result_rows({"table": results or []})
+        raw_rows = results or []
+        if not page_rows or not raw_rows:
+            return format_search_result_detail_html(None, query_text=query_text), page_rows
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=3)
+        selected_chunk_id = str(selected_row[3]) if len(selected_row) > 3 else ""
+        matched_row = next((item for item in raw_rows if str(item.get("chunk_id") or "") == selected_chunk_id), None)
+        if not matched_row:
+            return format_search_result_detail_html(None, query_text=query_text), page_rows
+        return build_search_detail(matched_row, query_text), page_rows
 
     def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
         normalized_query = normalize_search_query(query)
@@ -1379,22 +1981,52 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             selected_row,
         )
 
-    def select_search_result(search_rows: list[dict], query_text: str, evt: gr.SelectData) -> tuple[str, list[list[str]], dict]:
+    def run_search_ui(
+        query: str,
+        top_k: int,
+    ) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
+        """执行检索并返回分页后的界面输出。"""
+
+        summary_html, _full_rows, search_rows, normalized_query, detail_html, selected_row = run_search(query, top_k)
+        page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=1)
+        return summary_html, page_rows, search_rows, normalized_query, detail_html, selected_row, page_value, page_info
+
+    def change_search_page(
+        search_rows: list[dict],
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换检索结果分页。"""
+
+        current_page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=current_page)
+        _ = current_page_rows
+        full_rows = build_search_result_rows({"table": search_rows or []})
+        page_rows, new_page, new_page_info = change_table_page(
+            full_rows,
+            page_value,
+            action=action,
+            prepend_sequence=False,
+        )
+        return page_rows, new_page, format_table_pagination_html(new_page_info)
+
+    def select_search_result(
+        current_page_rows: list[list[object]],
+        search_rows: list[dict],
+        query_text: str,
+        evt: gr.SelectData,
+    ) -> tuple[str, list[list[object]], dict]:
         """点击检索结果表格后展示对应原文。"""
 
-        if not search_rows:
-            return format_search_result_detail_html(None, query_text=query_text), [], {}
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows}), {}
-        if row_index < 0 or row_index >= len(search_rows):
-            return format_search_result_detail_html(None, query_text=query_text), build_search_result_rows({"table": search_rows}), {}
-        selected_row = build_search_detail_payload(search_rows[row_index]) or {}
+        page_rows = normalize_table_rows(current_page_rows)
+        if not search_rows or not page_rows:
+            return format_search_result_detail_html(None, query_text=query_text), page_rows, {}
+        selected_display_row = get_row_from_paged_table(page_rows, evt, id_column_index=3)
+        selected_chunk_id = str(selected_display_row[3]) if len(selected_display_row) > 3 else ""
+        matched_row = next((item for item in search_rows if str(item.get("chunk_id") or "") == selected_chunk_id), None)
+        selected_row = build_search_detail_payload(matched_row) or {}
         return (
             format_search_result_detail_html(selected_row, query_text=query_text),
-            build_search_result_rows({"table": search_rows}, selected_row_index=row_index),
+            page_rows,
             selected_row,
         )
 
@@ -1408,7 +2040,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return detail_html, build_claim_evidence_rows(detail), detail_html, evidence_items, evidence_detail_html
 
     def select_quality_claim(
-        claim_rows: list[list[str]],
+        claim_rows: list[list[object]],
         claim_detail_map: dict | None,
         formatted_result: dict | None,
         evt: gr.SelectData,
@@ -1428,7 +2060,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         if row_index < 0 or row_index >= len(normalized_rows):
             claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views("", claim_detail_map)
             return claim_view, evidence_rows, review_view, "", evidence_items, evidence_detail_html, build_quality_evaluation_example_text(formatted_result, "", claim_detail_map)
-        selected_claim_id = str(normalized_rows[row_index][0]) if normalized_rows[row_index] else ""
+        selected_row = normalized_rows[row_index] if normalized_rows[row_index] else []
+        selected_claim_id = str(selected_row[1] if len(selected_row) > 8 else (selected_row[0] if selected_row else ""))
         claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(selected_claim_id, claim_detail_map)
         return (
             claim_view,
@@ -1443,20 +2076,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def select_quality_evidence(
         evidence_items: list[dict] | None,
         evt: gr.SelectData,
+        current_page_rows: list[list[object]] | None = None,
     ) -> str:
         """点击证据列表后联动证据详情。"""
 
+        page_rows = normalize_table_rows(current_page_rows) if current_page_rows is not None else build_quality_evidence_rows_from_items(evidence_items)
         items = evidence_items or []
-        if not items:
+        if not items or not page_rows:
             return format_evidence_detail_html(None)
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            return format_evidence_detail_html(None)
-        if row_index < 0 or row_index >= len(items):
-            return format_evidence_detail_html(None)
-        return format_evidence_detail_html(items[row_index])
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
+        selected_chunk_id = str(selected_row[1] if len(selected_row) > 8 else (selected_row[0] if selected_row else ""))
+        matched_item = next((item for item in items if str(item.get("chunk_id") or "") == selected_chunk_id), None)
+        return format_evidence_detail_html(matched_item)
 
     def render_quality_template(template_choice: str) -> str:
         """根据当前模板选择展示模板内容。"""
@@ -1566,6 +2197,29 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             build_quality_evaluation_rows(evaluation_result),
             evaluation_result,
         )
+
+    def run_quality_evaluation_ui(cases_json: str, template_choice: str) -> tuple[str, list[list[object]], dict, int, str]:
+        """执行效果评测并返回分页后的表格输出。"""
+
+        summary_html, _rows, evaluation_result = run_quality_evaluation(cases_json, template_choice)
+        page_rows, page_value, page_info = build_quality_evaluation_table_page_outputs(evaluation_result, page=1)
+        return summary_html, page_rows, evaluation_result, page_value, page_info
+
+    def change_quality_evaluation_page(
+        evaluation_result: dict | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换效果评测明细分页。"""
+
+        full_rows = build_quality_evaluation_rows(evaluation_result)
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
 
     def export_quality_results(
         formatted_result: dict | None,
@@ -1852,6 +2506,354 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             recent_rows=recent_rows,
         )
 
+    def list_recent_quality_results_ui() -> tuple:
+        """加载最近质检记录，并输出分页后的界面状态。"""
+
+        return build_quality_ui_outputs(list_recent_quality_results())
+
+    def select_recent_quality_result_ui(
+        current_page_rows: list[list[object]],
+        recent_results: list[dict],
+        evt: gr.SelectData,
+    ) -> tuple:
+        """点击最近质检记录后，输出分页后的 AI 质检界面状态。"""
+
+        page_rows = normalize_table_rows(current_page_rows)
+        results = recent_results or []
+        if not results or not page_rows:
+            return build_quality_ui_outputs(build_recent_quality_view_outputs([]))
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
+        selected_check_id = str(selected_row[1] if len(selected_row) > 6 else (selected_row[0] if selected_row else ""))
+        selected_index = next(
+            (index for index, item in enumerate(results) if str(item.get("check_id") or "") == selected_check_id),
+            0,
+        )
+        return build_quality_ui_outputs(
+            build_recent_quality_view_outputs(results, selected_index=selected_index),
+        )
+    select_recent_quality_result_ui.__name__ = "select_recent_quality_result"
+
+    def select_quality_claim_ui(
+        current_page_rows: list[list[object]],
+        claim_detail_map: dict | None,
+        formatted_result: dict | None,
+        evt: gr.SelectData,
+    ) -> tuple:
+        """点击 Claim 列表后，返回分页后的证据表输出。"""
+
+        (
+            claim_view,
+            evidence_rows,
+            review_view,
+            selected_claim_id,
+            evidence_items,
+            evidence_detail_html,
+            evaluation_cases,
+        ) = select_quality_claim(current_page_rows, claim_detail_map, formatted_result, evt)
+        evidence_page_rows, evidence_page_value, evidence_page_info = build_quality_evidence_table_page_outputs(
+            evidence_items,
+            page=1,
+        )
+        return (
+            claim_view,
+            evidence_page_rows,
+            evidence_page_value,
+            evidence_page_info,
+            review_view,
+            selected_claim_id,
+            evidence_items,
+            evidence_detail_html,
+            evaluation_cases,
+        )
+    select_quality_claim_ui.__name__ = "select_quality_claim"
+
+    def run_quality_check_ui(
+        input_text: str,
+        template_choice: str,
+    ):
+        """执行 AI 质检，并将输出适配为带分页的界面结果。"""
+
+        for base_outputs in run_quality_check(input_text, template_choice):
+            yield build_quality_ui_outputs(base_outputs)
+
+    def change_quality_claim_page(
+        formatted_result: dict | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换 Claim 列表分页。"""
+
+        full_rows = build_quality_claim_rows(formatted_result)
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def change_quality_evidence_page(
+        evidence_items: list[dict] | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换证据列表分页。"""
+
+        full_rows = build_quality_evidence_rows_from_items(evidence_items)
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def change_recent_quality_page(
+        recent_results: list[dict] | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换最近质检记录分页。"""
+
+        recent_payload = format_recent_quality_checks(recent_results or [])
+        full_rows = build_recent_quality_rows(recent_payload)
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def change_settings_template_page(
+        template_items: list[dict] | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换模板列表分页。"""
+
+        full_rows = build_settings_template_rows(template_items or [])
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def refresh_settings_workspace_ui(selected_template_id: str | None) -> tuple:
+        """刷新功能设置页并返回分页后的模板列表。"""
+
+        return build_settings_workspace_ui_outputs(refresh_settings_workspace(selected_template_id))
+
+    def save_settings_template_ui(*args) -> tuple:
+        """保存模板并返回分页后的功能设置页输出。"""
+
+        outputs = save_settings_template(*args)
+        return (*build_settings_workspace_ui_outputs(outputs[:20]), *outputs[20:])
+
+    def delete_settings_template_ui(*args) -> tuple:
+        """删除模板并返回分页后的功能设置页输出。"""
+
+        outputs = delete_settings_template(*args)
+        return (*build_settings_workspace_ui_outputs(outputs[:20]), *outputs[20:])
+
+    def list_review_workspace_ui(
+        scope_value: str,
+        risk_value: str,
+        selected_claim_id: str,
+    ) -> tuple:
+        """加载人工审核页并返回分页后的界面输出。"""
+
+        return build_review_workspace_ui_outputs(
+            list_review_workspace(scope_value, risk_value, selected_claim_id),
+        )
+
+    def change_review_filters_ui(
+        review_candidates: list[dict],
+        review_items: list[dict],
+        selected_claim_id: str,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple:
+        """切换人工审核筛选并返回分页后的界面输出。"""
+
+        return build_review_workspace_ui_outputs(
+            build_review_workspace_outputs(
+                review_candidates,
+                review_items,
+                selected_claim_id=selected_claim_id,
+                scope_value=scope_value,
+                risk_value=risk_value,
+            ),
+        )
+    change_review_filters_ui.__name__ = "change_review_filters"
+
+    def select_review_candidate_ui(
+        current_page_rows: list[list[object]],
+        review_candidates: list[dict],
+        review_items: list[dict],
+        evt: gr.SelectData,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple:
+        """点击人工审核候选记录后，返回分页后的证据输出。"""
+
+        (
+            selected_claim_id,
+            review_claim_detail_map,
+            review_claim_detail_html,
+            review_evidence_rows,
+            review_evidence_items,
+            review_evidence_detail_html,
+            review_action_value,
+            review_note_value,
+            selected_review_id,
+            review_record_detail_html,
+        ) = select_review_candidate(current_page_rows, review_candidates, review_items, evt, scope_value, risk_value)
+        evidence_page_rows, evidence_page_value, _evidence_total_pages, evidence_page_info = paginate_table_rows(
+            review_evidence_rows,
+            1,
+            prepend_sequence=True,
+        )
+        return (
+            selected_claim_id,
+            review_claim_detail_map,
+            review_claim_detail_html,
+            evidence_page_rows,
+            evidence_page_value,
+            format_table_pagination_html(evidence_page_info),
+            review_evidence_items,
+            review_evidence_detail_html,
+            review_action_value,
+            review_note_value,
+            selected_review_id,
+            review_record_detail_html,
+        )
+    select_review_candidate_ui.__name__ = "select_review_candidate"
+
+    def select_review_history_record_ui(
+        review_items: list[dict],
+        review_candidates: list[dict],
+        scope_value: str,
+        risk_value: str,
+        current_page_rows: list[list[object]],
+        evt: gr.SelectData,
+    ) -> tuple:
+        """点击审核历史后，返回分页后的证据输出。"""
+
+        (
+            selected_claim_id,
+            review_claim_detail_map,
+            review_claim_detail_html,
+            review_evidence_rows,
+            review_evidence_items,
+            review_evidence_detail_html,
+            review_action_value,
+            review_note_value,
+            selected_review_id,
+            review_record_detail_html,
+        ) = select_review_history_record(
+            review_items,
+            review_candidates,
+            evt,
+            scope_value,
+            risk_value,
+            current_page_rows,
+        )
+        evidence_page_rows, evidence_page_value, _evidence_total_pages, evidence_page_info = paginate_table_rows(
+            review_evidence_rows,
+            1,
+            prepend_sequence=True,
+        )
+        return (
+            selected_claim_id,
+            review_claim_detail_map,
+            review_claim_detail_html,
+            evidence_page_rows,
+            evidence_page_value,
+            format_table_pagination_html(evidence_page_info),
+            review_evidence_items,
+            review_evidence_detail_html,
+            review_action_value,
+            review_note_value,
+            selected_review_id,
+            review_record_detail_html,
+        )
+    select_review_history_record_ui.__name__ = "select_review_history_record"
+
+    def submit_review_action_ui(
+        claim_choice: str,
+        review_action: str,
+        review_note: str,
+        scope_value: str,
+        risk_value: str,
+    ) -> tuple:
+        """提交审核并返回分页后的人工审核界面输出。"""
+
+        outputs = submit_review_action(claim_choice, review_action, review_note, scope_value, risk_value)
+        return (outputs[0], *build_review_workspace_ui_outputs(outputs[1:]))
+    submit_review_action_ui.__name__ = "submit_review_action"
+
+    def change_review_candidate_page(
+        review_candidates: list[dict] | None,
+        scope_value: str,
+        risk_value: str,
+        current_page: int | float,
+        action: str,
+        *,
+        processed: bool,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换人工审核候选列表分页。"""
+
+        filtered_candidates = filter_review_candidates(
+            review_candidates,
+            scope_value=scope_value,
+            risk_value=risk_value,
+        )
+        pending_items, processed_items = split_review_candidates(filtered_candidates)
+        target_items = processed_items if processed else pending_items
+        full_rows = build_review_candidate_rows(format_review_candidates(target_items))
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def change_review_evidence_page(
+        evidence_items: list[dict] | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换人工审核证据列表分页。"""
+
+        full_rows = build_quality_evidence_rows_from_items(evidence_items)
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
+    def change_review_history_page(
+        review_items: list[dict] | None,
+        current_page: int | float,
+        action: str,
+    ) -> tuple[list[list[object]], int, str]:
+        """切换审核历史分页。"""
+
+        full_rows = build_review_history_rows(format_review_history(review_items or []))
+        page_rows, new_page, page_info = change_table_page(
+            full_rows,
+            current_page,
+            action=action,
+            prepend_sequence=True,
+        )
+        return page_rows, new_page, format_table_pagination_html(page_info)
+
     def run_quality_check(
         input_text: str,
         template_choice: str,
@@ -2034,21 +3036,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def select_settings_template(
         template_items: list[dict] | None,
         evt: gr.SelectData,
+        current_page_rows: list[list[object]] | None = None,
     ) -> tuple[str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, bool]:
         """点击模板列表后加载对应模板详情与表单。"""
 
+        page_rows = normalize_table_rows(current_page_rows) if current_page_rows is not None else build_settings_template_rows(template_items or [])
         items = template_items or []
-        if not items:
+        if not items or not page_rows:
             outputs = build_settings_workspace("")
             return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            row_index = 0
-        if row_index < 0 or row_index >= len(items):
-            row_index = 0
-        template_id = str(items[row_index].get("template_id") or "")
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
+        template_id = str(selected_row[1] if len(selected_row) > 6 else (selected_row[0] if selected_row else ""))
         outputs = build_settings_workspace(template_id)
         return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
 
@@ -2375,7 +3373,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return outputs[0], outputs[1], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[13], outputs[14]
 
     def select_review_candidate(
-        candidate_rows: list[list[str]],
+        candidate_rows: list[list[object]],
         review_candidates: list[dict],
         review_items: list[dict],
         evt: gr.SelectData,
@@ -2400,7 +3398,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             row_index = 0
         if row_index < 0 or row_index >= len(normalized_rows):
             row_index = 0
-        selected_claim_id = str(normalized_rows[row_index][0]) if normalized_rows[row_index] else ""
+        selected_row = normalized_rows[row_index] if normalized_rows[row_index] else []
+        selected_claim_id = str(selected_row[1] if len(selected_row) > 8 else (selected_row[0] if selected_row else ""))
         outputs = build_review_workspace_outputs(
             review_candidates,
             review_items,
@@ -2416,11 +3415,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         evt: gr.SelectData,
         scope_value: str,
         risk_value: str,
+        current_page_rows: list[list[object]] | None = None,
     ) -> tuple[str, dict, str, list[list[str]], list[dict], str, str, str, str, str]:
         """点击已审核记录后回放对应 Claim、证据与审核结论。"""
 
+        page_rows = normalize_table_rows(current_page_rows) if current_page_rows is not None else build_review_history_rows(format_review_history(review_items or []))
         items = review_items or []
-        if not items:
+        if not items or not page_rows:
             empty_outputs = build_review_workspace_outputs(
                 review_candidates,
                 [],
@@ -2428,14 +3429,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 risk_value=risk_value,
             )
             return empty_outputs[3], empty_outputs[4], empty_outputs[5], empty_outputs[6], empty_outputs[7], empty_outputs[8], empty_outputs[9], empty_outputs[10], empty_outputs[13], empty_outputs[14]
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            row_index = 0
-        if row_index < 0 or row_index >= len(items):
-            row_index = 0
-        selected_record = items[row_index]
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
+        selected_review_id = str(selected_row[1] if len(selected_row) > 8 else (selected_row[0] if selected_row else ""))
+        selected_record = next((item for item in items if str(item.get("review_id") or "") == selected_review_id), None)
+        if not selected_record:
+            selected_record = items[0]
         outputs = build_review_workspace_outputs(
             review_candidates,
             review_items,
@@ -2533,21 +3531,24 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return build_recent_quality_view_outputs(results, selected_index=0)
 
     def select_recent_quality_result(
+        current_page_rows: list[list[object]],
         recent_results: list[dict],
         evt: gr.SelectData,
     ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, str]:
         """点击最近质检记录后回放对应结果。"""
 
+        page_rows = normalize_table_rows(current_page_rows)
         results = recent_results or []
-        if not results:
+        if not results or not page_rows:
             empty_outputs = build_recent_quality_view_outputs([])
             return (*empty_outputs[:11], empty_outputs[13])
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            row_index = 0
-        selected_outputs = build_recent_quality_view_outputs(results, selected_index=row_index)
+        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
+        selected_check_id = str(selected_row[1] if len(selected_row) > 6 else (selected_row[0] if selected_row else ""))
+        selected_index = next(
+            (index for index, item in enumerate(results) if str(item.get("check_id") or "") == selected_check_id),
+            0,
+        )
+        selected_outputs = build_recent_quality_view_outputs(results, selected_index=selected_index)
         return (*selected_outputs[:11], selected_outputs[13])
 
     initial_document_state = get_document_management_state()
@@ -2647,6 +3648,67 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_settings_runtime_html,
         initial_settings_delete_confirm,
     ) = build_settings_workspace()
+    initial_database_table_rows, initial_database_page, initial_database_page_info = reset_table_pagination(
+        initial_database_rows,
+        prepend_sequence=True,
+    )
+    initial_document_table_rows, initial_document_page, initial_document_page_info = reset_table_pagination(
+        initial_document_state["table_rows"],
+        prepend_sequence=True,
+    )
+    initial_document_quality_sections_table_rows, initial_document_quality_sections_page, initial_document_quality_sections_page_info = reset_table_pagination(
+        initial_document_quality_section_rows,
+        prepend_sequence=True,
+    )
+    initial_document_quality_chunks_table_rows, initial_document_quality_chunks_page, initial_document_quality_chunks_page_info = reset_table_pagination(
+        initial_document_quality_chunk_rows,
+        prepend_sequence=True,
+    )
+    initial_document_quality_search_table_rows, initial_document_quality_search_page, initial_document_quality_search_page_info = reset_table_pagination(
+        initial_document_quality_search_rows,
+        prepend_sequence=False,
+    )
+    initial_document_quality_batch_table_rows, initial_document_quality_batch_page, initial_document_quality_batch_page_info = reset_table_pagination(
+        initial_document_quality_batch_rows,
+        prepend_sequence=True,
+    )
+    initial_search_table_rows, initial_search_page, initial_search_page_info = reset_table_pagination([], prepend_sequence=False)
+    initial_quality_claim_table_rows, initial_quality_claim_page, initial_quality_claim_page_info = reset_table_pagination(
+        initial_claim_rows,
+        prepend_sequence=True,
+    )
+    initial_claim_evidence_table_rows, initial_claim_evidence_page, initial_claim_evidence_page_info = reset_table_pagination(
+        initial_evidence_rows,
+        prepend_sequence=True,
+    )
+    initial_recent_quality_table_rows, initial_recent_quality_page, initial_recent_quality_page_info = reset_table_pagination(
+        initial_recent_rows,
+        prepend_sequence=True,
+    )
+    initial_quality_evaluation_table_rows, initial_quality_evaluation_page, initial_quality_evaluation_page_info = reset_table_pagination(
+        initial_quality_evaluation_rows,
+        prepend_sequence=True,
+    )
+    initial_review_pending_table_rows, initial_review_pending_page, initial_review_pending_page_info = reset_table_pagination(
+        initial_review_pending_rows,
+        prepend_sequence=True,
+    )
+    initial_review_processed_table_rows, initial_review_processed_page, initial_review_processed_page_info = reset_table_pagination(
+        initial_review_processed_rows,
+        prepend_sequence=True,
+    )
+    initial_review_evidence_table_rows, initial_review_evidence_page, initial_review_evidence_page_info = reset_table_pagination(
+        initial_review_evidence_rows,
+        prepend_sequence=True,
+    )
+    initial_review_history_table_rows, initial_review_history_page, initial_review_history_page_info = reset_table_pagination(
+        initial_review_rows,
+        prepend_sequence=True,
+    )
+    initial_settings_template_table_rows, initial_settings_template_page, initial_settings_template_page_info = reset_table_pagination(
+        initial_settings_template_rows,
+        prepend_sequence=True,
+    )
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -2658,6 +3720,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     elem_id="document-management-help-panel",
                 )
                 scan_button = gr.Button("刷新文档列表")
+                database_page_state = gr.State(initial_database_page)
+                document_page_state = gr.State(initial_document_page)
+                document_quality_sections_page_state = gr.State(initial_document_quality_sections_page)
+                document_quality_chunks_page_state = gr.State(initial_document_quality_chunks_page)
+                document_quality_search_page_state = gr.State(initial_document_quality_search_page)
+                document_quality_batch_page_state = gr.State(initial_document_quality_batch_page)
                 with gr.Row():
                     with gr.Column(scale=1):
                         document_summary = gr.HTML(value=initial_document_summary)
@@ -2680,22 +3748,36 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
                     with gr.Column(scale=4):
                         database_summary_table = gr.Dataframe(
-                            headers=["指标", "数量"],
-                            datatype=["str", "str"],
+                            headers=["序号", "指标", "数量"],
+                            datatype=["str", "str", "str"],
                             interactive=False,
                             row_count=0,
-                            column_count=2,
+                            column_count=3,
                             label="数据库统计",
-                            value=initial_database_rows,
+                            value=initial_database_table_rows,
+                        )
+                        with gr.Row(elem_id="database-pagination-row"):
+                            database_prev_button = gr.Button("上一页")
+                            database_next_button = gr.Button("下一页")
+                        database_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_database_page_info),
+                            elem_id="database-page-info",
                         )
                 document_table = gr.Dataframe(
-                    headers=["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
-                    datatype=["str"] * 9,
+                    headers=["序号", "文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+                    datatype=["str"] * 10,
                     interactive=False,
                     row_count=0,
-                    column_count=9,
+                    column_count=10,
                     label="现有文档列表",
-                    value=initial_document_state["table_rows"],
+                    value=initial_document_table_rows,
+                )
+                with gr.Row(elem_id="document-pagination-row"):
+                    document_prev_button = gr.Button("上一页")
+                    document_next_button = gr.Button("下一页")
+                document_page_info = gr.HTML(
+                    value=format_table_pagination_html(initial_document_page_info),
+                    elem_id="document-page-info",
                 )
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -2729,25 +3811,39 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row(elem_id="document-quality-sample-row", equal_height=True):
                             with gr.Column(scale=1):
                                 document_quality_sections = gr.Dataframe(
-                                    headers=["定位", "章节标题", "层级", "章节字数", "内容预览"],
-                                    datatype=["str"] * 5,
-                                    interactive=False,
-                                    row_count=0,
-                                    column_count=5,
-                                    label="章节抽样",
-                                    elem_id="document-quality-sections-table",
-                                    value=initial_document_quality_section_rows,
-                                )
-                            with gr.Column(scale=1):
-                                document_quality_chunks = gr.Dataframe(
-                                    headers=["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
+                                    headers=["序号", "定位", "章节标题", "层级", "章节字数", "内容预览"],
                                     datatype=["str"] * 6,
                                     interactive=False,
                                     row_count=0,
                                     column_count=6,
+                                    label="章节抽样",
+                                    elem_id="document-quality-sections-table",
+                                    value=initial_document_quality_sections_table_rows,
+                                )
+                                with gr.Row(elem_id="document-quality-sections-pagination-row"):
+                                    document_quality_sections_prev_button = gr.Button("上一页")
+                                    document_quality_sections_next_button = gr.Button("下一页")
+                                document_quality_sections_page_info = gr.HTML(
+                                    value=format_table_pagination_html(initial_document_quality_sections_page_info),
+                                    elem_id="document-quality-sections-page-info",
+                                )
+                            with gr.Column(scale=1):
+                                document_quality_chunks = gr.Dataframe(
+                                    headers=["序号", "片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
+                                    datatype=["str"] * 7,
+                                    interactive=False,
+                                    row_count=0,
+                                    column_count=7,
                                     label="分块抽样",
                                     elem_id="document-quality-chunks-table",
-                                    value=initial_document_quality_chunk_rows,
+                                    value=initial_document_quality_chunks_table_rows,
+                                )
+                                with gr.Row(elem_id="document-quality-chunks-pagination-row"):
+                                    document_quality_chunks_prev_button = gr.Button("上一页")
+                                    document_quality_chunks_next_button = gr.Button("下一页")
+                                document_quality_chunks_page_info = gr.HTML(
+                                    value=format_table_pagination_html(initial_document_quality_chunks_page_info),
+                                    elem_id="document-quality-chunks-page-info",
                                 )
                         with gr.Row(elem_id="document-quality-search-row", equal_height=True):
                             with gr.Column(scale=5):
@@ -2775,7 +3871,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     column_count=9,
                                     label="文档内检索结果",
                                     elem_id="document-quality-search-results",
-                                    value=initial_document_quality_search_rows,
+                                    value=initial_document_quality_search_table_rows,
+                                )
+                                with gr.Row(elem_id="document-quality-search-pagination-row"):
+                                    document_quality_search_prev_button = gr.Button("上一页")
+                                    document_quality_search_next_button = gr.Button("下一页")
+                                document_quality_search_page_info = gr.HTML(
+                                    value=format_table_pagination_html(initial_document_quality_search_page_info),
+                                    elem_id="document-quality-search-page-info",
                                 )
                             with gr.Column(scale=4):
                                 document_quality_search_detail = gr.HTML(
@@ -2802,14 +3905,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 )
                             with gr.Column(scale=5):
                                 document_quality_batch_table = gr.Dataframe(
-                                    headers=["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                                    datatype=["str"] * 9,
+                                    headers=["序号", "文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                                    datatype=["str"] * 10,
                                     interactive=False,
                                     row_count=0,
-                                    column_count=9,
+                                    column_count=10,
                                     label="批量质检结果",
                                     elem_id="document-quality-batch-table",
-                                    value=initial_document_quality_batch_rows,
+                                    value=initial_document_quality_batch_table_rows,
+                                )
+                                with gr.Row(elem_id="document-quality-batch-pagination-row"):
+                                    document_quality_batch_prev_button = gr.Button("上一页")
+                                    document_quality_batch_next_button = gr.Button("下一页")
+                                document_quality_batch_page_info = gr.HTML(
+                                    value=format_table_pagination_html(initial_document_quality_batch_page_info),
+                                    elem_id="document-quality-batch-page-info",
                                 )
                         with gr.Row(elem_id="document-quality-config-row", equal_height=True):
                             with gr.Column(scale=4):
@@ -2862,6 +3972,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     search_result_state = gr.State([])
                     search_query_state = gr.State("")
                     search_selected_row_state = gr.State({})
+                    search_page_state = gr.State(initial_search_page)
                     with gr.Row(elem_id="search-result-row", equal_height=True):
                         with gr.Column(scale=5):
                             search_result = gr.Dataframe(
@@ -2872,6 +3983,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 column_count=9,
                                 label="检索结果列表",
                                 elem_id="search-results-table",
+                                value=initial_search_table_rows,
+                            )
+                            with gr.Row(elem_id="search-pagination-row"):
+                                search_prev_button = gr.Button("上一页")
+                                search_next_button = gr.Button("下一页")
+                            search_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_search_page_info),
+                                elem_id="search-page-info",
                             )
                         with gr.Column(scale=4):
                             search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
@@ -2904,6 +4023,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         elem_id="quality-template-panel",
                     )
                 formatted_quality_result_state = gr.State(initial_formatted_quality_result)
+                quality_claim_page_state = gr.State(initial_quality_claim_page)
+                quality_evidence_page_state = gr.State(initial_claim_evidence_page)
+                recent_quality_page_state = gr.State(initial_recent_quality_page)
+                quality_evaluation_page_state = gr.State(initial_quality_evaluation_page)
                 with gr.Group(elem_id="quality-main-workspace"):
                     with gr.Row(elem_id="quality-summary-row", equal_height=True):
                         with gr.Column(scale=1):
@@ -2922,14 +4045,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Row(elem_id="quality-claim-row", equal_height=True):
                         with gr.Column(scale=5):
                             quality_claims = gr.Dataframe(
-                                headers=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
-                                datatype=["str"] * 8,
+                                headers=["序号", "Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
+                                datatype=["str"] * 9,
                                 interactive=False,
                                 row_count=0,
-                                column_count=8,
+                                column_count=9,
                                 label="Claim 列表",
                                 elem_id="quality-claims-table",
-                                value=initial_claim_rows,
+                                value=initial_quality_claim_table_rows,
+                            )
+                            with gr.Row(elem_id="quality-claim-pagination-row"):
+                                quality_claim_prev_button = gr.Button("上一页")
+                                quality_claim_next_button = gr.Button("下一页")
+                            quality_claim_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_quality_claim_page_info),
+                                elem_id="quality-claim-page-info",
                             )
                         with gr.Column(scale=4):
                             selected_claim_state = gr.State(initial_selected_claim)
@@ -2941,14 +4071,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Row(elem_id="quality-evidence-row", equal_height=True):
                         with gr.Column(scale=5):
                             claim_evidence_table = gr.Dataframe(
-                                headers=["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                                datatype=["str"] * 8,
+                                headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                                datatype=["str"] * 9,
                                 interactive=False,
                                 row_count=0,
-                                column_count=8,
+                                column_count=9,
                                 label="证据列表",
                                 elem_id="quality-evidence-table",
-                                value=initial_evidence_rows,
+                                value=initial_claim_evidence_table_rows,
+                            )
+                            with gr.Row(elem_id="quality-evidence-pagination-row"):
+                                quality_evidence_prev_button = gr.Button("上一页")
+                                quality_evidence_next_button = gr.Button("下一页")
+                            quality_evidence_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_claim_evidence_page_info),
+                                elem_id="quality-evidence-page-info",
                             )
                         with gr.Column(scale=4):
                             claim_evidence_detail = gr.HTML(
@@ -2973,14 +4110,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     elem_id="quality-history-note",
                                 )
                                 recent_quality_checks = gr.Dataframe(
-                                    headers=["质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
-                                    datatype=["str"] * 6,
+                                    headers=["序号", "质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
+                                    datatype=["str"] * 7,
                                     interactive=False,
                                     row_count=0,
-                                    column_count=6,
+                                    column_count=7,
                                     label="最近质检记录",
                                     elem_id="quality-recent-table",
-                                    value=initial_recent_rows,
+                                    value=initial_recent_quality_table_rows,
+                                )
+                                with gr.Row(elem_id="quality-recent-pagination-row"):
+                                    recent_quality_prev_button = gr.Button("上一页")
+                                    recent_quality_next_button = gr.Button("下一页")
+                                recent_quality_page_info = gr.HTML(
+                                    value=format_table_pagination_html(initial_recent_quality_page_info),
+                                    elem_id="quality-recent-page-info",
                                 )
                     with gr.Group(elem_id="quality-evaluation-panel"):
                         quality_evaluation_help = gr.HTML(
@@ -3001,6 +4145,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         quality_evaluation_result_state = gr.State(initial_quality_evaluation_result)
                         quality_evaluation_table = gr.Dataframe(
                             headers=[
+                                "序号",
                                 "样例 ID",
                                 "预期结论",
                                 "实际结论",
@@ -3017,13 +4162,20 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 "建议排查方向",
                                 "输入摘要",
                             ],
-                            datatype=["str"] * 15,
+                            datatype=["str"] * 16,
                             interactive=False,
                             row_count=0,
-                            column_count=15,
+                            column_count=16,
                             label="效果评测明细",
                             elem_id="quality-evaluation-table",
-                            value=initial_quality_evaluation_rows,
+                            value=initial_quality_evaluation_table_rows,
+                        )
+                        with gr.Row(elem_id="quality-evaluation-pagination-row"):
+                            quality_evaluation_prev_button = gr.Button("上一页")
+                            quality_evaluation_next_button = gr.Button("下一页")
+                        quality_evaluation_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_quality_evaluation_page_info),
+                            elem_id="quality-evaluation-page-info",
                         )
                         quality_evaluation_export_button = gr.Button("下载评测结果")
                         quality_evaluation_export_result = gr.HTML(
@@ -3038,6 +4190,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_selected_claim_state = gr.State(initial_review_selected_claim_id)
                 review_claim_detail_state = gr.State(initial_review_claim_detail_map)
                 review_evidence_items_state = gr.State(initial_review_evidence_items)
+                review_pending_page_state = gr.State(initial_review_pending_page)
+                review_processed_page_state = gr.State(initial_review_processed_page)
+                review_evidence_page_state = gr.State(initial_review_evidence_page)
+                review_history_page_state = gr.State(initial_review_history_page)
                 with gr.Group(elem_id="review-focus-panel"):
                     with gr.Row(elem_id="review-top-row", equal_height=True):
                         with gr.Column(scale=5):
@@ -3055,24 +4211,38 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     interactive=True,
                                 )
                             review_pending_candidates = gr.Dataframe(
-                                headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 8,
+                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                                datatype=["str"] * 9,
                                 interactive=False,
                                 row_count=0,
-                                column_count=8,
+                                column_count=9,
                                 label="待处理记录",
                                 elem_id="review-pending-table",
-                                value=initial_review_pending_rows,
+                                value=initial_review_pending_table_rows,
+                            )
+                            with gr.Row(elem_id="review-pending-pagination-row"):
+                                review_pending_prev_button = gr.Button("上一页")
+                                review_pending_next_button = gr.Button("下一页")
+                            review_pending_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_review_pending_page_info),
+                                elem_id="review-pending-page-info",
                             )
                             review_processed_candidates = gr.Dataframe(
-                                headers=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 8,
+                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                                datatype=["str"] * 9,
                                 interactive=False,
                                 row_count=0,
-                                column_count=8,
+                                column_count=9,
                                 label="已处理 Claim",
                                 elem_id="review-processed-table",
-                                value=initial_review_processed_rows,
+                                value=initial_review_processed_table_rows,
+                            )
+                            with gr.Row(elem_id="review-processed-pagination-row"):
+                                review_processed_prev_button = gr.Button("上一页")
+                                review_processed_next_button = gr.Button("下一页")
+                            review_processed_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_review_processed_page_info),
+                                elem_id="review-processed-page-info",
                             )
                         with gr.Column(scale=4):
                             review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
@@ -3087,14 +4257,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 with gr.Row(elem_id="review-evidence-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_evidence_table = gr.Dataframe(
-                            headers=["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                            datatype=["str"] * 8,
+                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                            datatype=["str"] * 9,
                             interactive=False,
                             row_count=0,
-                            column_count=8,
+                            column_count=9,
                             label="关联证据列表",
                             elem_id="review-evidence-table",
-                            value=initial_review_evidence_rows,
+                            value=initial_review_evidence_table_rows,
+                        )
+                        with gr.Row(elem_id="review-evidence-pagination-row"):
+                            review_evidence_prev_button = gr.Button("上一页")
+                            review_evidence_next_button = gr.Button("下一页")
+                        review_evidence_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_review_evidence_page_info),
+                            elem_id="review-evidence-page-info",
                         )
                     with gr.Column(scale=4):
                         with gr.Group(elem_id="review-action-panel"):
@@ -3116,14 +4293,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 with gr.Row(elem_id="review-record-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_history = gr.Dataframe(
-                            headers=["审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
-                            datatype=["str"] * 8,
+                            headers=["序号", "审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
+                            datatype=["str"] * 9,
                             interactive=False,
                             row_count=0,
-                            column_count=8,
+                            column_count=9,
                             label="已审核记录",
                             elem_id="review-history-table",
-                            value=initial_review_rows,
+                            value=initial_review_history_table_rows,
+                        )
+                        with gr.Row(elem_id="review-history-pagination-row"):
+                            review_history_prev_button = gr.Button("上一页")
+                            review_history_next_button = gr.Button("下一页")
+                        review_history_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_review_history_page_info),
+                            elem_id="review-history-page-info",
                         )
                     with gr.Column(scale=4):
                         review_record_detail = gr.HTML(
@@ -3134,6 +4318,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             with gr.Tab("功能设置"):
                 settings_template_state = gr.State(initial_settings_template_state)
                 settings_selected_template_state = gr.State(initial_settings_selected_template_id)
+                settings_template_page_state = gr.State(initial_settings_template_page)
                 with gr.Group(elem_id="settings-overview-panel"):
                     with gr.Row(elem_id="settings-top-row", equal_height=True):
                         with gr.Column(scale=5):
@@ -3144,14 +4329,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Row(elem_id="settings-main-row", equal_height=True):
                         with gr.Column(scale=4):
                             settings_template_table = gr.Dataframe(
-                                headers=["模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
-                                datatype=["str"] * 6,
+                                headers=["序号", "模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
+                                datatype=["str"] * 7,
                                 interactive=False,
                                 row_count=0,
-                                column_count=6,
+                                column_count=7,
                                 label="模板列表",
                                 elem_id="settings-template-table",
-                                value=initial_settings_template_rows,
+                                value=initial_settings_template_table_rows,
+                            )
+                            with gr.Row(elem_id="settings-pagination-row"):
+                                settings_template_prev_button = gr.Button("上一页")
+                                settings_template_next_button = gr.Button("下一页")
+                            settings_template_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_settings_template_page_info),
+                                elem_id="settings-template-page-info",
                             )
                             with gr.Row(elem_id="settings-list-actions"):
                                 settings_new_button = gr.Button("新建模板")
@@ -3209,12 +4401,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 settings_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="settings-export-result")
 
         scan_button.click(
-            fn=load_document_management_state,
+            fn=load_document_management_state_ui,
             outputs=[
                 document_summary,
                 database_summary,
                 database_summary_table,
+                database_page_state,
+                database_page_info,
                 document_table,
+                document_page_state,
+                document_page_info,
                 document_choices,
                 document_detail,
                 register_button,
@@ -3222,13 +4418,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
                 document_quality_batch_summary,
                 document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
                 document_quality_config_panel,
                 document_quality_sample_limit,
                 document_quality_long_document_char_threshold,
@@ -3242,7 +4446,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         document_choices.change(
-            fn=inspect_document,
+            fn=inspect_document_ui,
             inputs=document_choices,
             outputs=[
                 document_detail,
@@ -3251,13 +4455,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
                 document_quality_batch_summary,
                 document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
                 document_quality_config_panel,
                 document_quality_sample_limit,
                 document_quality_long_document_char_threshold,
@@ -3271,14 +4483,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         register_button.click(
-            fn=register_selected_document,
+            fn=register_selected_document_ui,
             inputs=document_choices,
             outputs=[
                 register_result,
                 document_summary,
                 database_summary,
                 database_summary_table,
+                database_page_state,
+                database_page_info,
                 document_table,
+                document_page_state,
+                document_page_info,
                 document_choices,
                 document_detail,
                 register_button,
@@ -3286,13 +4502,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
                 document_quality_batch_summary,
                 document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
                 document_quality_config_panel,
                 document_quality_sample_limit,
                 document_quality_long_document_char_threshold,
@@ -3306,13 +4530,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         register_all_button.click(
-            fn=register_all_documents,
+            fn=register_all_documents_ui,
             outputs=[
                 register_result,
                 document_summary,
                 database_summary,
                 database_summary_table,
+                database_page_state,
+                database_page_info,
                 document_table,
+                document_page_state,
+                document_page_info,
                 document_choices,
                 document_detail,
                 register_button,
@@ -3320,13 +4548,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
                 document_quality_batch_summary,
                 document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
                 document_quality_config_panel,
                 document_quality_sample_limit,
                 document_quality_long_document_char_threshold,
@@ -3340,12 +4576,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         status_button.click(
-            fn=query_ingest_status,
+            fn=query_ingest_status_ui,
             outputs=[
                 document_summary,
                 database_summary,
                 database_summary_table,
+                database_page_state,
+                database_page_info,
                 document_table,
+                document_page_state,
+                document_page_info,
                 document_choices,
                 document_detail,
                 register_button,
@@ -3353,13 +4593,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
                 document_quality_batch_summary,
                 document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
                 document_quality_config_panel,
                 document_quality_sample_limit,
                 document_quality_long_document_char_threshold,
@@ -3373,14 +4621,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         rebuild_button.click(
-            fn=rebuild_selected_document,
+            fn=rebuild_selected_document_ui,
             inputs=document_choices,
             outputs=[
                 rebuild_result,
                 document_summary,
                 database_summary,
                 database_summary_table,
+                database_page_state,
+                database_page_info,
                 document_table,
+                document_page_state,
+                document_page_info,
                 document_choices,
                 document_detail,
                 register_button,
@@ -3388,33 +4640,61 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_result_export_result,
             ],
         )
         document_quality_run_button.click(
-            fn=inspect_selected_document_quality,
+            fn=inspect_selected_document_quality_ui,
             inputs=document_choices,
             outputs=[
                 document_quality_report,
                 document_quality_checks,
                 document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
                 document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_detail,
             ],
         )
         document_quality_search_button.click(
-            fn=run_document_quality_search,
+            fn=run_document_quality_search_ui,
             inputs=[document_choices, document_quality_search_query],
             outputs=[
                 document_quality_search_summary,
                 document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
                 document_quality_search_state,
                 document_quality_search_query_state,
                 document_quality_search_detail,
@@ -3422,7 +4702,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         document_quality_search_results.select(
             fn=select_document_quality_search_result,
-            inputs=[document_quality_search_state, document_quality_search_query_state],
+            inputs=[document_quality_search_state, document_quality_search_query_state, document_quality_search_results],
             outputs=[document_quality_search_detail, document_quality_search_results],
         )
         document_quality_result_export_button.click(
@@ -3436,8 +4716,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[document_quality_result_export_result],
         )
         document_quality_batch_button.click(
-            fn=run_batch_document_quality,
-            outputs=[document_quality_batch_summary, document_quality_batch_table],
+            fn=run_batch_document_quality_ui,
+            outputs=[document_quality_batch_summary, document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
         )
         document_quality_batch_export_button.click(
             fn=export_document_quality_batch_result,
@@ -3483,15 +4763,85 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
             outputs=[document_quality_config_export_result],
         )
+        database_prev_button.click(
+            fn=lambda choice, page: change_database_summary_page(choice, page, "prev"),
+            inputs=[document_choices, database_page_state],
+            outputs=[database_summary_table, database_page_state, database_page_info],
+        )
+        database_next_button.click(
+            fn=lambda choice, page: change_database_summary_page(choice, page, "next"),
+            inputs=[document_choices, database_page_state],
+            outputs=[database_summary_table, database_page_state, database_page_info],
+        )
+        document_prev_button.click(
+            fn=lambda choice, page: change_document_list_page(choice, page, "prev"),
+            inputs=[document_choices, document_page_state],
+            outputs=[document_table, document_page_state, document_page_info],
+        )
+        document_next_button.click(
+            fn=lambda choice, page: change_document_list_page(choice, page, "next"),
+            inputs=[document_choices, document_page_state],
+            outputs=[document_table, document_page_state, document_page_info],
+        )
+        document_quality_sections_prev_button.click(
+            fn=lambda choice, page: change_document_quality_sections_page(choice, page, "prev"),
+            inputs=[document_choices, document_quality_sections_page_state],
+            outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
+        )
+        document_quality_sections_next_button.click(
+            fn=lambda choice, page: change_document_quality_sections_page(choice, page, "next"),
+            inputs=[document_choices, document_quality_sections_page_state],
+            outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
+        )
+        document_quality_chunks_prev_button.click(
+            fn=lambda choice, page: change_document_quality_chunks_page(choice, page, "prev"),
+            inputs=[document_choices, document_quality_chunks_page_state],
+            outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
+        )
+        document_quality_chunks_next_button.click(
+            fn=lambda choice, page: change_document_quality_chunks_page(choice, page, "next"),
+            inputs=[document_choices, document_quality_chunks_page_state],
+            outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
+        )
+        document_quality_search_prev_button.click(
+            fn=lambda rows, page: change_document_table_page(rows, page, "prev", prepend_sequence=False),
+            inputs=[document_quality_search_state, document_quality_search_page_state],
+            outputs=[document_quality_search_results, document_quality_search_page_state, document_quality_search_page_info],
+        )
+        document_quality_search_next_button.click(
+            fn=lambda rows, page: change_document_table_page(rows, page, "next", prepend_sequence=False),
+            inputs=[document_quality_search_state, document_quality_search_page_state],
+            outputs=[document_quality_search_results, document_quality_search_page_state, document_quality_search_page_info],
+        )
+        document_quality_batch_prev_button.click(
+            fn=lambda page: change_document_quality_batch_page(page, "prev"),
+            inputs=[document_quality_batch_page_state],
+            outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
+        )
+        document_quality_batch_next_button.click(
+            fn=lambda page: change_document_quality_batch_page(page, "next"),
+            inputs=[document_quality_batch_page_state],
+            outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
+        )
         search_button.click(
-            fn=run_search,
+            fn=run_search_ui,
             inputs=[search_query, search_top_k],
-            outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail, search_selected_row_state],
+            outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail, search_selected_row_state, search_page_state, search_page_info],
         )
         search_result.select(
             fn=select_search_result,
-            inputs=[search_result_state, search_query_state],
+            inputs=[search_result, search_result_state, search_query_state],
             outputs=[search_result_detail, search_result, search_selected_row_state],
+        )
+        search_prev_button.click(
+            fn=lambda rows, page: change_search_page(rows, page, "prev"),
+            inputs=[search_result_state, search_page_state],
+            outputs=[search_result, search_page_state, search_page_info],
+        )
+        search_next_button.click(
+            fn=lambda rows, page: change_search_page(rows, page, "next"),
+            inputs=[search_result_state, search_page_state],
+            outputs=[search_result, search_page_state, search_page_info],
         )
         search_export_button.click(
             fn=export_search_results,
@@ -3499,22 +4849,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[search_export_result],
         )
         quality_button.click(
-            fn=run_quality_check,
+            fn=run_quality_check_ui,
             inputs=[quality_input, quality_template],
             outputs=[
                 quality_progress,
                 quality_result,
                 formatted_quality_result_state,
                 quality_claims,
+                quality_claim_page_state,
+                quality_claim_page_info,
                 selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
                 quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
                 recent_quality_state,
                 recent_quality_checks,
+                recent_quality_page_state,
+                recent_quality_page_info,
                 quality_evaluation_cases,
             ],
         )
@@ -3524,51 +4880,105 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=quality_template_detail,
         )
         recent_quality_button.click(
-            fn=list_recent_quality_results,
+            fn=list_recent_quality_results_ui,
             outputs=[
                 quality_progress,
                 quality_result,
                 formatted_quality_result_state,
                 quality_claims,
+                quality_claim_page_state,
+                quality_claim_page_info,
                 selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
                 quality_review_claim_detail,
                 evidence_items_state,
                 claim_evidence_detail,
                 recent_quality_state,
                 recent_quality_checks,
+                recent_quality_page_state,
+                recent_quality_page_info,
                 quality_evaluation_cases,
             ],
         )
         recent_quality_checks.select(
-            fn=select_recent_quality_result,
-            inputs=[recent_quality_state],
+            fn=select_recent_quality_result_ui,
+            inputs=[recent_quality_checks, recent_quality_state],
             outputs=[
                 quality_progress,
                 quality_result,
                 formatted_quality_result_state,
                 quality_claims,
+                quality_claim_page_state,
+                quality_claim_page_info,
                 selected_claim_state,
                 claim_detail_state,
                 claim_detail_view,
                 claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
                 quality_review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
+                recent_quality_state,
+                recent_quality_checks,
+                recent_quality_page_state,
+                recent_quality_page_info,
+                quality_evaluation_cases,
+            ],
+        )
+        quality_claims.select(
+            fn=select_quality_claim_ui,
+            inputs=[quality_claims, claim_detail_state, formatted_quality_result_state],
+            outputs=[
+                claim_detail_view,
+                claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
+                quality_review_claim_detail,
+                selected_claim_state,
                 evidence_items_state,
                 claim_evidence_detail,
                 quality_evaluation_cases,
             ],
         )
-        quality_claims.select(
-            fn=select_quality_claim,
-            inputs=[quality_claims, claim_detail_state, formatted_quality_result_state],
-            outputs=[claim_detail_view, claim_evidence_table, quality_review_claim_detail, selected_claim_state, evidence_items_state, claim_evidence_detail, quality_evaluation_cases],
-        )
         claim_evidence_table.select(
             fn=select_quality_evidence,
-            inputs=[evidence_items_state],
+            inputs=[evidence_items_state, claim_evidence_table],
             outputs=[claim_evidence_detail],
+        )
+        quality_claim_prev_button.click(
+            fn=lambda formatted, page: change_quality_claim_page(formatted, page, "prev"),
+            inputs=[formatted_quality_result_state, quality_claim_page_state],
+            outputs=[quality_claims, quality_claim_page_state, quality_claim_page_info],
+        )
+        quality_claim_next_button.click(
+            fn=lambda formatted, page: change_quality_claim_page(formatted, page, "next"),
+            inputs=[formatted_quality_result_state, quality_claim_page_state],
+            outputs=[quality_claims, quality_claim_page_state, quality_claim_page_info],
+        )
+        quality_evidence_prev_button.click(
+            fn=lambda items, page: change_quality_evidence_page(items, page, "prev"),
+            inputs=[evidence_items_state, quality_evidence_page_state],
+            outputs=[claim_evidence_table, quality_evidence_page_state, quality_evidence_page_info],
+        )
+        quality_evidence_next_button.click(
+            fn=lambda items, page: change_quality_evidence_page(items, page, "next"),
+            inputs=[evidence_items_state, quality_evidence_page_state],
+            outputs=[claim_evidence_table, quality_evidence_page_state, quality_evidence_page_info],
+        )
+        recent_quality_prev_button.click(
+            fn=lambda results, page: change_recent_quality_page(results, page, "prev"),
+            inputs=[recent_quality_state, recent_quality_page_state],
+            outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
+        )
+        recent_quality_next_button.click(
+            fn=lambda results, page: change_recent_quality_page(results, page, "next"),
+            inputs=[recent_quality_state, recent_quality_page_state],
+            outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
         )
         quality_export_button.click(
             fn=export_quality_results,
@@ -3576,9 +4986,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[quality_export_result],
         )
         quality_evaluation_button.click(
-            fn=run_quality_evaluation,
+            fn=run_quality_evaluation_ui,
             inputs=[quality_evaluation_cases, quality_template],
-            outputs=[quality_evaluation_summary, quality_evaluation_table, quality_evaluation_result_state],
+            outputs=[quality_evaluation_summary, quality_evaluation_table, quality_evaluation_result_state, quality_evaluation_page_state, quality_evaluation_page_info],
+        )
+        quality_evaluation_prev_button.click(
+            fn=lambda result, page: change_quality_evaluation_page(result, page, "prev"),
+            inputs=[quality_evaluation_result_state, quality_evaluation_page_state],
+            outputs=[quality_evaluation_table, quality_evaluation_page_state, quality_evaluation_page_info],
+        )
+        quality_evaluation_next_button.click(
+            fn=lambda result, page: change_quality_evaluation_page(result, page, "next"),
+            inputs=[quality_evaluation_result_state, quality_evaluation_page_state],
+            outputs=[quality_evaluation_table, quality_evaluation_page_state, quality_evaluation_page_info],
         )
         quality_evaluation_export_button.click(
             fn=export_quality_evaluation_results,
@@ -3586,10 +5006,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[quality_evaluation_export_result],
         )
         settings_refresh_button.click(
-            fn=refresh_settings_workspace,
+            fn=refresh_settings_workspace_ui,
             inputs=[settings_selected_template_state],
             outputs=[
                 settings_template_table,
+                settings_template_page_state,
+                settings_template_page_info,
                 settings_template_state,
                 settings_selected_template_state,
                 settings_template_detail,
@@ -3613,7 +5035,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         settings_template_table.select(
             fn=select_settings_template,
-            inputs=[settings_template_state],
+            inputs=[settings_template_state, settings_template_table],
             outputs=[
                 settings_selected_template_state,
                 settings_template_detail,
@@ -3657,7 +5079,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         settings_save_button.click(
-            fn=save_settings_template,
+            fn=save_settings_template_ui,
             inputs=[
                 settings_selected_template_state,
                 settings_template_id,
@@ -3676,6 +5098,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
             outputs=[
                 settings_template_table,
+                settings_template_page_state,
+                settings_template_page_info,
                 settings_template_state,
                 settings_selected_template_state,
                 settings_template_detail,
@@ -3700,10 +5124,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         settings_delete_button.click(
-            fn=delete_settings_template,
+            fn=delete_settings_template_ui,
             inputs=[settings_selected_template_state, settings_template_id, settings_delete_confirm],
             outputs=[
                 settings_template_table,
+                settings_template_page_state,
+                settings_template_page_info,
                 settings_template_state,
                 settings_selected_template_state,
                 settings_template_detail,
@@ -3727,27 +5153,45 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_template_detail,
             ],
         )
+        settings_template_prev_button.click(
+            fn=lambda items, page: change_settings_template_page(items, page, "prev"),
+            inputs=[settings_template_state, settings_template_page_state],
+            outputs=[settings_template_table, settings_template_page_state, settings_template_page_info],
+        )
+        settings_template_next_button.click(
+            fn=lambda items, page: change_settings_template_page(items, page, "next"),
+            inputs=[settings_template_state, settings_template_page_state],
+            outputs=[settings_template_table, settings_template_page_state, settings_template_page_info],
+        )
         settings_export_button.click(
             fn=export_settings_result,
             inputs=[settings_selected_template_state],
             outputs=[settings_export_result],
         )
         review_history_button.click(
-            fn=list_review_workspace,
+            fn=list_review_workspace_ui,
             inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
             outputs=[
                 review_pending_candidates,
+                review_pending_page_state,
+                review_pending_page_info,
                 review_processed_candidates,
+                review_processed_page_state,
+                review_processed_page_info,
                 review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
                 review_history,
+                review_history_page_state,
+                review_history_page_info,
                 review_history_state,
                 review_selected_record_state,
                 review_record_detail,
@@ -3765,49 +5209,73 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[review_export_result],
         )
         review_scope_filter.change(
-            fn=change_review_filters,
+            fn=change_review_filters_ui,
             inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_pending_candidates,
+                review_pending_page_state,
+                review_pending_page_info,
                 review_processed_candidates,
+                review_processed_page_state,
+                review_processed_page_info,
+                review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
+                review_history,
+                review_history_page_state,
+                review_history_page_info,
+                review_history_state,
                 review_selected_record_state,
                 review_record_detail,
             ],
         )
         review_risk_filter.change(
-            fn=change_review_filters,
+            fn=change_review_filters_ui,
             inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_pending_candidates,
+                review_pending_page_state,
+                review_pending_page_info,
                 review_processed_candidates,
+                review_processed_page_state,
+                review_processed_page_info,
+                review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
+                review_history,
+                review_history_page_state,
+                review_history_page_info,
+                review_history_state,
                 review_selected_record_state,
                 review_record_detail,
             ],
         )
         review_pending_candidates.select(
-            fn=select_review_candidate,
+            fn=select_review_candidate_ui,
             inputs=[review_pending_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
@@ -3817,13 +5285,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         review_processed_candidates.select(
-            fn=select_review_candidate,
+            fn=select_review_candidate_ui,
             inputs=[review_processed_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
             outputs=[
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
@@ -3833,13 +5303,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ],
         )
         review_history.select(
-            fn=select_review_history_record,
-            inputs=[review_history_state, review_candidate_state, review_scope_filter, review_risk_filter],
+            fn=select_review_history_record_ui,
+            inputs=[review_history_state, review_candidate_state, review_scope_filter, review_risk_filter, review_history],
             outputs=[
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
@@ -3850,29 +5322,77 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         review_evidence_table.select(
             fn=select_quality_evidence,
-            inputs=[review_evidence_items_state],
+            inputs=[review_evidence_items_state, review_evidence_table],
             outputs=[review_evidence_detail],
         )
         review_button.click(
-            fn=submit_review_action,
+            fn=submit_review_action_ui,
             inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter],
             outputs=[
                 review_result,
                 review_pending_candidates,
+                review_pending_page_state,
+                review_pending_page_info,
                 review_processed_candidates,
+                review_processed_page_state,
+                review_processed_page_info,
                 review_candidate_state,
                 review_selected_claim_state,
                 review_claim_detail_state,
                 review_claim_detail_panel,
                 review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
                 review_evidence_items_state,
                 review_evidence_detail,
                 review_action_input,
                 review_note_input,
                 review_history,
+                review_history_page_state,
+                review_history_page_info,
                 review_history_state,
                 review_selected_record_state,
                 review_record_detail,
             ],
+        )
+        review_pending_prev_button.click(
+            fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "prev", processed=False),
+            inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_pending_page_state],
+            outputs=[review_pending_candidates, review_pending_page_state, review_pending_page_info],
+        )
+        review_pending_next_button.click(
+            fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "next", processed=False),
+            inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_pending_page_state],
+            outputs=[review_pending_candidates, review_pending_page_state, review_pending_page_info],
+        )
+        review_processed_prev_button.click(
+            fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "prev", processed=True),
+            inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_processed_page_state],
+            outputs=[review_processed_candidates, review_processed_page_state, review_processed_page_info],
+        )
+        review_processed_next_button.click(
+            fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "next", processed=True),
+            inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_processed_page_state],
+            outputs=[review_processed_candidates, review_processed_page_state, review_processed_page_info],
+        )
+        review_evidence_prev_button.click(
+            fn=lambda items, page: change_review_evidence_page(items, page, "prev"),
+            inputs=[review_evidence_items_state, review_evidence_page_state],
+            outputs=[review_evidence_table, review_evidence_page_state, review_evidence_page_info],
+        )
+        review_evidence_next_button.click(
+            fn=lambda items, page: change_review_evidence_page(items, page, "next"),
+            inputs=[review_evidence_items_state, review_evidence_page_state],
+            outputs=[review_evidence_table, review_evidence_page_state, review_evidence_page_info],
+        )
+        review_history_prev_button.click(
+            fn=lambda items, page: change_review_history_page(items, page, "prev"),
+            inputs=[review_history_state, review_history_page_state],
+            outputs=[review_history, review_history_page_state, review_history_page_info],
+        )
+        review_history_next_button.click(
+            fn=lambda items, page: change_review_history_page(items, page, "next"),
+            inputs=[review_history_state, review_history_page_state],
+            outputs=[review_history, review_history_page_state, review_history_page_info],
         )
     return demo
