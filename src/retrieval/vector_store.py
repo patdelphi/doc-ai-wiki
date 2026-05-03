@@ -1,4 +1,4 @@
-"""程序说明：封装 ChromaDB 持久化向量索引与查询逻辑。"""
+"""程序说明：封装 ChromaDB 持久化向量索引、维度校验与自动重建逻辑。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import chromadb
 
 from src.ai.embedding import BaseEmbeddingClient, DeterministicEmbeddingClient
 from src.common.errors import ValidationAppError
+from src.db.repositories import DocumentRepository
 
 
 class VectorStore:
@@ -16,13 +17,22 @@ class VectorStore:
         persist_directory,
         collection_name: str = "knowledge_chunks",
         embedding_client: BaseEmbeddingClient | None = None,
+        sqlite_db_path=None,
+        auto_repair_dimension_mismatch: bool = False,
     ) -> None:
         self.persist_directory = str(persist_directory)
         self.collection_name = collection_name
         self.embedding = embedding_client or DeterministicEmbeddingClient()
+        self.sqlite_db_path = str(sqlite_db_path) if sqlite_db_path is not None else None
+        self.auto_repair_dimension_mismatch = auto_repair_dimension_mismatch
         self.client = chromadb.PersistentClient(path=str(persist_directory))
         self.collection = self.client.get_or_create_collection(name=collection_name)
-        self._validate_embedding_dimension()
+        try:
+            self._validate_embedding_dimension()
+        except ValidationAppError as exc:
+            if not self._should_auto_repair_dimension_mismatch(exc):
+                raise
+            self._repair_dimension_mismatch(exc)
 
     def _validate_embedding_dimension(self) -> None:
         """启动时校验当前 embedding 维度与现有集合维度是否一致。"""
@@ -41,6 +51,42 @@ class VectorStore:
                 "recommended_action": "备份后删除 index/chroma，并重新执行向量重建或文档入库",
             },
         )
+
+    def _should_auto_repair_dimension_mismatch(self, exc: ValidationAppError) -> bool:
+        """判断当前异常是否可自动重建。"""
+
+        details = exc.details or {}
+        return bool(
+            self.auto_repair_dimension_mismatch
+            and self.sqlite_db_path
+            and details.get("stored_dimension") is not None
+            and details.get("current_dimension") is not None
+        )
+
+    def _repair_dimension_mismatch(self, exc: ValidationAppError) -> None:
+        """检测到维度不一致时，重建向量集合。"""
+
+        try:
+            self.reset_collection()
+            repaired_docs, repaired_chunks = self.rebuild_from_sqlite()
+            self._validate_embedding_dimension()
+            self.last_repair_summary = {
+                "repaired": True,
+                "repaired_docs": repaired_docs,
+                "repaired_chunks": repaired_chunks,
+                "stored_dimension": (exc.details or {}).get("stored_dimension"),
+                "current_dimension": (exc.details or {}).get("current_dimension"),
+            }
+        except Exception as repair_exc:  # noqa: BLE001
+            raise ValidationAppError(
+                "检测到向量维度不一致，但自动重建失败",
+                details={
+                    **(exc.details or {}),
+                    "persist_directory": self.persist_directory,
+                    "repair_error": str(repair_exc),
+                    "recommended_action": "检查 Embedding 配置与网络后重启；如仍失败，可删除 index/chroma 后重新入库",
+                },
+            ) from repair_exc
 
     def _infer_current_embedding_dimension(self) -> int:
         """探测当前 embedding 客户端返回的维度。"""
@@ -117,6 +163,45 @@ class VectorStore:
         except TypeError:
             return None
         return converted if converted else None
+
+    def reset_collection(self) -> None:
+        """删除并重建当前向量集合。"""
+
+        try:
+            self.client.delete_collection(name=self.collection_name)
+        except Exception:  # noqa: BLE001
+            pass
+        self.collection = self.client.get_or_create_collection(name=self.collection_name)
+
+    def rebuild_from_sqlite(self, *, page_size: int = 100) -> tuple[int, int]:
+        """基于 SQLite 已存储的 chunks 重建整个向量集合。"""
+
+        if not self.sqlite_db_path:
+            raise ValidationAppError(
+                "缺少 sqlite_db_path，无法自动重建向量集合",
+                details={"persist_directory": self.persist_directory},
+            )
+
+        repository = DocumentRepository(self.sqlite_db_path)
+        repaired_docs = 0
+        repaired_chunks = 0
+        page = 1
+        while True:
+            documents, total = repository.list_documents(page=page, page_size=page_size)
+            if not documents:
+                break
+            for document in documents:
+                doc_uid = str(document["doc_uid"])
+                chunk_items = repository.list_chunks_by_doc_uid(doc_uid)
+                if not chunk_items:
+                    continue
+                self.upsert_chunks(chunk_items)
+                repaired_docs += 1
+                repaired_chunks += len(chunk_items)
+            if page * page_size >= total:
+                break
+            page += 1
+        return repaired_docs, repaired_chunks
 
     def upsert_chunks(self, items: list[dict], *, batch_size: int = 8, progress_callback=None) -> None:
         """批量写入 chunk 向量记录。"""

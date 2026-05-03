@@ -33,6 +33,8 @@ class IngestService:
         self.vector_store = VectorStore(
             settings.chroma_persist_dir,
             embedding_client=build_embedding_client(settings),
+            sqlite_db_path=settings.sqlite_db_path,
+            auto_repair_dimension_mismatch=True,
         )
 
     def register_documents(self, documents: list[dict], rebuild_if_exists: bool = False, progress_callback=None) -> list[dict]:

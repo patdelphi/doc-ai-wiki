@@ -1993,3 +1993,22 @@
 - `"知识库检索"` 切到 `kb_acceptance_7860` 后，会清空旧检索结果并提示重新检索，避免跨库残留。
 - `"AI 质检"` 切到 `kb_acceptance_7860` 后，最近质检结果会回放到 `chk_kb_acceptance_7860`，Claim 选择器只保留 1 条 `claim_kb_acceptance_7860`。
 - `"人工审核"` 切到 `kb_acceptance_7860` 后，待审核列表只返回 1 条 `claim_kb_acceptance_7860`，审核历史为空。
+
+### 用户
+
+- commit当前进度
+- 然后处理一个遗留问题，系统在别的服务器上部署，运行ai质检报错：Collection expecting embedding with dimension of 64, got 1024，你前面做了一些修复但但应该没完成，请继续完成，确保系统在任何新环境下系统里部署运行都不会有问题
+
+### 助手
+
+- 时间戳：`2026-05-03 19:16:23 +08:00`
+- 已完成当前进度提交，提交号：`6f76e06`，提交信息：`feat: complete multi-knowledge-base isolation groundwork`。
+- 已定位旧问题根因：项目此前只在 `VectorStore` 启动时检测向量维度冲突并直接报错，没有完成“跨服务器迁移后自动恢复旧 Chroma 索引”的闭环；当旧环境遗留 `64` 维集合、而新环境 Embedding 为 `1024` 维时，AI 质检/检索会直接失败。
+- 已在 `"src/retrieval/vector_store.py"` 完成自动自愈：当检测到维度不一致，且已提供 SQLite 路径时，会自动删除旧集合，并基于本地 SQLite 中已保存的 `"chunks"` 数据重建整个 Chroma 集合，而不是要求人工删除 `"index/chroma"`。
+- 已同步修改 `"src/app.py"`、`"src/ui/app.py"`、`"src/ingest/service.py"`，确保 API、UI、入库服务三条启动链路都会启用这个自动修复逻辑，避免只修一处、其他入口仍然报错。
+- 已补充并更新测试 `"tests/unit/test_vector_store.py"`、`"tests/unit/test_startup_validation.py"`，覆盖：
+  - `VectorStore` 在开启自动修复时会基于 SQLite 重建 `1024` 维向量集合
+  - API 启动时遇到 `64 -> 1024` 维度冲突会自动重建
+  - UI 启动时遇到 `64 -> 1024` 维度冲突会自动重建
+- 已执行校验：`python -m pytest "tests/unit/test_vector_store.py" "tests/unit/test_startup_validation.py" -q`，结果：`6 passed`。
+- 已执行运行时验证：当前配置下直接初始化 `create_app()` 与 `create_ui_app()` 均成功，不再因向量维度冲突中断；过程中本地 `"index/chroma/chroma.sqlite3"` 被自动修复逻辑更新，这是本轮预期内变更。

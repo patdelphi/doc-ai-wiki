@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 from src.common.errors import ValidationAppError
+from src.db.connection import initialize_database
+from src.db.transaction import transaction
 from src.retrieval.vector_store import VectorStore
 
 
@@ -42,16 +44,102 @@ class StubCollection:
             "embeddings": self._embeddings[:1],
         }
 
+    def upsert(
+        self,
+        *,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict],
+        embeddings: list[list[float]],
+    ) -> None:
+        assert len(ids) == len(documents) == len(metadatas) == len(embeddings)
+        self._ids = list(ids)
+        self._embeddings = [list(item) for item in embeddings]
+
+    def delete(self, *, where: dict) -> None:
+        _ = where
+
 
 class StubClient:
     """测试用 Chroma 客户端。"""
 
     def __init__(self, collection: StubCollection) -> None:
-        self._collection = collection
+        self._collections = {"knowledge_chunks": collection}
 
     def get_or_create_collection(self, *, name: str) -> StubCollection:
         assert name == "knowledge_chunks"
-        return self._collection
+        return self._collections.setdefault(name, StubCollection())
+
+    def delete_collection(self, *, name: str) -> None:
+        self._collections.pop(name, None)
+
+
+def seed_chunk_database(database_path: Path) -> None:
+    """写入最小 chunk 记录，供自动修复重建向量集合。"""
+
+    initialize_database(database_path)
+    now = "2026-05-03T19:10:00+08:00"
+    with transaction(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO documents (
+                doc_uid, knowledge_base_id, doc_id, doc_title, edition, author, source_name, tags_json, source_path,
+                source_hash, ingest_status, index_status, error_message, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "doc_1",
+                "default",
+                "doc_1",
+                "维度修复验收文档",
+                "default",
+                "tester",
+                "acceptance.MD",
+                "[]",
+                str(database_path.parent / "acceptance.MD"),
+                "hash-doc-1",
+                "completed",
+                "indexed",
+                None,
+                now,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO document_sections (
+                section_id, doc_uid, section_title, section_level, source_span, content, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "sec_1",
+                "doc_1",
+                "说明",
+                1,
+                "section-1",
+                "阿胶并非只有东阿可生产。",
+                now,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO chunks (
+                chunk_id, doc_uid, section_id, chunk_index, content, source_span, token_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "chunk_1",
+                "doc_1",
+                "sec_1",
+                0,
+                "阿胶并非只有东阿可生产。",
+                "section-1:chunk-1",
+                14,
+                now,
+                now,
+            ),
+        )
 
 
 def test_vector_store_should_allow_empty_collection_without_dimension_conflict(monkeypatch, tmp_path: Path) -> None:
@@ -111,3 +199,55 @@ def test_vector_store_should_support_ndarray_embeddings_when_inferring_stored_di
 
     assert "Embedding 维度与现有向量索引不一致" in exc_info.value.message
     assert exc_info.value.details["stored_dimension"] == 64
+
+
+def test_vector_store_should_auto_rebuild_collection_from_sqlite_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    """开启自动修复后，应基于 SQLite 的 chunks 重建新维度向量集合。"""
+
+    database_path = tmp_path / "app.db"
+    seed_chunk_database(database_path)
+    client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: client,
+    )
+
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=1024),
+        sqlite_db_path=database_path,
+        auto_repair_dimension_mismatch=True,
+    )
+
+    assert store.collection.peek(limit=1)["ids"] == ["chunk_1"]
+    assert len(store.collection.peek(limit=1)["embeddings"][0]) == 1024
+    assert store.last_repair_summary["repaired"] is True
+    assert store.last_repair_summary["repaired_docs"] == 1
+    assert store.last_repair_summary["repaired_chunks"] == 1
+
+
+def test_vector_store_should_clear_legacy_collection_when_auto_repair_enabled_but_sqlite_has_no_chunks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """旧索引维度冲突但 SQLite 还没有 chunk 时，应清空旧集合并允许系统继续启动。"""
+
+    database_path = tmp_path / "empty.db"
+    initialize_database(database_path)
+    client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: client,
+    )
+
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=1024),
+        sqlite_db_path=database_path,
+        auto_repair_dimension_mismatch=True,
+    )
+
+    assert store.collection.peek(limit=1)["ids"] == []
+    assert store.last_repair_summary["repaired"] is True
+    assert store.last_repair_summary["repaired_docs"] == 0
+    assert store.last_repair_summary["repaired_chunks"] == 0

@@ -28,7 +28,12 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     embedding_client = build_embedding_client(settings)
     llm_client = build_llm_client(settings)
     reranker = build_reranker(settings)
-    vector_store = VectorStore(settings.chroma_persist_dir, embedding_client=embedding_client)
+    vector_store = VectorStore(
+        settings.chroma_persist_dir,
+        embedding_client=embedding_client,
+        sqlite_db_path=settings.sqlite_db_path,
+        auto_repair_dimension_mismatch=True,
+    )
     ingest_service = IngestService(settings)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
     retrieval_service.set_vector_store(vector_store)
