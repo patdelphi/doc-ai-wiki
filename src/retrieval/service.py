@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from src.ai.rerank import BaseReranker, DisabledReranker
 from src.db.connection import create_connection
@@ -56,19 +57,24 @@ class RetrievalService:
         like_params = tuple(like_params_list)
 
         with create_connection(self.database_path) as connection:
-            rows = connection.execute(
-                f"""
-                SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
-                FROM chunk_fts f
-                JOIN chunks c ON c.chunk_id = f.chunk_id
-                JOIN documents d ON d.doc_uid = c.doc_uid
-                WHERE chunk_fts MATCH ?
-                {doc_uid_filter}
-                {knowledge_base_filter}
-                LIMIT ?
-                """,
-                params,
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    f"""
+                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
+                    FROM chunk_fts f
+                    JOIN chunks c ON c.chunk_id = f.chunk_id
+                    JOIN documents d ON d.doc_uid = c.doc_uid
+                    WHERE chunk_fts MATCH ?
+                    {doc_uid_filter}
+                    {knowledge_base_filter}
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # 某些 SQLite/FTS5 运行环境对 MATCH 参数解析不稳定，失败时回退到 LIKE，
+                # 避免检索异常直接中断 AI 质检链路。
+                rows = []
             if not rows:
                 rows = connection.execute(
                     f"""
