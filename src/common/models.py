@@ -38,6 +38,7 @@ class DocumentRegisterItem(BaseModel):
     """文档注册请求项。"""
 
     file_path: str
+    knowledge_base_id: str | None = None
     doc_title: str | None = None
     edition: str | None = None
     author: str | None = None
@@ -56,6 +57,7 @@ class IngestStatusQuery(BaseModel):
     """入库状态查询参数。"""
 
     doc_uid: str | None = None
+    knowledge_base_id: str | None = None
     status: str | None = None
     page: int = 1
     page_size: int = 20
@@ -67,6 +69,16 @@ class IngestRebuildRequest(BaseModel):
     doc_uids: list[str]
     rebuild_fulltext: bool = True
     rebuild_vector: bool = True
+
+
+class KnowledgeBaseUpsertRequest(BaseModel):
+    """知识库新增或更新请求。"""
+
+    knowledge_base_id: str | None = None
+    knowledge_base_name: str
+    description: str = ""
+    status: str = "active"
+    is_default: bool = False
 
 
 class ReviewSubmitRequest(BaseModel):
@@ -84,4 +96,5 @@ class QualityCheckRequest(BaseModel):
 
     input_text: str
     doc_uid: str | None = None
+    knowledge_base_id: str | None = None
     template_id: str | None = None

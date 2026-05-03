@@ -12,6 +12,104 @@ from src.db.connection import create_connection
 from src.db.transaction import transaction
 
 
+class KnowledgeBaseRepository:
+    """知识库配置访问对象。"""
+
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = database_path
+
+    def list_knowledge_bases(self) -> list[dict[str, Any]]:
+        """按默认优先、名称排序列出知识库。"""
+
+        with create_connection(self.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT knowledge_base_id, knowledge_base_name, description, status, is_default, created_at, updated_at
+                FROM knowledge_bases
+                ORDER BY is_default DESC, updated_at DESC, knowledge_base_name ASC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_by_id(self, knowledge_base_id: str) -> dict[str, Any] | None:
+        """按知识库标识读取配置。"""
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT knowledge_base_id, knowledge_base_name, description, status, is_default, created_at, updated_at
+                FROM knowledge_bases
+                WHERE knowledge_base_id = ?
+                """,
+                (knowledge_base_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_knowledge_base(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """新增或更新知识库。"""
+
+        now = utc_now_iso()
+        with transaction(self.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO knowledge_bases (
+                    knowledge_base_id, knowledge_base_name, description, status, is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(knowledge_base_id) DO UPDATE SET
+                    knowledge_base_name = excluded.knowledge_base_name,
+                    description = excluded.description,
+                    status = excluded.status,
+                    is_default = excluded.is_default,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    payload["knowledge_base_id"],
+                    payload["knowledge_base_name"],
+                    payload.get("description"),
+                    payload.get("status", "active"),
+                    1 if payload.get("is_default") else 0,
+                    payload.get("created_at") or now,
+                    now,
+                ),
+            )
+            if payload.get("is_default"):
+                connection.execute(
+                    """
+                    UPDATE knowledge_bases
+                    SET is_default = CASE WHEN knowledge_base_id = ? THEN 1 ELSE 0 END,
+                        updated_at = ?
+                    """,
+                    (payload["knowledge_base_id"], now),
+                )
+        return self.get_by_id(payload["knowledge_base_id"]) or {}
+
+    def count_documents(self, knowledge_base_id: str) -> int:
+        """统计指定知识库下的文档数量。"""
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(1) AS total
+                FROM documents
+                WHERE knowledge_base_id = ?
+                """,
+                (knowledge_base_id,),
+            ).fetchone()
+        return int(row["total"] or 0) if row else 0
+
+    def delete_knowledge_base(self, knowledge_base_id: str) -> None:
+        """删除知识库。"""
+
+        with transaction(self.database_path) as connection:
+            connection.execute(
+                """
+                DELETE FROM knowledge_bases
+                WHERE knowledge_base_id = ?
+                """,
+                (knowledge_base_id,),
+            )
+
+
 class DocumentRepository:
     """文档主表访问对象。"""
 
@@ -54,10 +152,11 @@ class DocumentRepository:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    doc_uid, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
+                    doc_uid, knowledge_base_id, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
                     ingest_status, index_status, error_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_uid) DO UPDATE SET
+                    knowledge_base_id = excluded.knowledge_base_id,
                     doc_id = excluded.doc_id,
                     doc_title = excluded.doc_title,
                     edition = excluded.edition,
@@ -73,6 +172,7 @@ class DocumentRepository:
                 """,
                 (
                     payload["doc_uid"],
+                    payload.get("knowledge_base_id", "default"),
                     payload["doc_id"],
                     payload["doc_title"],
                     payload.get("edition"),
@@ -132,6 +232,7 @@ class DocumentRepository:
         self,
         *,
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         status: str | None = None,
         page: int = 1,
         page_size: int = 20,
@@ -144,6 +245,9 @@ class DocumentRepository:
         if doc_uid:
             where_clauses.append("doc_uid = ?")
             params.append(doc_uid)
+        if knowledge_base_id:
+            where_clauses.append("knowledge_base_id = ?")
+            params.append(knowledge_base_id)
         if status:
             where_clauses.append("ingest_status = ?")
             params.append(status)
@@ -253,25 +357,48 @@ class DocumentRepository:
             "chunk_samples": self._sample_rows(chunk_rows, sample_limit),
         }
 
-    def get_database_summary(self) -> dict[str, int]:
+    def get_database_summary(self, *, knowledge_base_id: str | None = None) -> dict[str, int]:
         """汇总数据库中的文档、分块、质检与审核统计。"""
 
         with create_connection(self.database_path) as connection:
-            row = connection.execute(
-                """
-                SELECT
-                    (SELECT COUNT(1) FROM documents) AS document_count,
-                    (SELECT COUNT(1) FROM documents WHERE ingest_status = 'completed') AS completed_document_count,
-                    (SELECT COUNT(1) FROM documents WHERE index_status = 'indexed') AS indexed_document_count,
-                    (SELECT COUNT(1) FROM documents WHERE index_status IN ('pending', 'rebuilding')) AS rebuild_pending_document_count,
-                    (SELECT COUNT(1) FROM documents WHERE index_status = 'partial_failed' OR ingest_status = 'failed') AS failed_document_count,
-                    (SELECT COUNT(1) FROM document_sections) AS section_count,
-                    (SELECT COUNT(1) FROM chunks) AS chunk_count,
-                    (SELECT COUNT(1) FROM quality_checks) AS quality_check_count,
-                    (SELECT COUNT(1) FROM quality_claims) AS claim_count,
-                    (SELECT COUNT(1) FROM review_records) AS review_count
-                """
-            ).fetchone()
+            if knowledge_base_id:
+                row = connection.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ?) AS document_count,
+                        (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ? AND ingest_status = 'completed') AS completed_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ? AND index_status = 'indexed') AS indexed_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ? AND index_status IN ('pending', 'rebuilding')) AS rebuild_pending_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ? AND (index_status = 'partial_failed' OR ingest_status = 'failed')) AS failed_document_count,
+                        (SELECT COUNT(1) FROM document_sections WHERE doc_uid IN (SELECT doc_uid FROM documents WHERE knowledge_base_id = ?)) AS section_count,
+                        (SELECT COUNT(1) FROM chunks WHERE doc_uid IN (SELECT doc_uid FROM documents WHERE knowledge_base_id = ?)) AS chunk_count,
+                        (SELECT COUNT(1) FROM quality_checks WHERE knowledge_base_id = ?) AS quality_check_count,
+                        (SELECT COUNT(1) FROM quality_claims WHERE check_id IN (SELECT check_id FROM quality_checks WHERE knowledge_base_id = ?)) AS claim_count,
+                        (SELECT COUNT(1) FROM review_records WHERE claim_id IN (
+                            SELECT qc.claim_id
+                            FROM quality_claims qc
+                            JOIN quality_checks q ON q.check_id = qc.check_id
+                            WHERE q.knowledge_base_id = ?
+                        )) AS review_count
+                    """,
+                    (knowledge_base_id,) * 10,
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(1) FROM documents) AS document_count,
+                        (SELECT COUNT(1) FROM documents WHERE ingest_status = 'completed') AS completed_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE index_status = 'indexed') AS indexed_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE index_status IN ('pending', 'rebuilding')) AS rebuild_pending_document_count,
+                        (SELECT COUNT(1) FROM documents WHERE index_status = 'partial_failed' OR ingest_status = 'failed') AS failed_document_count,
+                        (SELECT COUNT(1) FROM document_sections) AS section_count,
+                        (SELECT COUNT(1) FROM chunks) AS chunk_count,
+                        (SELECT COUNT(1) FROM quality_checks) AS quality_check_count,
+                        (SELECT COUNT(1) FROM quality_claims) AS claim_count,
+                        (SELECT COUNT(1) FROM review_records) AS review_count
+                    """
+                ).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
 
     @staticmethod
@@ -357,11 +484,12 @@ class QualityRepository:
             connection.execute(
                 """
                 INSERT INTO quality_checks (
-                    check_id, input_text, template_id, template_name, overall_verdict, risk_level, summary, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    check_id, knowledge_base_id, input_text, template_id, template_name, overall_verdict, risk_level, summary, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     quality_check["check_id"],
+                    quality_check.get("knowledge_base_id", "default"),
                     quality_check["input_text"],
                     quality_check.get("template_id"),
                     quality_check.get("template_name"),
@@ -455,18 +583,26 @@ class QualityRepository:
             "rule_hits": [dict(row) for row in rule_hit_rows],
         }
 
-    def list_recent_quality_results(self, limit: int = 10) -> list[dict[str, Any]]:
+    def list_recent_quality_results(
+        self,
+        limit: int = 10,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """读取最近质检结果及其 claim 列表。"""
 
+        where_sql = "WHERE knowledge_base_id = ?" if knowledge_base_id else ""
+        params: tuple[Any, ...] = (knowledge_base_id, limit) if knowledge_base_id else (limit,)
         with create_connection(self.database_path) as connection:
             check_rows = connection.execute(
-                """
+                f"""
                 SELECT *
                 FROM quality_checks
+                {where_sql}
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
 
             results: list[dict[str, Any]] = []
@@ -483,6 +619,7 @@ class QualityRepository:
                 results.append(
                     {
                         "check_id": check_row["check_id"],
+                        "knowledge_base_id": check_row["knowledge_base_id"],
                         "input_text": check_row["input_text"],
                         "template_id": check_row["template_id"],
                         "template_name": check_row["template_name"],
@@ -495,12 +632,19 @@ class QualityRepository:
 
         return results
 
-    def list_review_candidates(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_review_candidates(
+        self,
+        limit: int = 50,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """读取可进入人工审核的 Claim 列表，按待处理优先、时间倒序排列。"""
 
+        where_sql = "WHERE q.knowledge_base_id = ?" if knowledge_base_id else ""
+        params: tuple[Any, ...] = (knowledge_base_id, limit) if knowledge_base_id else (limit,)
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     qc.claim_id,
                     qc.check_id,
@@ -514,11 +658,13 @@ class QualityRepository:
                     qc.review_status,
                     qc.created_at,
                     qc.updated_at,
+                    q.knowledge_base_id,
                     q.template_name,
                     q.input_text,
                     q.created_at AS check_created_at
                 FROM quality_claims qc
                 JOIN quality_checks q ON q.check_id = qc.check_id
+                {where_sql}
                 ORDER BY
                     CASE WHEN COALESCE(qc.review_status, 'pending') = 'pending' THEN 0 ELSE 1 END ASC,
                     COALESCE(qc.updated_at, qc.created_at, q.created_at) DESC,
@@ -526,7 +672,7 @@ class QualityRepository:
                     qc.created_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -616,29 +762,49 @@ class QualityRepository:
         deleted_record["restored_review_status"] = restored_review_status
         return deleted_record
 
-    def list_reviews(self, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
+    def list_reviews(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
         """分页查询审核记录。"""
 
         offset = max(page - 1, 0) * page_size
+        where_sql = "WHERE q.knowledge_base_id = ?" if knowledge_base_id else ""
+        count_params: tuple[Any, ...] = (knowledge_base_id,) if knowledge_base_id else ()
+        list_params: tuple[Any, ...] = (
+            (knowledge_base_id, page_size, offset) if knowledge_base_id else (page_size, offset)
+        )
         with create_connection(self.database_path) as connection:
             total_row = connection.execute(
-                "SELECT COUNT(1) AS total FROM review_records",
+                f"""
+                SELECT COUNT(1) AS total
+                FROM review_records rr
+                JOIN quality_claims qc ON qc.claim_id = rr.claim_id
+                JOIN quality_checks q ON q.check_id = qc.check_id
+                {where_sql}
+                """,
+                count_params,
             ).fetchone()
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     rr.*,
                     qc.check_id AS check_id,
                     qc.claim_text AS claim_text,
                     qc.review_status AS review_status,
+                    q.knowledge_base_id AS knowledge_base_id,
                     q.template_name AS template_name
                 FROM review_records rr
                 JOIN quality_claims qc ON qc.claim_id = rr.claim_id
                 JOIN quality_checks q ON q.check_id = qc.check_id
+                {where_sql}
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (page_size, offset),
+                list_params,
             ).fetchall()
 
         return [dict(row) for row in rows], int(total_row["total"])

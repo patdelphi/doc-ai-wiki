@@ -18,6 +18,7 @@ from src.common.models import (
     ApiResponse,
     DocumentRegisterRequest,
     IngestRebuildRequest,
+    KnowledgeBaseUpsertRequest,
     QualityCheckRequest,
     ReviewSubmitRequest,
 )
@@ -106,6 +107,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.get("/ingest/status", response_model=ApiResponse)
     def get_ingest_status(
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         status: str | None = None,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
@@ -114,6 +116,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
 
         items, total = ingest_service.list_status(
             doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
             status=status,
             page=page,
             page_size=page_size,
@@ -131,20 +134,22 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     def search_fulltext(
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=10, ge=1, le=100),
+        knowledge_base_id: str | None = None,
     ) -> ApiResponse:
         """执行全文检索。"""
 
-        items = retrieval_service.fulltext_search(query, top_k=top_k)
+        items = retrieval_service.fulltext_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.get("/search/vector", response_model=ApiResponse)
     def search_vector(
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=10, ge=1, le=100),
+        knowledge_base_id: str | None = None,
     ) -> ApiResponse:
         """执行向量检索占位实现。"""
 
-        items = retrieval_service.vector_search(query, top_k=top_k)
+        items = retrieval_service.vector_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.get("/search/hybrid", response_model=ApiResponse)
@@ -152,10 +157,16 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=10, ge=1, le=100),
         use_rerank: bool = Query(default=True),
+        knowledge_base_id: str | None = None,
     ) -> ApiResponse:
         """执行混合检索。"""
 
-        items = retrieval_service.hybrid_search(query, top_k=top_k, use_rerank=use_rerank)
+        items = retrieval_service.hybrid_search(
+            query,
+            top_k=top_k,
+            knowledge_base_id=knowledge_base_id,
+            use_rerank=use_rerank,
+        )
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.post("/quality/check", response_model=ApiResponse)
@@ -169,9 +180,30 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         result = quality_service.run_check(
             request.input_text,
             doc_uid=request.doc_uid,
+            knowledge_base_id=request.knowledge_base_id,
             template_id=request.template_id,
         )
         return ApiResponse(success=True, message="ok", data=result)
+
+    @app.get("/knowledge-bases", response_model=ApiResponse)
+    def list_knowledge_bases() -> ApiResponse:
+        """列出可用知识库。"""
+
+        return ApiResponse(success=True, message="ok", data={"items": ingest_service.list_knowledge_bases()})
+
+    @app.post("/knowledge-bases", response_model=ApiResponse)
+    def save_knowledge_base(request: KnowledgeBaseUpsertRequest) -> ApiResponse:
+        """新增或更新知识库。"""
+
+        item = ingest_service.save_knowledge_base(request.model_dump())
+        return ApiResponse(success=True, message="ok", data={"item": item})
+
+    @app.delete("/knowledge-bases/{knowledge_base_id}", response_model=ApiResponse)
+    def delete_knowledge_base(knowledge_base_id: str) -> ApiResponse:
+        """删除知识库。"""
+
+        item = ingest_service.delete_knowledge_base(knowledge_base_id)
+        return ApiResponse(success=True, message="ok", data={"item": item})
 
     @app.get("/quality/templates", response_model=ApiResponse)
     def list_quality_templates() -> ApiResponse:
@@ -205,10 +237,15 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     def list_reviews(
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
+        knowledge_base_id: str | None = None,
     ) -> ApiResponse:
         """分页查询审核记录。"""
 
-        items, total = review_service.list_reviews(page=page, page_size=page_size)
+        items, total = review_service.list_reviews(
+            page=page,
+            page_size=page_size,
+            knowledge_base_id=knowledge_base_id,
+        )
         return ApiResponse(
             success=True,
             message="ok",

@@ -3,8 +3,19 @@
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    knowledge_base_id TEXT PRIMARY KEY,
+    knowledge_base_name TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     doc_uid TEXT PRIMARY KEY,
+    knowledge_base_id TEXT NOT NULL DEFAULT 'default',
     doc_id TEXT NOT NULL,
     doc_title TEXT NOT NULL,
     edition TEXT,
@@ -17,9 +28,11 @@ CREATE TABLE IF NOT EXISTS documents (
     index_status TEXT NOT NULL,
     error_message TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases (knowledge_base_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_documents_knowledge_base_id ON documents (knowledge_base_id);
 CREATE INDEX IF NOT EXISTS idx_documents_doc_id ON documents (doc_id);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents (ingest_status);
 CREATE INDEX IF NOT EXISTS idx_documents_source_hash ON documents (source_hash);
@@ -71,6 +84,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 
 CREATE TABLE IF NOT EXISTS quality_checks (
     check_id TEXT PRIMARY KEY,
+    knowledge_base_id TEXT NOT NULL DEFAULT 'default',
     input_text TEXT NOT NULL,
     template_id TEXT,
     template_name TEXT,
@@ -78,8 +92,11 @@ CREATE TABLE IF NOT EXISTS quality_checks (
     risk_level TEXT NOT NULL,
     summary TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases (knowledge_base_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_quality_checks_knowledge_base_id ON quality_checks (knowledge_base_id);
 
 CREATE TABLE IF NOT EXISTS quality_claims (
     claim_id TEXT PRIMARY KEY,

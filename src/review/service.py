@@ -39,15 +39,25 @@ class ReviewService:
         self.repository.insert_review_record(payload)
         return payload
 
-    def list_reviews(self, page: int = 1, page_size: int = 20) -> tuple[list[dict], int]:
+    def list_reviews(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> tuple[list[dict], int]:
         """读取审核记录。"""
 
-        return self.repository.list_reviews(page=page, page_size=page_size)
+        return self.repository.list_reviews(
+            page=page,
+            page_size=page_size,
+            knowledge_base_id=knowledge_base_id,
+        )
 
-    def list_review_candidates(self, limit: int = 50) -> list[dict]:
+    def list_review_candidates(self, limit: int = 50, *, knowledge_base_id: str | None = None) -> list[dict]:
         """读取可审核的 Claim 列表。"""
 
-        return self.repository.list_review_candidates(limit=limit)
+        return self.repository.list_review_candidates(limit=limit, knowledge_base_id=knowledge_base_id)
 
     def delete_review(self, review_id: str) -> dict:
         """删除指定审核记录。"""

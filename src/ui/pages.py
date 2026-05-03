@@ -12,10 +12,12 @@ from src.ui.viewmodels import (
     build_claim_evidence_rows,
     build_database_summary_rows,
     build_document_action_updates,
+    build_document_choices,
     build_document_quality_batch_rows,
     build_document_quality_chunk_rows,
     build_document_quality_section_rows,
     build_document_management_state,
+    build_knowledge_base_choices,
     build_quality_claim_rows,
     build_quality_evaluation_rows,
     build_recent_claim_navigation,
@@ -24,6 +26,7 @@ from src.ui.viewmodels import (
     build_review_history_rows,
     build_search_result_rows,
     build_settings_template_rows,
+    build_settings_knowledge_base_rows,
     build_template_choices,
     format_claim_detail_for_review,
     format_claim_detail_html,
@@ -57,6 +60,8 @@ from src.ui.viewmodels import (
     format_quality_result_html,
     format_search_export_markdown,
     format_settings_help_html,
+    format_settings_knowledge_base_detail_html,
+    format_settings_knowledge_base_detail_markdown,
     format_settings_runtime_markdown,
     format_settings_runtime_html,
     format_settings_template_detail_markdown,
@@ -79,6 +84,7 @@ from src.ui.viewmodels import (
     normalize_search_query,
     parse_claim_choice,
     parse_document_choice,
+    parse_knowledge_base_choice,
     parse_template_choice,
     scan_input_documents,
 )
@@ -611,6 +617,20 @@ UI_CSS = """
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service, runtime_config: dict | None = None) -> gr.Blocks:
     """构建最小可用界面。"""
 
+    knowledge_base_items = ingest_service.list_knowledge_bases()
+    knowledge_base_choices = build_knowledge_base_choices(knowledge_base_items)
+    default_knowledge_base_choice = next(
+        (
+            choice
+            for choice in knowledge_base_choices
+            if any(
+                item.get("is_default")
+                and parse_knowledge_base_choice(choice) == item.get("knowledge_base_id")
+                for item in knowledge_base_items
+            )
+        ),
+        knowledge_base_choices[0] if knowledge_base_choices else None,
+    )
     template_items = quality_service.list_templates()
     template_choices = build_template_choices(template_items)
     default_template_choice = next(
@@ -619,12 +639,50 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     )
     default_template = quality_service.get_template(parse_template_choice(default_template_choice)) if default_template_choice else None
 
-    def get_document_management_state(selected_choice: str | None = None) -> dict:
+    def resolve_knowledge_base_choice(choice: str | None) -> str:
+        """解析当前知识库选项，未传时回退到默认值。"""
+
+        resolved_choice = choice or default_knowledge_base_choice or ""
+        knowledge_base_id = parse_knowledge_base_choice(resolved_choice)
+        if knowledge_base_id:
+            return knowledge_base_id
+        return ingest_service.get_knowledge_base(None)["knowledge_base_id"]
+
+    def refresh_knowledge_base_choices() -> tuple[list[dict], list[str], str | None]:
+        """重新加载知识库选项，并返回默认选项。"""
+
+        items = ingest_service.list_knowledge_bases()
+        choices = build_knowledge_base_choices(items)
+        default_choice = next(
+            (
+                choice
+                for choice in choices
+                if any(
+                    item.get("is_default")
+                    and parse_knowledge_base_choice(choice) == item.get("knowledge_base_id")
+                    for item in items
+                )
+            ),
+            choices[0] if choices else None,
+        )
+        return items, choices, default_choice
+
+    def get_document_management_state(
+        selected_choice: str | None = None,
+        knowledge_base_choice: str | None = None,
+    ) -> dict:
         """统一构建文档管理页的当前视图状态。"""
 
-        documents = scan_input_documents(ingest_service.settings.input_root)
-        status_items, _ = ingest_service.list_status(doc_uid=None, status=None, page=1, page_size=50)
-        database_summary = ingest_service.get_database_summary()
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
+        documents = scan_input_documents(ingest_service.settings.input_root, knowledge_base_id)
+        status_items, _ = ingest_service.list_status(
+            doc_uid=None,
+            knowledge_base_id=knowledge_base_id,
+            status=None,
+            page=1,
+            page_size=50,
+        )
+        database_summary = ingest_service.get_database_summary(knowledge_base_id=knowledge_base_id)
         state = build_document_management_state(documents, status_items)
         active_choice = selected_choice if selected_choice in state["document_choices"] else state["default_choice"]
         selected_detail = get_document_detail(active_choice, state["document_detail_map"])
@@ -636,6 +694,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "document_choices": state["document_choices"],
             "active_choice": active_choice,
             "selected_detail": selected_detail,
+            "knowledge_base_choice": next(
+                (
+                    choice
+                    for choice in knowledge_base_choices
+                    if parse_knowledge_base_choice(choice) == knowledge_base_id
+                ),
+                default_knowledge_base_choice,
+            ),
             "register_interactive": register_button_state["interactive"],
             "rebuild_interactive": rebuild_button_state["interactive"],
         }
@@ -712,10 +778,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             detail_html,
         )
 
-    def build_document_quality_batch_outputs() -> tuple[str, list[list[str]]]:
+    def build_document_quality_batch_outputs(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[str]]]:
         """构建批量入库质检结果输出。"""
 
-        batch_result = ingest_service.list_document_quality_reports()
+        batch_result = ingest_service.list_document_quality_reports(
+            knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
+        )
         return (
             format_document_quality_batch_summary_html(batch_result),
             build_document_quality_batch_rows(batch_result),
@@ -772,7 +842,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """将文档管理状态转换为页面组件输出。"""
 
         quality_outputs = build_document_quality_outputs(state["selected_detail"])
-        batch_outputs = build_document_quality_batch_outputs()
+        batch_outputs = build_document_quality_batch_outputs(state.get("knowledge_base_choice"))
         config_outputs = build_document_quality_config_outputs()
         return (
             format_document_summary_html(state["scan_summary"]),
@@ -789,45 +859,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             format_operation_result_html(None, title="导出结果"),
         )
 
-    def load_document_management_state() -> tuple[
-        str,
-        str,
-        list[list[str]],
-        list[list[str]],
-        gr.Dropdown,
-        str,
-        gr.Button,
-        gr.Button,
-        str,
-        str,
-        list[list[str]],
-        list[list[str]],
-        str,
-        list[list[str]],
-        list[dict],
-        str,
-        str,
-        list[list[str]],
-        str,
-        int,
-        int,
-        int,
-        int,
-        int,
-        int,
-        int,
-        str,
-        str,
-    ]:
-        return build_document_page_outputs(get_document_management_state())
-
-    def load_document_management_state_ui() -> tuple:
-        """加载文档管理页，并返回分页后的界面输出。"""
-
-        return build_document_page_ui_outputs(load_document_management_state())
-
-    def refresh_document_management_state(
-        selected_choice: str | None = None,
+    def load_document_management_state(
+        knowledge_base_choice: str | None = None,
     ) -> tuple[
         str,
         str,
@@ -858,14 +891,24 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         str,
         str,
     ]:
-        return build_document_page_outputs(get_document_management_state(selected_choice))
+        return build_document_page_outputs(get_document_management_state(knowledge_base_choice=knowledge_base_choice))
 
-    def refresh_document_management_state_ui(selected_choice: str | None = None) -> tuple:
-        """刷新文档管理页，并返回分页后的界面输出。"""
+    def load_document_management_state_ui(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """加载文档管理页，并返回分页后的界面输出。"""
 
-        return build_document_page_ui_outputs(refresh_document_management_state(selected_choice))
+        return build_document_page_ui_outputs(load_document_management_state(knowledge_base_choice=knowledge_base_choice))
 
-    def inspect_document(choice: str) -> tuple[
+    def refresh_document_management_state(
+        selected_choice: str | None = None,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
         str,
         gr.Button,
         gr.Button,
@@ -890,17 +933,55 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         str,
         str,
     ]:
-        page_outputs = build_document_page_outputs(get_document_management_state(choice))
+        return build_document_page_outputs(get_document_management_state(selected_choice, knowledge_base_choice))
+
+    def refresh_document_management_state_ui(
+        selected_choice: str | None = None,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """刷新文档管理页，并返回分页后的界面输出。"""
+
+        return build_document_page_ui_outputs(refresh_document_management_state(selected_choice, knowledge_base_choice))
+
+    def inspect_document(choice: str, knowledge_base_choice: str | None = None) -> tuple[
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
+        page_outputs = build_document_page_outputs(get_document_management_state(choice, knowledge_base_choice))
         return page_outputs[5:]
 
-    def inspect_document_ui(choice: str) -> tuple:
+    def inspect_document_ui(choice: str, knowledge_base_choice: str | None = None) -> tuple:
         """切换文档后，返回分页后的文档详情输出。"""
 
-        outputs = build_document_page_ui_outputs(build_document_page_outputs(get_document_management_state(choice)))
+        outputs = build_document_page_ui_outputs(
+            build_document_page_outputs(get_document_management_state(choice, knowledge_base_choice))
+        )
         return outputs[9:]
 
     def register_selected_document(
         choice: str,
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple[
         str,
@@ -922,8 +1003,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         str,
     ]:
         file_path = parse_document_choice(choice)
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         if not file_path:
-            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
+            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice, knowledge_base_choice)
             return (
                 format_operation_result_html({"success": False, "message": "请选择文档"}, title="注册结果"),
                 summary,
@@ -960,6 +1042,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         try:
             job = ingest_service.register_document(
                 {"file_path": file_path},
+                knowledge_base_id=knowledge_base_id,
                 rebuild_if_exists=False,
                 progress_callback=lambda info: progress(
                     info["percent"] / 100,
@@ -970,7 +1053,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
+        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice, knowledge_base_choice)
         return (
             format_operation_result_html(payload, title="注册结果"),
             summary,
@@ -1005,14 +1088,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def register_selected_document_ui(
         choice: str,
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple:
         """注册当前文档，并返回分页后的文档管理界面输出。"""
 
-        outputs = register_selected_document(choice, progress)
+        outputs = register_selected_document(choice, knowledge_base_choice, progress)
         return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
     def register_all_documents(
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple[
         str,
@@ -1033,9 +1118,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         list[dict],
         str,
     ]:
-        documents = scan_input_documents(ingest_service.settings.input_root)
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
+        documents = scan_input_documents(ingest_service.settings.input_root, knowledge_base_id)
         if not documents:
-            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state()
+            summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(knowledge_base_choice=knowledge_base_choice)
             return (
                 format_operation_result_html({"success": False, "message": "Input 目录下没有可注册文档"}, title="批量注册结果"),
                 summary,
@@ -1072,6 +1158,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         try:
             jobs = ingest_service.register_documents(
                 [{"file_path": item["file_path"]} for item in documents],
+                knowledge_base_id=knowledge_base_id,
                 rebuild_if_exists=False,
                 progress_callback=lambda info: progress(
                     info["overall_percent"] / 100,
@@ -1088,7 +1175,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state()
+        summary, database_summary, database_rows, table_rows, dropdown, detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(knowledge_base_choice=knowledge_base_choice)
         return (
             format_operation_result_html(payload, title="批量注册结果"),
             summary,
@@ -1122,14 +1209,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
 
     def register_all_documents_ui(
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple:
         """批量注册文档，并返回分页后的文档管理界面输出。"""
 
-        outputs = register_all_documents(progress)
+        outputs = register_all_documents(knowledge_base_choice, progress)
         return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
-    def query_ingest_status() -> tuple[
+    def query_ingest_status(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[
         str,
         str,
         list[list[str]],
@@ -1147,15 +1237,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         list[dict],
         str,
     ]:
-        return refresh_document_management_state()
+        return refresh_document_management_state(knowledge_base_choice=knowledge_base_choice)
 
-    def query_ingest_status_ui() -> tuple:
+    def query_ingest_status_ui(knowledge_base_choice: str | None = None) -> tuple:
         """刷新入库状态，并返回分页后的文档管理界面输出。"""
 
-        return build_document_page_ui_outputs(query_ingest_status())
+        return build_document_page_ui_outputs(query_ingest_status(knowledge_base_choice))
 
     def rebuild_selected_document(
         choice: str,
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple[
         str,
@@ -1176,10 +1267,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         list[dict],
         str,
     ]:
-        current_state = get_document_management_state(choice)
+        current_state = get_document_management_state(choice, knowledge_base_choice)
         doc_uid = current_state["selected_detail"].get("doc_uid")
         if not doc_uid:
-            summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
+            summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice, knowledge_base_choice)
             return (
                 format_operation_result_html({"success": False, "message": "当前文档尚未入库，无法重建"}, title="重建结果"),
                 summary,
@@ -1227,7 +1318,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         except AppError as exc:
             payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
 
-        summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice)
+        summary, database_summary, database_rows, table_rows, dropdown, current_detail, register_state, rebuild_state, qc_report, qc_checks, qc_sections, qc_chunks, qc_search_summary, qc_search_rows, qc_search_state, qc_search_detail, qc_batch_summary, qc_batch_rows, qc_config_panel, qc_sample_limit, qc_long_threshold, qc_min_sections, qc_max_avg_chunks, qc_max_chunk_chars, qc_short_chunk_chars, qc_short_chunk_min_count, qc_config_result, qc_export_result = refresh_document_management_state(choice, knowledge_base_choice)
         return (
             format_operation_result_html(payload, title="重建结果"),
             summary,
@@ -1262,23 +1353,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def rebuild_selected_document_ui(
         choice: str,
+        knowledge_base_choice: str | None = None,
         progress=gr.Progress(track_tqdm=False),
     ) -> tuple:
         """重建当前文档，并返回分页后的文档管理界面输出。"""
 
-        outputs = rebuild_selected_document(choice, progress)
+        outputs = rebuild_selected_document(choice, knowledge_base_choice, progress)
         return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
-    def inspect_selected_document_quality(choice: str) -> tuple[str, str, list[list[str]], list[list[str]], str, list[list[str]], list[dict], str]:
+    def inspect_selected_document_quality(
+        choice: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, str, list[list[str]], list[list[str]], str, list[list[str]], list[dict], str]:
         """执行当前文档的入库质检，并返回总览、抽样与检索验证默认视图。"""
 
-        state = get_document_management_state(choice)
+        state = get_document_management_state(choice, knowledge_base_choice)
         return build_document_quality_outputs(state["selected_detail"])
 
-    def inspect_selected_document_quality_ui(choice: str) -> tuple[str, str, list[list[object]], int, str, list[list[object]], int, str, str, list[list[object]], int, str, list[dict], str]:
+    def inspect_selected_document_quality_ui(
+        choice: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, str, list[list[object]], int, str, list[list[object]], int, str, str, list[list[object]], int, str, list[dict], str]:
         """执行当前文档入库质检，并返回分页后的相关表格。"""
 
-        report_html, checks_html, section_rows, chunk_rows, search_summary, search_rows, search_state, search_detail = inspect_selected_document_quality(choice)
+        report_html, checks_html, section_rows, chunk_rows, search_summary, search_rows, search_state, search_detail = inspect_selected_document_quality(
+            choice,
+            knowledge_base_choice,
+        )
         section_page_rows, section_page, section_page_info = build_document_table_page_outputs(
             section_rows,
             prepend_sequence=True,
@@ -1308,33 +1409,49 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             search_detail,
         )
 
-    def run_document_quality_search(choice: str, query_text: str) -> tuple[str, list[list[str]], list[dict], str, str]:
+    def run_document_quality_search(
+        choice: str,
+        query_text: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[str]], list[dict], str, str]:
         """在当前文档范围内执行检索验证。"""
 
-        state = get_document_management_state(choice)
+        state = get_document_management_state(choice, knowledge_base_choice)
         outputs = build_document_quality_outputs(state["selected_detail"], query_text=query_text)
         normalized_query = normalize_search_query(query_text)
         return outputs[4], outputs[5], outputs[6], normalized_query, outputs[7]
 
-    def run_document_quality_search_ui(choice: str, query_text: str) -> tuple[str, list[list[object]], int, str, list[dict], str, str]:
+    def run_document_quality_search_ui(
+        choice: str,
+        query_text: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[object]], int, str, list[dict], str, str]:
         """在当前文档范围内执行检索验证，并返回分页后的表格输出。"""
 
-        summary_html, search_rows, search_state, normalized_query, detail_html = run_document_quality_search(choice, query_text)
+        summary_html, search_rows, search_state, normalized_query, detail_html = run_document_quality_search(
+            choice,
+            query_text,
+            knowledge_base_choice,
+        )
         page_rows, page_value, page_info = build_document_table_page_outputs(
             search_rows,
             prepend_sequence=False,
         )
         return summary_html, page_rows, page_value, page_info, search_state, normalized_query, detail_html
 
-    def run_batch_document_quality() -> tuple[str, list[list[str]]]:
+    def run_batch_document_quality(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[str]]]:
         """执行全部文档的批量入库质检。"""
 
-        return build_document_quality_batch_outputs()
+        return build_document_quality_batch_outputs(knowledge_base_choice)
 
-    def run_batch_document_quality_ui() -> tuple[str, list[list[object]], int, str]:
+    def run_batch_document_quality_ui(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[object]], int, str]:
         """执行全部文档质检，并返回分页后的批量结果。"""
 
-        summary_html, batch_rows = run_batch_document_quality()
+        summary_html, batch_rows = run_batch_document_quality(knowledge_base_choice)
         page_rows, page_value, page_info = build_document_table_page_outputs(
             batch_rows,
             prepend_sequence=True,
@@ -1343,58 +1460,65 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def change_database_summary_page(
         choice: str,
+        knowledge_base_choice: str | None,
         current_page: int | float,
         action: str,
     ) -> tuple[list[list[object]], int, str]:
         """切换数据库统计表分页。"""
 
-        rows = build_database_summary_rows(get_document_management_state(choice)["database_summary"])
+        rows = build_database_summary_rows(get_document_management_state(choice, knowledge_base_choice)["database_summary"])
         return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
     def change_document_list_page(
         choice: str,
+        knowledge_base_choice: str | None,
         current_page: int | float,
         action: str,
     ) -> tuple[list[list[object]], int, str]:
         """切换文档列表分页。"""
 
-        rows = get_document_management_state(choice)["table_rows"]
+        rows = get_document_management_state(choice, knowledge_base_choice)["table_rows"]
         return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
     def change_document_quality_sections_page(
         choice: str,
+        knowledge_base_choice: str | None,
         current_page: int | float,
         action: str,
     ) -> tuple[list[list[object]], int, str]:
         """切换章节抽样分页。"""
 
-        rows = build_document_quality_outputs(get_document_management_state(choice)["selected_detail"])[2]
+        rows = build_document_quality_outputs(get_document_management_state(choice, knowledge_base_choice)["selected_detail"])[2]
         return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
     def change_document_quality_chunks_page(
         choice: str,
+        knowledge_base_choice: str | None,
         current_page: int | float,
         action: str,
     ) -> tuple[list[list[object]], int, str]:
         """切换分块抽样分页。"""
 
-        rows = build_document_quality_outputs(get_document_management_state(choice)["selected_detail"])[3]
+        rows = build_document_quality_outputs(get_document_management_state(choice, knowledge_base_choice)["selected_detail"])[3]
         return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
     def change_document_quality_batch_page(
+        knowledge_base_choice: str | None,
         current_page: int | float,
         action: str,
     ) -> tuple[list[list[object]], int, str]:
         """切换批量质检结果分页。"""
 
-        rows = build_document_quality_batch_outputs()[1]
+        rows = build_document_quality_batch_outputs(knowledge_base_choice)[1]
         return change_document_table_page(rows, current_page, action, prepend_sequence=True)
 
-    def export_document_quality_csv() -> str:
+    def export_document_quality_csv(knowledge_base_choice: str | None = None) -> str:
         """导出全部文档的入库质检结果。"""
 
         try:
-            export_result = ingest_service.export_document_quality_reports_csv()
+            export_result = ingest_service.export_document_quality_reports_csv(
+                knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
+            )
             return format_operation_result_html(
                 {
                     "success": True,
@@ -1837,6 +1961,58 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         return page_rows, resolved_page, format_table_pagination_html(page_info)
 
+    def build_settings_knowledge_base_table_page_outputs(
+        knowledge_base_items: list[dict] | None,
+        page: int | float | None = 1,
+    ) -> tuple[list[list[object]], int, str]:
+        """构建功能设置知识库表分页输出。"""
+
+        full_rows = build_settings_knowledge_base_rows(knowledge_base_items or [])
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=True,
+        )
+        return page_rows, resolved_page, format_table_pagination_html(page_info)
+
+    def build_settings_knowledge_base_selector_page_outputs(
+        knowledge_base_items: list[dict] | None,
+        selected_knowledge_base_id: str | None = None,
+        page: int | float | None = 1,
+    ) -> tuple[list[str], str | None, int, str]:
+        """构建功能设置知识库可选列表分页输出。"""
+
+        full_rows = build_settings_knowledge_base_rows(knowledge_base_items or [])
+        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
+            full_rows,
+            page,
+            prepend_sequence=False,
+        )
+        start_index = (resolved_page - 1) * TABLE_PAGE_SIZE
+        choice_map: dict[str, str] = {}
+        for offset, row in enumerate(page_rows):
+            knowledge_base_id = str(row[0]) if row else ""
+            if not knowledge_base_id:
+                continue
+            knowledge_base_name = str(row[1]) if len(row) > 1 else ""
+            description = str(row[2]) if len(row) > 2 else ""
+            is_default = str(row[3]) if len(row) > 3 else "否"
+            status = str(row[4]) if len(row) > 4 else "-"
+            description_preview = description[:24] if description not in ("", "-") else ""
+            choice_text = (
+                f"{knowledge_base_id} | 第 {start_index + offset + 1} 条 | "
+                f"{knowledge_base_name} | 默认:{is_default} | 状态:{status}"
+            )
+            if description_preview:
+                choice_text = f"{choice_text} | {description_preview}"
+            choice_map[knowledge_base_id] = choice_text
+        choices = list(choice_map.values())
+        normalized_knowledge_base_id = str(selected_knowledge_base_id or "")
+        if normalized_knowledge_base_id not in choice_map and choice_map:
+            normalized_knowledge_base_id = next(iter(choice_map))
+        selected_choice = choice_map.get(normalized_knowledge_base_id)
+        return choices, selected_choice, resolved_page, format_table_pagination_html(page_info)
+
     def build_quality_ui_outputs(
         base_outputs: tuple,
         *,
@@ -2001,6 +2177,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *base_outputs[1:],
         )
 
+    def build_settings_knowledge_base_workspace_ui_outputs(
+        base_outputs: tuple,
+        *,
+        page: int | float | None = 1,
+    ) -> tuple:
+        """将知识库设置基础输出扩展为带分页状态的 UI 输出。"""
+
+        selector_choices, selected_choice, page_value, page_info = build_settings_knowledge_base_selector_page_outputs(
+            base_outputs[1],
+            base_outputs[2],
+            page,
+        )
+        resolved_knowledge_base_id = parse_knowledge_base_choice(selected_choice or "")
+        if resolved_knowledge_base_id != str(base_outputs[2] or ""):
+            base_outputs = build_settings_knowledge_base_workspace(resolved_knowledge_base_id)
+        return (
+            gr.update(choices=selector_choices, value=selected_choice),
+            page_value,
+            page_info,
+            *base_outputs[1:],
+        )
+
     def build_search_detail_payload(search_row: dict | None) -> dict | None:
         """根据检索结果行补齐原文详情。"""
 
@@ -2053,7 +2251,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return format_search_result_detail_html(None, query_text=query_text), page_rows
         return build_search_detail(matched_row, query_text), page_rows
 
-    def run_search(query: str, top_k: int) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
+    def run_search(
+        query: str,
+        top_k: int,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
         normalized_query = normalize_search_query(query)
         if not normalized_query:
             return (
@@ -2068,7 +2270,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 {},
             )
         try:
-            items = retrieval_service.hybrid_search(normalized_query, top_k=top_k, use_rerank=True)
+            items = retrieval_service.hybrid_search(
+                normalized_query,
+                top_k=top_k,
+                knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
+                use_rerank=True,
+            )
         except AppError as exc:
             return (
                 format_operation_result_html(
@@ -2100,12 +2307,36 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def run_search_ui(
         query: str,
         top_k: int,
+        knowledge_base_choice: str | None = None,
     ) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
         """执行检索并返回分页后的界面输出。"""
 
-        summary_html, _full_rows, search_rows, normalized_query, detail_html, selected_row = run_search(query, top_k)
+        summary_html, _full_rows, search_rows, normalized_query, detail_html, selected_row = run_search(
+            query,
+            top_k,
+            knowledge_base_choice,
+        )
         page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=1)
         return summary_html, page_rows, search_rows, normalized_query, detail_html, selected_row, page_value, page_info
+
+    def reset_search_workspace_ui(knowledge_base_choice: str | None = None) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
+        """切换知识库后清空旧检索结果，避免跨库误读。"""
+
+        _ = knowledge_base_choice
+        page_rows, page_value, page_info = build_search_table_page_outputs([], page=1)
+        return (
+            format_operation_result_html(
+                {"success": True, "message": "已切换知识库，请重新执行检索。"},
+                title="检索结果",
+            ),
+            page_rows,
+            [],
+            "",
+            format_search_result_detail_html(None, query_text=""),
+            {},
+            page_value,
+            page_info,
+        )
 
     def change_search_page(
         search_rows: list[dict],
@@ -2265,7 +2496,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             indent=2,
         )
 
-    def run_quality_evaluation(cases_json: str, template_choice: str) -> tuple[str, list[list[str]], dict]:
+    def run_quality_evaluation(
+        cases_json: str,
+        template_choice: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[str]], dict]:
         """执行 AI 质检效果评测，并返回摘要和明细。"""
 
         raw_text = str(cases_json or "").strip()
@@ -2296,6 +2531,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         try:
             evaluation_result = quality_service.run_evaluation_suite(
                 cases,
+                knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
                 template_id=parse_template_choice(template_choice),
             )
         except AppError as exc:
@@ -2314,10 +2550,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             evaluation_result,
         )
 
-    def run_quality_evaluation_ui(cases_json: str, template_choice: str) -> tuple[str, list[list[object]], dict, int, str]:
+    def run_quality_evaluation_ui(
+        cases_json: str,
+        template_choice: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, list[list[object]], dict, int, str]:
         """执行效果评测并返回分页后的表格输出。"""
 
-        summary_html, _rows, evaluation_result = run_quality_evaluation(cases_json, template_choice)
+        summary_html, _rows, evaluation_result = run_quality_evaluation(
+            cases_json,
+            template_choice,
+            knowledge_base_choice,
+        )
         page_rows, page_value, page_info = build_quality_evaluation_table_page_outputs(evaluation_result, page=1)
         return summary_html, page_rows, evaluation_result, page_value, page_info
 
@@ -2366,16 +2610,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         choice: str,
         search_rows: list[dict],
         query_text: str,
+        knowledge_base_choice: str | None = None,
     ) -> str:
         """导出当前文档的入库质检结果。"""
 
-        state = get_document_management_state(choice)
+        state = get_document_management_state(choice, knowledge_base_choice)
         detail = state["selected_detail"]
         doc_uid = str(detail.get("doc_uid") or "")
         if not doc_uid:
-            return (
-                format_operation_result_html({"success": False, "message": "当前文档尚未入库，无法导出入库质检结果。"}, title="下载结果"),
-                None,
+            return format_operation_result_html(
+                {"success": False, "message": "当前文档尚未入库，无法导出入库质检结果。"},
+                title="下载结果",
             )
         report = ingest_service.inspect_document_quality(doc_uid)
         batch_result = ingest_service.list_document_quality_reports(doc_uids=[doc_uid], page_size=1)
@@ -2418,10 +2663,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         choice: str,
         search_rows: list[dict],
         query_text: str,
+        knowledge_base_choice: str | None = None,
     ) -> str:
         """导出当前文档内检索验证结果。"""
 
-        detail = get_document_management_state(choice)["selected_detail"]
+        detail = get_document_management_state(choice, knowledge_base_choice)["selected_detail"]
+        doc_uid = str(detail.get("doc_uid") or "")
         selected_row = build_search_detail_payload((search_rows or [None])[0]) if search_rows else None
         markdown_text = "\n".join(
             [
@@ -2441,10 +2688,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         return export_markdown_result("文档管理", "文档检索验证", markdown_text, linked_id=doc_uid or None)
 
-    def export_document_quality_batch_result() -> str:
+    def export_document_quality_batch_result(knowledge_base_choice: str | None = None) -> str:
         """导出批量入库质检结果。"""
 
-        batch_result = ingest_service.list_document_quality_reports()
+        batch_result = ingest_service.list_document_quality_reports(
+            knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
+        )
         markdown_text = "\n".join(
             [
                 format_document_quality_batch_summary_markdown(batch_result),
@@ -2623,10 +2872,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             recent_rows=recent_rows,
         )
 
-    def list_recent_quality_results_ui() -> tuple:
+    def list_recent_quality_results_ui(knowledge_base_choice: str | None = None) -> tuple:
         """加载最近质检记录，并输出分页后的界面状态。"""
 
-        return build_quality_ui_outputs(list_recent_quality_results())
+        return build_quality_ui_outputs(list_recent_quality_results(knowledge_base_choice))
 
     def select_recent_quality_result_ui(
         current_page_rows: list[list[object]],
@@ -2737,10 +2986,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def run_quality_check_ui(
         input_text: str,
         template_choice: str,
+        knowledge_base_choice: str | None = None,
     ):
         """执行 AI 质检，并将输出适配为带分页的界面结果。"""
 
-        for base_outputs in run_quality_check(input_text, template_choice):
+        for base_outputs in run_quality_check(input_text, template_choice, knowledge_base_choice):
             yield build_quality_ui_outputs(base_outputs)
 
     def change_quality_claim_page(
@@ -2840,6 +3090,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         return build_settings_workspace_ui_outputs(refresh_settings_workspace(selected_template_id))
 
+    def refresh_settings_knowledge_base_workspace_ui(selected_knowledge_base_id: str | None) -> tuple:
+        """刷新知识库设置页并返回分页后的知识库列表。"""
+
+        return build_settings_knowledge_base_workspace_ui_outputs(
+            refresh_settings_knowledge_base_workspace(selected_knowledge_base_id)
+        )
+
     def save_settings_template_ui(*args) -> tuple:
         """保存模板并返回分页后的功能设置页输出。"""
 
@@ -2852,15 +3109,62 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         outputs = delete_settings_template(*args)
         return (*build_settings_workspace_ui_outputs(outputs[:20]), *outputs[20:])
 
+    def save_settings_knowledge_base_ui(*args) -> tuple:
+        """保存知识库并返回分页后的知识库设置页输出。"""
+
+        outputs = save_settings_knowledge_base(*args)
+        return (*build_settings_knowledge_base_workspace_ui_outputs(outputs[:10]), *outputs[10:])
+
+    def delete_settings_knowledge_base_ui(*args) -> tuple:
+        """删除知识库并返回分页后的知识库设置页输出。"""
+
+        outputs = delete_settings_knowledge_base(*args)
+        return (*build_settings_knowledge_base_workspace_ui_outputs(outputs[:10]), *outputs[10:])
+
+    def change_settings_knowledge_base_page(
+        knowledge_base_items: list[dict] | None,
+        current_page: int | float,
+        action: str,
+        selected_knowledge_base_id: str,
+    ) -> tuple[dict, int, str, str, str, str, str, str, bool, str]:
+        """切换知识库列表分页。"""
+
+        _choices, current_choice, new_page, _page_info = build_settings_knowledge_base_selector_page_outputs(
+            knowledge_base_items,
+            selected_knowledge_base_id,
+            current_page,
+        )
+        target_page = new_page - 1 if action == "prev" else new_page + 1
+        choices, resolved_choice, final_page, final_page_info = build_settings_knowledge_base_selector_page_outputs(
+            knowledge_base_items,
+            parse_knowledge_base_choice(current_choice or selected_knowledge_base_id),
+            target_page,
+        )
+        outputs = build_settings_knowledge_base_workspace(parse_knowledge_base_choice(resolved_choice or ""))
+        return (
+            gr.update(choices=choices, value=resolved_choice),
+            final_page,
+            final_page_info,
+            outputs[2],
+            outputs[3],
+            outputs[4],
+            outputs[5],
+            outputs[6],
+            outputs[7],
+            outputs[8],
+            outputs[9],
+        )
+
     def list_review_workspace_ui(
         scope_value: str,
         risk_value: str,
         selected_claim_id: str,
+        knowledge_base_choice: str | None = None,
     ) -> tuple:
         """加载人工审核页并返回分页后的界面输出。"""
 
         return build_review_workspace_ui_outputs(
-            list_review_workspace(scope_value, risk_value, selected_claim_id),
+            list_review_workspace(scope_value, risk_value, selected_claim_id, knowledge_base_choice),
         )
 
     def change_review_filters_ui(
@@ -2982,10 +3286,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         review_note: str,
         scope_value: str,
         risk_value: str,
+        knowledge_base_choice: str | None = None,
     ) -> tuple:
         """提交审核并返回分页后的人工审核界面输出。"""
 
-        outputs = submit_review_action(claim_choice, review_action, review_note, scope_value, risk_value)
+        outputs = submit_review_action(
+            claim_choice,
+            review_action,
+            review_note,
+            scope_value,
+            risk_value,
+            knowledge_base_choice,
+        )
         return (outputs[0], *build_review_workspace_ui_outputs(outputs[1:]))
     submit_review_action_ui.__name__ = "submit_review_action"
 
@@ -3051,12 +3363,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def run_quality_check(
         input_text: str,
         template_choice: str,
+        knowledge_base_choice: str | None = None,
     ):
         selected_template_id = parse_template_choice(template_choice)
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         initial_result_html = format_quality_result_html(None)
         try:
             for event in quality_service.run_check_stream(
                 input_text,
+                knowledge_base_id=knowledge_base_id,
                 template_id=selected_template_id,
             ):
                 if event.get("type") == "progress":
@@ -3176,6 +3491,224 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         detail_html = render_quality_template(selected_choice or "")
         return gr.update(choices=template_choices, value=selected_choice), detail_html
+
+    def build_knowledge_base_form_values(knowledge_base: dict | None) -> tuple[str, str, str, str, bool]:
+        """根据知识库生成设置页表单默认值。"""
+
+        resolved = knowledge_base or {}
+        return (
+            str(resolved.get("knowledge_base_id") or ""),
+            str(resolved.get("knowledge_base_name") or ""),
+            str(resolved.get("description") or ""),
+            str(resolved.get("status") or "active"),
+            bool(resolved.get("is_default", False)),
+        )
+
+    def build_knowledge_base_refresh_outputs(
+        selected_knowledge_base_id: str | None = None,
+    ) -> tuple[gr.update, gr.update, gr.update, gr.update]:
+        """构建各页面知识库下拉刷新输出。"""
+
+        items, choices, default_choice = refresh_knowledge_base_choices()
+        normalized_id = str(selected_knowledge_base_id or "")
+        available_ids = {str(item.get("knowledge_base_id") or "") for item in items}
+        if normalized_id not in available_ids:
+            normalized_id = parse_knowledge_base_choice(default_choice or "")
+        resolved_choice = next(
+            (choice for choice in choices if parse_knowledge_base_choice(choice) == normalized_id),
+            default_choice,
+        )
+        update = gr.update(choices=choices, value=resolved_choice)
+        return update, update, update, update
+
+    def sync_knowledge_base_selector_outputs(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[gr.update, gr.update, gr.update, gr.update]:
+        """按当前选中的知识库同步四个页面顶部下拉。"""
+
+        return build_knowledge_base_refresh_outputs(
+            parse_knowledge_base_choice(knowledge_base_choice or ""),
+        )
+
+    def change_document_knowledge_base_ui(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """切换文档管理页知识库时，同步其它页面顶部下拉。"""
+
+        return (
+            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
+            *load_document_management_state_ui(knowledge_base_choice),
+        )
+
+    def change_search_knowledge_base_ui(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """切换检索页知识库时，同步其它页面顶部下拉。"""
+
+        return (
+            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
+            *reset_search_workspace_ui(knowledge_base_choice),
+        )
+
+    def change_quality_knowledge_base_ui(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """切换 AI 质检页知识库时，同步其它页面顶部下拉。"""
+
+        return (
+            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
+            *list_recent_quality_results_ui(knowledge_base_choice),
+        )
+
+    def change_review_knowledge_base_ui(
+        scope_value: str,
+        risk_value: str,
+        selected_claim_id: str,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """切换人工审核页知识库时，同步其它页面顶部下拉。"""
+
+        return (
+            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
+            *list_review_workspace_ui(
+                scope_value,
+                risk_value,
+                selected_claim_id,
+                knowledge_base_choice,
+            ),
+        )
+
+    def build_settings_knowledge_base_workspace(
+        selected_knowledge_base_id: str | None = None,
+        *,
+        result_payload: dict | None = None,
+        form_override: dict | None = None,
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, bool, str]:
+        """构建设置页知识库工作区数据。"""
+
+        knowledge_bases = ingest_service.list_knowledge_bases()
+        knowledge_base_ids = {str(item.get("knowledge_base_id") or "") for item in knowledge_bases}
+        normalized_knowledge_base_id = str(selected_knowledge_base_id or "")
+        if normalized_knowledge_base_id not in knowledge_base_ids:
+            default_item = next((item for item in knowledge_bases if item.get("is_default")), knowledge_bases[0] if knowledge_bases else None)
+            normalized_knowledge_base_id = str((default_item or {}).get("knowledge_base_id") or "")
+        selected_knowledge_base = (
+            ingest_service.get_knowledge_base(normalized_knowledge_base_id) if normalized_knowledge_base_id else None
+        )
+        detail_html = format_settings_knowledge_base_detail_html(selected_knowledge_base)
+        form_values = build_knowledge_base_form_values(selected_knowledge_base)
+        if form_override:
+            form_values = (
+                str(form_override.get("knowledge_base_id", form_values[0])),
+                str(form_override.get("knowledge_base_name", form_values[1])),
+                str(form_override.get("description", form_values[2])),
+                str(form_override.get("status", form_values[3])),
+                bool(form_override.get("is_default", form_values[4])),
+            )
+        return (
+            build_settings_knowledge_base_rows(knowledge_bases),
+            knowledge_bases,
+            normalized_knowledge_base_id,
+            detail_html,
+            *form_values,
+            format_operation_result_html(result_payload, title="知识库结果"),
+        )
+
+    def refresh_settings_knowledge_base_workspace(selected_knowledge_base_id: str | None) -> tuple:
+        """刷新知识库工作区。"""
+
+        return build_settings_knowledge_base_workspace(selected_knowledge_base_id)
+
+    def select_settings_knowledge_base(
+        knowledge_base_choice: str,
+        knowledge_base_items: list[dict] | None,
+    ) -> tuple[str, str, str, str, str, str, bool, str]:
+        """切换知识库选择器后加载对应详情与表单。"""
+
+        items = knowledge_base_items or []
+        if not items:
+            outputs = build_settings_knowledge_base_workspace("")
+            return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice)
+        outputs = build_settings_knowledge_base_workspace(knowledge_base_id)
+        return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
+
+    def prepare_new_knowledge_base() -> tuple[str, str, str, str, str, str, bool, str]:
+        """清空表单，准备创建新知识库。"""
+
+        blank_form = {
+            "knowledge_base_id": "",
+            "knowledge_base_name": "",
+            "description": "",
+            "status": "active",
+            "is_default": False,
+        }
+        outputs = build_settings_knowledge_base_workspace("", form_override=blank_form)
+        return "", outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
+
+    def save_settings_knowledge_base(
+        selected_knowledge_base_id: str,
+        knowledge_base_id: str,
+        knowledge_base_name: str,
+        description: str,
+        status: str,
+        is_default: bool,
+    ) -> tuple:
+        """保存知识库并刷新设置页与各页面选择器。"""
+
+        form_payload = {
+            "knowledge_base_id": knowledge_base_id,
+            "knowledge_base_name": knowledge_base_name,
+            "description": description,
+            "status": status,
+            "is_default": is_default,
+        }
+        try:
+            saved_item = ingest_service.save_knowledge_base(form_payload)
+        except AppError as exc:
+            outputs = build_settings_knowledge_base_workspace(
+                selected_knowledge_base_id,
+                result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
+                form_override=form_payload,
+            )
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            return (*outputs, *selector_outputs)
+        outputs = build_settings_knowledge_base_workspace(
+            saved_item.get("knowledge_base_id"),
+            result_payload={"success": True, "message": "知识库已保存。"},
+        )
+        selector_outputs = build_knowledge_base_refresh_outputs(saved_item.get("knowledge_base_id"))
+        return (*outputs, *selector_outputs)
+
+    def delete_settings_knowledge_base(
+        selected_knowledge_base_id: str,
+        knowledge_base_id_input: str,
+    ) -> tuple:
+        """删除知识库并刷新设置页与各页面选择器。"""
+
+        knowledge_base_id = str(knowledge_base_id_input or selected_knowledge_base_id or "").strip()
+        if not knowledge_base_id:
+            outputs = build_settings_knowledge_base_workspace(
+                selected_knowledge_base_id,
+                result_payload={"success": False, "message": "请先选择或输入知识库 ID。"},
+            )
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            return (*outputs, *selector_outputs)
+        try:
+            deleted_item = ingest_service.delete_knowledge_base(knowledge_base_id)
+        except AppError as exc:
+            outputs = build_settings_knowledge_base_workspace(
+                selected_knowledge_base_id,
+                result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
+            )
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            return (*outputs, *selector_outputs)
+        outputs = build_settings_knowledge_base_workspace(
+            "",
+            result_payload={"success": True, "message": f'知识库“{deleted_item.get("knowledge_base_name") or knowledge_base_id}”已删除。'},
+        )
+        selector_outputs = build_knowledge_base_refresh_outputs("")
+        return (*outputs, *selector_outputs)
 
     def build_settings_workspace(
         selected_template_id: str | None = None,
@@ -3532,12 +4065,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         scope_value: str,
         risk_value: str,
         selected_claim_id: str,
+        knowledge_base_choice: str | None = None,
     ) -> tuple[list[list[str]], list[list[str]], list[dict], str, dict, str, list[list[str]], list[dict], str, str, str, list[list[str]], list[dict], str, str]:
         """读取人工审核页所需的待审核列表与审核历史。"""
 
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         try:
-            review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
-            review_items, _ = review_service.list_reviews(page=1, page_size=20)
+            review_candidates = review_service.list_review_candidates(
+                limit=review_candidate_fetch_limit,
+                knowledge_base_id=knowledge_base_id,
+            )
+            review_items, _ = review_service.list_reviews(
+                page=1,
+                page_size=20,
+                knowledge_base_id=knowledge_base_id,
+            )
         except AppError:
             return build_review_workspace_outputs([], [], scope_value=scope_value, risk_value=risk_value)
         return build_review_workspace_outputs(
@@ -3644,7 +4186,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         review_note: str,
         scope_value: str,
         risk_value: str,
+        knowledge_base_choice: str | None = None,
     ) -> tuple[str, list[list[str]], list[list[str]], list[dict], str, dict, str, list[list[str]], list[dict], str, str, str, list[list[str]], list[dict], str, str]:
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         claim_id = parse_claim_choice(claim_choice)
         if not claim_id:
             empty_outputs = build_review_workspace_outputs([], [], scope_value=scope_value, risk_value=risk_value)
@@ -3660,15 +4204,29 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_note=review_note,
                 reviewer="ui_user",
             )
-            review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
-            review_items, _ = review_service.list_reviews(page=1, page_size=20)
+            review_candidates = review_service.list_review_candidates(
+                limit=review_candidate_fetch_limit,
+                knowledge_base_id=knowledge_base_id,
+            )
+            review_items, _ = review_service.list_reviews(
+                page=1,
+                page_size=20,
+                knowledge_base_id=knowledge_base_id,
+            )
         except AppError as exc:
             try:
-                current_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
+                current_candidates = review_service.list_review_candidates(
+                    limit=review_candidate_fetch_limit,
+                    knowledge_base_id=knowledge_base_id,
+                )
             except AppError:
                 current_candidates = []
             try:
-                current_review_items, _ = review_service.list_reviews(page=1, page_size=20)
+                current_review_items, _ = review_service.list_reviews(
+                    page=1,
+                    page_size=20,
+                    knowledge_base_id=knowledge_base_id,
+                )
             except AppError:
                 current_review_items = []
             current_outputs = build_review_workspace_outputs(
@@ -3712,9 +4270,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *current_outputs,
         )
 
-    def list_recent_quality_results() -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
+    def list_recent_quality_results(
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         try:
-            results = quality_service.list_recent_results(limit=RECENT_QUALITY_FETCH_LIMIT)
+            results = quality_service.list_recent_results(
+                limit=RECENT_QUALITY_FETCH_LIMIT,
+                knowledge_base_id=knowledge_base_id,
+            )
         except AppError:
             return build_quality_outputs(
                 progress_html=format_quality_progress_html(None),
@@ -3746,6 +4310,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return (*selected_outputs[:11], selected_outputs[13])
 
     initial_document_state = get_document_management_state()
+    initial_knowledge_base_choice = initial_document_state["knowledge_base_choice"]
+    initial_knowledge_base_id = resolve_knowledge_base_choice(initial_knowledge_base_choice)
     initial_document_summary = format_document_summary_html(initial_document_state["scan_summary"])
     initial_database_summary = format_database_summary_html(initial_document_state["database_summary"])
     initial_database_rows = build_database_summary_rows(initial_document_state["database_summary"])
@@ -3760,7 +4326,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_document_quality_search_state,
         initial_document_quality_search_detail,
     ) = build_document_quality_outputs(initial_document_state["selected_detail"])
-    initial_document_quality_batch_summary, initial_document_quality_batch_rows = build_document_quality_batch_outputs()
+    initial_document_quality_batch_summary, initial_document_quality_batch_rows = build_document_quality_batch_outputs(initial_knowledge_base_choice)
     (
         initial_document_quality_config_html,
         initial_quality_sample_limit,
@@ -3776,7 +4342,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     initial_quality_evaluation_rows: list[list[str]] = []
     initial_quality_evaluation_result: dict = {}
     try:
-        initial_recent_results = quality_service.list_recent_results(limit=RECENT_QUALITY_FETCH_LIMIT)
+        initial_recent_results = quality_service.list_recent_results(
+            limit=RECENT_QUALITY_FETCH_LIMIT,
+            knowledge_base_id=initial_knowledge_base_id,
+        )
     except AppError:
         initial_recent_results = []
     (
@@ -3797,11 +4366,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) = build_recent_quality_view_outputs(initial_recent_results, selected_index=0)
     initial_active_quality_check_html = format_active_quality_check_html(initial_formatted_quality_result)
     try:
-        initial_review_candidates = review_service.list_review_candidates(limit=review_candidate_fetch_limit)
+        initial_review_candidates = review_service.list_review_candidates(
+            limit=review_candidate_fetch_limit,
+            knowledge_base_id=initial_knowledge_base_id,
+        )
     except AppError:
         initial_review_candidates = []
     try:
-        initial_review_items, _ = review_service.list_reviews(page=1, page_size=20)
+        initial_review_items, _ = review_service.list_reviews(
+            page=1,
+            page_size=20,
+            knowledge_base_id=initial_knowledge_base_id,
+        )
     except AppError:
         initial_review_items = []
     (
@@ -3843,6 +4419,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_settings_runtime_html,
         initial_settings_delete_confirm,
     ) = build_settings_workspace()
+    (
+        initial_settings_knowledge_base_rows,
+        initial_settings_knowledge_base_state,
+        initial_settings_selected_knowledge_base_id,
+        initial_settings_knowledge_base_detail_html,
+        initial_settings_knowledge_base_id_value,
+        initial_settings_knowledge_base_name_value,
+        initial_settings_knowledge_base_description_value,
+        initial_settings_knowledge_base_status_value,
+        initial_settings_knowledge_base_is_default,
+        initial_settings_knowledge_base_result_html,
+    ) = build_settings_knowledge_base_workspace()
     initial_database_table_rows, initial_database_page, initial_database_page_info = reset_table_pagination(
         initial_database_rows,
         prepend_sequence=True,
@@ -3904,6 +4492,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_settings_template_rows,
         prepend_sequence=True,
     )
+    (
+        initial_settings_knowledge_base_choices,
+        initial_settings_knowledge_base_selected_choice,
+        initial_settings_knowledge_base_page,
+        initial_settings_knowledge_base_page_info,
+    ) = build_settings_knowledge_base_selector_page_outputs(
+        initial_settings_knowledge_base_state,
+        initial_settings_selected_knowledge_base_id,
+    )
 
     with gr.Blocks(title="中文知识库系统") as demo:
         gr.Markdown("# 中文知识库系统 MVP")
@@ -3917,6 +4514,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 label="待质检文本",
                                 lines=8,
                                 placeholder="建议一行或一句输入一个明确说法，系统会拆成多条 Claim 逐条质检。",
+                            )
+                            quality_knowledge_base = gr.Dropdown(
+                                label="当前知识库",
+                                choices=knowledge_base_choices,
+                                value=initial_knowledge_base_choice,
+                                interactive=True,
+                                elem_id="quality-knowledge-base",
                             )
                             quality_template = gr.Dropdown(
                                 label="质检模板",
@@ -4117,6 +4721,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Row(elem_id="review-top-row", equal_height=True):
                         with gr.Column(scale=5):
                             with gr.Row():
+                                review_knowledge_base = gr.Dropdown(
+                                    label="当前知识库",
+                                    choices=knowledge_base_choices,
+                                    value=initial_knowledge_base_choice,
+                                    interactive=True,
+                                    elem_id="review-knowledge-base",
+                                )
                                 review_scope_filter = gr.Dropdown(
                                     label="列表范围",
                                     choices=review_scope_choices,
@@ -4235,17 +4846,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
 
             with gr.Tab("知识库管理"):
-                document_management_help = gr.HTML(
-                    value=format_document_management_help_html(),
-                    elem_id="document-management-help-panel",
-                )
-                scan_button = gr.Button("刷新文档列表")
                 database_page_state = gr.State(initial_database_page)
                 document_page_state = gr.State(initial_document_page)
                 document_quality_sections_page_state = gr.State(initial_document_quality_sections_page)
                 document_quality_chunks_page_state = gr.State(initial_document_quality_chunks_page)
                 document_quality_search_page_state = gr.State(initial_document_quality_search_page)
                 document_quality_batch_page_state = gr.State(initial_document_quality_batch_page)
+                with gr.Row(elem_id="document-management-top-row", equal_height=True):
+                    with gr.Column(scale=5):
+                        document_management_help = gr.HTML(
+                            value=format_document_management_help_html(),
+                            elem_id="document-management-help-panel",
+                        )
+                    with gr.Column(scale=4):
+                        with gr.Group(elem_id="document-management-selector-panel"):
+                            document_knowledge_base = gr.Dropdown(
+                                label="当前知识库",
+                                choices=knowledge_base_choices,
+                                value=initial_knowledge_base_choice,
+                                interactive=True,
+                                elem_id="document-knowledge-base",
+                            )
+                            scan_button = gr.Button("刷新文档列表")
                 with gr.Row():
                     with gr.Column(scale=1):
                         document_summary = gr.HTML(value=initial_document_summary)
@@ -4483,6 +5105,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 lines=3,
                                 placeholder="可输入关键词、短语、整句，或多组关键词（建议用空格、逗号分隔）",
                             )
+                            search_knowledge_base = gr.Dropdown(
+                                label="当前知识库",
+                                choices=knowledge_base_choices,
+                                value=initial_knowledge_base_choice,
+                                interactive=True,
+                                elem_id="search-knowledge-base",
+                            )
                             search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=100, step=1, value=10)
                             search_button = gr.Button("执行检索")
                     with gr.Column(scale=4):
@@ -4522,6 +5151,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 settings_template_state = gr.State(initial_settings_template_state)
                 settings_selected_template_state = gr.State(initial_settings_selected_template_id)
                 settings_template_page_state = gr.State(initial_settings_template_page)
+                settings_knowledge_base_state = gr.State(initial_settings_knowledge_base_state)
+                settings_selected_knowledge_base_state = gr.State(initial_settings_selected_knowledge_base_id)
+                settings_knowledge_base_page_state = gr.State(initial_settings_knowledge_base_page)
                 with gr.Group(elem_id="settings-overview-panel"):
                     with gr.Row(elem_id="settings-top-row", equal_height=True):
                         with gr.Column(scale=5):
@@ -4591,6 +5223,65 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 with gr.Row(elem_id="settings-form-actions"):
                                     settings_save_button = gr.Button("保存模板", variant="primary")
                                     settings_delete_button = gr.Button("删除模板", variant="stop")
+                with gr.Group(elem_id="settings-knowledge-base-panel"):
+                    with gr.Row(elem_id="settings-knowledge-base-row", equal_height=True):
+                        with gr.Column(scale=4):
+                            settings_knowledge_base_table = gr.Radio(
+                                label="知识库列表",
+                                elem_id="settings-knowledge-base-table",
+                                choices=initial_settings_knowledge_base_choices,
+                                value=initial_settings_knowledge_base_selected_choice,
+                            )
+                            with gr.Row(elem_id="settings-knowledge-base-pagination-row"):
+                                settings_knowledge_base_prev_button = gr.Button("上一页")
+                                settings_knowledge_base_next_button = gr.Button("下一页")
+                            settings_knowledge_base_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_settings_knowledge_base_page_info),
+                                elem_id="settings-knowledge-base-page-info",
+                            )
+                            with gr.Row(elem_id="settings-knowledge-base-list-actions"):
+                                settings_knowledge_base_new_button = gr.Button("新建知识库")
+                                settings_knowledge_base_refresh_button = gr.Button("刷新知识库")
+                        with gr.Column(scale=5):
+                            settings_knowledge_base_detail = gr.HTML(
+                                value=initial_settings_knowledge_base_detail_html,
+                                elem_id="settings-knowledge-base-detail",
+                            )
+                            with gr.Group(elem_id="settings-knowledge-base-form"):
+                                with gr.Row():
+                                    settings_knowledge_base_id = gr.Textbox(
+                                        label="知识库 ID",
+                                        value=initial_settings_knowledge_base_id_value,
+                                        scale=2,
+                                    )
+                                    settings_knowledge_base_name = gr.Textbox(
+                                        label="知识库名称",
+                                        value=initial_settings_knowledge_base_name_value,
+                                        scale=3,
+                                    )
+                                settings_knowledge_base_description = gr.Textbox(
+                                    label="知识库说明",
+                                    lines=3,
+                                    value=initial_settings_knowledge_base_description_value,
+                                )
+                                with gr.Row():
+                                    settings_knowledge_base_status = gr.Dropdown(
+                                        label="状态",
+                                        choices=["active", "disabled"],
+                                        value=initial_settings_knowledge_base_status_value,
+                                        interactive=True,
+                                    )
+                                    settings_knowledge_base_is_default = gr.Checkbox(
+                                        label="设为默认",
+                                        value=initial_settings_knowledge_base_is_default,
+                                    )
+                                with gr.Row(elem_id="settings-knowledge-base-actions"):
+                                    settings_knowledge_base_save_button = gr.Button("保存知识库", variant="primary")
+                                    settings_knowledge_base_delete_button = gr.Button("删除知识库", variant="stop")
+                            settings_knowledge_base_result = gr.HTML(
+                                value=initial_settings_knowledge_base_result_html,
+                                elem_id="settings-knowledge-base-result",
+                            )
                 with gr.Group(elem_id="settings-footer-panel"):
                     with gr.Row(elem_id="settings-bottom-row", equal_height=True):
                         with gr.Column(scale=5):
@@ -4603,8 +5294,59 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 settings_export_button = gr.Button("下载当前配置")
                                 settings_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="settings-export-result")
 
+        document_knowledge_base.change(
+            fn=change_document_knowledge_base_ui,
+            inputs=[document_knowledge_base],
+            outputs=[
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
+                document_summary,
+                database_summary,
+                database_summary_table,
+                database_page_state,
+                database_page_info,
+                document_table,
+                document_page_state,
+                document_page_info,
+                document_choices,
+                document_detail,
+                register_button,
+                rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
+                document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_csv_export_result,
+            ],
+        )
         scan_button.click(
             fn=load_document_management_state_ui,
+            inputs=[document_knowledge_base],
             outputs=[
                 document_summary,
                 database_summary,
@@ -4650,7 +5392,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         document_choices.change(
             fn=inspect_document_ui,
-            inputs=document_choices,
+            inputs=[document_choices, document_knowledge_base],
             outputs=[
                 document_detail,
                 register_button,
@@ -4687,7 +5429,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         register_button.click(
             fn=register_selected_document_ui,
-            inputs=document_choices,
+            inputs=[document_choices, document_knowledge_base],
             outputs=[
                 register_result,
                 document_summary,
@@ -4734,6 +5476,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         register_all_button.click(
             fn=register_all_documents_ui,
+            inputs=[document_knowledge_base],
             outputs=[
                 register_result,
                 document_summary,
@@ -4780,6 +5523,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         status_button.click(
             fn=query_ingest_status_ui,
+            inputs=[document_knowledge_base],
             outputs=[
                 document_summary,
                 database_summary,
@@ -4825,7 +5569,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         rebuild_button.click(
             fn=rebuild_selected_document_ui,
-            inputs=document_choices,
+            inputs=[document_choices, document_knowledge_base],
             outputs=[
                 rebuild_result,
                 document_summary,
@@ -4872,7 +5616,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         document_quality_run_button.click(
             fn=inspect_selected_document_quality_ui,
-            inputs=document_choices,
+            inputs=[document_choices, document_knowledge_base],
             outputs=[
                 document_quality_report,
                 document_quality_checks,
@@ -4892,7 +5636,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         document_quality_search_button.click(
             fn=run_document_quality_search_ui,
-            inputs=[document_choices, document_quality_search_query],
+            inputs=[document_choices, document_quality_search_query, document_knowledge_base],
             outputs=[
                 document_quality_search_summary,
                 document_quality_search_results,
@@ -4910,24 +5654,27 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         document_quality_result_export_button.click(
             fn=export_document_quality_result,
-            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state],
+            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state, document_knowledge_base],
             outputs=[document_quality_result_export_result],
         )
         document_quality_search_export_button.click(
             fn=export_document_quality_search_result,
-            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state],
+            inputs=[document_choices, document_quality_search_state, document_quality_search_query_state, document_knowledge_base],
             outputs=[document_quality_result_export_result],
         )
         document_quality_batch_button.click(
             fn=run_batch_document_quality_ui,
+            inputs=[document_knowledge_base],
             outputs=[document_quality_batch_summary, document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
         )
         document_quality_batch_export_button.click(
             fn=export_document_quality_batch_result,
+            inputs=[document_knowledge_base],
             outputs=[document_quality_batch_export_result],
         )
         document_quality_csv_export_button.click(
             fn=export_document_quality_csv,
+            inputs=[document_knowledge_base],
             outputs=[document_quality_csv_export_result],
         )
         document_quality_config_save_button.click(
@@ -4967,43 +5714,43 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[document_quality_config_export_result],
         )
         database_prev_button.click(
-            fn=lambda choice, page: change_database_summary_page(choice, page, "prev"),
-            inputs=[document_choices, database_page_state],
+            fn=lambda choice, knowledge_base, page: change_database_summary_page(choice, knowledge_base, page, "prev"),
+            inputs=[document_choices, document_knowledge_base, database_page_state],
             outputs=[database_summary_table, database_page_state, database_page_info],
         )
         database_next_button.click(
-            fn=lambda choice, page: change_database_summary_page(choice, page, "next"),
-            inputs=[document_choices, database_page_state],
+            fn=lambda choice, knowledge_base, page: change_database_summary_page(choice, knowledge_base, page, "next"),
+            inputs=[document_choices, document_knowledge_base, database_page_state],
             outputs=[database_summary_table, database_page_state, database_page_info],
         )
         document_prev_button.click(
-            fn=lambda choice, page: change_document_list_page(choice, page, "prev"),
-            inputs=[document_choices, document_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_list_page(choice, knowledge_base, page, "prev"),
+            inputs=[document_choices, document_knowledge_base, document_page_state],
             outputs=[document_table, document_page_state, document_page_info],
         )
         document_next_button.click(
-            fn=lambda choice, page: change_document_list_page(choice, page, "next"),
-            inputs=[document_choices, document_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_list_page(choice, knowledge_base, page, "next"),
+            inputs=[document_choices, document_knowledge_base, document_page_state],
             outputs=[document_table, document_page_state, document_page_info],
         )
         document_quality_sections_prev_button.click(
-            fn=lambda choice, page: change_document_quality_sections_page(choice, page, "prev"),
-            inputs=[document_choices, document_quality_sections_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_quality_sections_page(choice, knowledge_base, page, "prev"),
+            inputs=[document_choices, document_knowledge_base, document_quality_sections_page_state],
             outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
         )
         document_quality_sections_next_button.click(
-            fn=lambda choice, page: change_document_quality_sections_page(choice, page, "next"),
-            inputs=[document_choices, document_quality_sections_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_quality_sections_page(choice, knowledge_base, page, "next"),
+            inputs=[document_choices, document_knowledge_base, document_quality_sections_page_state],
             outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
         )
         document_quality_chunks_prev_button.click(
-            fn=lambda choice, page: change_document_quality_chunks_page(choice, page, "prev"),
-            inputs=[document_choices, document_quality_chunks_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_quality_chunks_page(choice, knowledge_base, page, "prev"),
+            inputs=[document_choices, document_knowledge_base, document_quality_chunks_page_state],
             outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
         )
         document_quality_chunks_next_button.click(
-            fn=lambda choice, page: change_document_quality_chunks_page(choice, page, "next"),
-            inputs=[document_choices, document_quality_chunks_page_state],
+            fn=lambda choice, knowledge_base, page: change_document_quality_chunks_page(choice, knowledge_base, page, "next"),
+            inputs=[document_choices, document_knowledge_base, document_quality_chunks_page_state],
             outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
         )
         document_quality_search_prev_button.click(
@@ -5017,19 +5764,37 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs=[document_quality_search_results, document_quality_search_page_state, document_quality_search_page_info],
         )
         document_quality_batch_prev_button.click(
-            fn=lambda page: change_document_quality_batch_page(page, "prev"),
-            inputs=[document_quality_batch_page_state],
+            fn=lambda knowledge_base, page: change_document_quality_batch_page(knowledge_base, page, "prev"),
+            inputs=[document_knowledge_base, document_quality_batch_page_state],
             outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
         )
         document_quality_batch_next_button.click(
-            fn=lambda page: change_document_quality_batch_page(page, "next"),
-            inputs=[document_quality_batch_page_state],
+            fn=lambda knowledge_base, page: change_document_quality_batch_page(knowledge_base, page, "next"),
+            inputs=[document_knowledge_base, document_quality_batch_page_state],
             outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
         )
         search_button.click(
             fn=run_search_ui,
-            inputs=[search_query, search_top_k],
+            inputs=[search_query, search_top_k, search_knowledge_base],
             outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail, search_selected_row_state, search_page_state, search_page_info],
+        )
+        search_knowledge_base.change(
+            fn=change_search_knowledge_base_ui,
+            inputs=[search_knowledge_base],
+            outputs=[
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
+                search_result_summary,
+                search_result,
+                search_result_state,
+                search_query_state,
+                search_result_detail,
+                search_selected_row_state,
+                search_page_state,
+                search_page_info,
+            ],
         )
         search_result.select(
             fn=select_search_result,
@@ -5053,7 +5818,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         quality_button.click(
             fn=run_quality_check_ui,
-            inputs=[quality_input, quality_template],
+            inputs=[quality_input, quality_template, quality_knowledge_base],
             outputs=[
                 quality_progress,
                 quality_result,
@@ -5085,7 +5850,39 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         recent_quality_button.click(
             fn=list_recent_quality_results_ui,
+            inputs=[quality_knowledge_base],
             outputs=[
+                quality_progress,
+                quality_result,
+                quality_active_check,
+                formatted_quality_result_state,
+                quality_claims,
+                quality_claim_page_state,
+                quality_claim_page_info,
+                selected_claim_state,
+                claim_detail_state,
+                claim_detail_view,
+                claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
+                quality_review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
+                recent_quality_state,
+                recent_quality_checks,
+                recent_quality_page_state,
+                recent_quality_page_info,
+                quality_evaluation_cases,
+            ],
+        )
+        quality_knowledge_base.change(
+            fn=change_quality_knowledge_base_ui,
+            inputs=[quality_knowledge_base],
+            outputs=[
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
                 quality_progress,
                 quality_result,
                 quality_active_check,
@@ -5228,7 +6025,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         quality_evaluation_button.click(
             fn=run_quality_evaluation_ui,
-            inputs=[quality_evaluation_cases, quality_template],
+            inputs=[quality_evaluation_cases, quality_template, quality_knowledge_base],
             outputs=[quality_evaluation_summary, quality_evaluation_table, quality_evaluation_result_state, quality_evaluation_page_state, quality_evaluation_page_info],
         )
         quality_evaluation_prev_button.click(
@@ -5409,10 +6206,176 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             inputs=[settings_selected_template_state],
             outputs=[settings_export_result],
         )
+        settings_knowledge_base_refresh_button.click(
+            fn=refresh_settings_knowledge_base_workspace_ui,
+            inputs=[settings_selected_knowledge_base_state],
+            outputs=[
+                settings_knowledge_base_table,
+                settings_knowledge_base_page_state,
+                settings_knowledge_base_page_info,
+                settings_knowledge_base_state,
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+            ],
+        )
+        settings_knowledge_base_table.change(
+            fn=select_settings_knowledge_base,
+            inputs=[settings_knowledge_base_table, settings_knowledge_base_state],
+            outputs=[
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+            ],
+        )
+        settings_knowledge_base_new_button.click(
+            fn=prepare_new_knowledge_base,
+            outputs=[
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+            ],
+        )
+        settings_knowledge_base_save_button.click(
+            fn=save_settings_knowledge_base_ui,
+            inputs=[
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+            ],
+            outputs=[
+                settings_knowledge_base_table,
+                settings_knowledge_base_page_state,
+                settings_knowledge_base_page_info,
+                settings_knowledge_base_state,
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
+            ],
+        )
+        settings_knowledge_base_delete_button.click(
+            fn=delete_settings_knowledge_base_ui,
+            inputs=[
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_id,
+            ],
+            outputs=[
+                settings_knowledge_base_table,
+                settings_knowledge_base_page_state,
+                settings_knowledge_base_page_info,
+                settings_knowledge_base_state,
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
+            ],
+        )
+        settings_knowledge_base_prev_button.click(
+            fn=lambda items, page, selected: change_settings_knowledge_base_page(items, page, "prev", selected),
+            inputs=[settings_knowledge_base_state, settings_knowledge_base_page_state, settings_selected_knowledge_base_state],
+            outputs=[
+                settings_knowledge_base_table,
+                settings_knowledge_base_page_state,
+                settings_knowledge_base_page_info,
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+            ],
+        )
+        settings_knowledge_base_next_button.click(
+            fn=lambda items, page, selected: change_settings_knowledge_base_page(items, page, "next", selected),
+            inputs=[settings_knowledge_base_state, settings_knowledge_base_page_state, settings_selected_knowledge_base_state],
+            outputs=[
+                settings_knowledge_base_table,
+                settings_knowledge_base_page_state,
+                settings_knowledge_base_page_info,
+                settings_selected_knowledge_base_state,
+                settings_knowledge_base_detail,
+                settings_knowledge_base_id,
+                settings_knowledge_base_name,
+                settings_knowledge_base_description,
+                settings_knowledge_base_status,
+                settings_knowledge_base_is_default,
+                settings_knowledge_base_result,
+            ],
+        )
         review_history_button.click(
             fn=list_review_workspace_ui,
-            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state],
+            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base],
             outputs=[
+                review_pending_candidates,
+                review_pending_page_state,
+                review_pending_page_info,
+                review_processed_candidates,
+                review_processed_page_state,
+                review_processed_page_info,
+                review_candidate_state,
+                review_selected_claim_state,
+                review_claim_detail_state,
+                review_claim_detail_panel,
+                review_evidence_table,
+                review_evidence_page_state,
+                review_evidence_page_info,
+                review_evidence_items_state,
+                review_evidence_detail,
+                review_action_input,
+                review_note_input,
+                review_history,
+                review_history_page_state,
+                review_history_page_info,
+                review_history_state,
+                review_selected_record_state,
+                review_record_detail,
+            ],
+        )
+        review_knowledge_base.change(
+            fn=change_review_knowledge_base_ui,
+            inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base],
+            outputs=[
+                document_knowledge_base,
+                search_knowledge_base,
+                quality_knowledge_base,
+                review_knowledge_base,
                 review_pending_candidates,
                 review_pending_page_state,
                 review_pending_page_info,
@@ -5568,7 +6531,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         review_button.click(
             fn=submit_review_action_ui,
-            inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter],
+            inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter, review_knowledge_base],
             outputs=[
                 review_result,
                 review_pending_candidates,

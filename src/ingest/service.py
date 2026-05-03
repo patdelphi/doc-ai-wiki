@@ -15,6 +15,7 @@ from src.common.utils import read_text_file, sha256_of_text, utc_now_iso
 from src.db.repositories import DocumentRepository, IngestJobRepository
 from src.db.transaction import transaction
 from src.ingest.quality_config import IngestQualityConfigService
+from src.knowledge_base.service import KnowledgeBaseService
 from src.metadata.extractor import extract_basic_metadata
 from src.metadata.sections import parse_markdown_sections
 from src.retrieval.vector_store import VectorStore
@@ -28,6 +29,7 @@ class IngestService:
         self.document_repository = DocumentRepository(settings.sqlite_db_path)
         self.job_repository = IngestJobRepository(settings.sqlite_db_path)
         self.quality_config_service = IngestQualityConfigService(settings.templates_dir)
+        self.knowledge_base_service = KnowledgeBaseService(settings.sqlite_db_path, settings.input_root)
         self.vector_store = VectorStore(
             settings.chroma_persist_dir,
             embedding_client=build_embedding_client(settings),
@@ -55,6 +57,7 @@ class IngestService:
             jobs.append(
                 self.register_document(
                     document,
+                    knowledge_base_id=document.get("knowledge_base_id"),
                     rebuild_if_exists=rebuild_if_exists,
                     progress_callback=child_callback,
                 )
@@ -62,7 +65,14 @@ class IngestService:
 
         return jobs
 
-    def register_document(self, document: dict, *, rebuild_if_exists: bool = False, progress_callback=None) -> dict:
+    def register_document(
+        self,
+        document: dict,
+        *,
+        knowledge_base_id: str | None = None,
+        rebuild_if_exists: bool = False,
+        progress_callback=None,
+    ) -> dict:
         """注册单篇文档，并返回更细粒度的进度信息。"""
 
         progress_events: list[dict] = []
@@ -83,6 +93,9 @@ class IngestService:
             file_path = Path.cwd() / file_path
         if not file_path.exists():
             raise NotFoundAppError("文档文件不存在", details={"file_path": str(file_path)})
+        resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(
+            knowledge_base_id or document.get("knowledge_base_id")
+        )["knowledge_base_id"]
 
         report("prepare", "开始读取输入文档", 5, file_path=str(file_path))
         try:
@@ -122,6 +135,7 @@ class IngestService:
         report("parse", "完成文本读取，开始解析章节与元数据", 15, doc_uid=doc_uid)
         chunk_items = self._save_document_and_chunks(
             doc_uid=doc_uid,
+            knowledge_base_id=resolved_knowledge_base_id,
             doc_id=doc_id,
             doc_title=document.get("doc_title") or metadata["doc_title"],
             edition=edition,
@@ -170,20 +184,29 @@ class IngestService:
         )
         return {"job_id": job_id, "doc_uid": doc_uid, "status": "completed", "progress_events": progress_events}
 
-    def list_status(self, *, doc_uid: str | None, status: str | None, page: int, page_size: int) -> tuple[list[dict], int]:
+    def list_status(
+        self,
+        *,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
         """查询文档入库状态。"""
 
         return self.document_repository.list_documents(
             doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
             status=status,
             page=page,
             page_size=page_size,
         )
 
-    def get_database_summary(self) -> dict[str, int]:
+    def get_database_summary(self, *, knowledge_base_id: str | None = None) -> dict[str, int]:
         """读取数据库中与文档管理相关的关键统计信息。"""
 
-        return self.document_repository.get_database_summary()
+        return self.document_repository.get_database_summary(knowledge_base_id=knowledge_base_id)
 
     def inspect_document_quality(self, doc_uid: str, *, sample_limit: int | None = None) -> dict:
         """汇总单篇文档的入库质检结果。"""
@@ -324,7 +347,13 @@ class IngestService:
             "applied_thresholds": quality_config,
         }
 
-    def list_document_quality_reports(self, *, doc_uids: list[str] | None = None, page_size: int = 200) -> dict:
+    def list_document_quality_reports(
+        self,
+        *,
+        doc_uids: list[str] | None = None,
+        knowledge_base_id: str | None = None,
+        page_size: int = 200,
+    ) -> dict:
         """批量读取文档入库质检结果。"""
 
         if doc_uids:
@@ -334,7 +363,13 @@ class IngestService:
             ]
             documents = [item for item in documents if item]
         else:
-            documents, _ = self.list_status(doc_uid=None, status=None, page=1, page_size=page_size)
+            documents, _ = self.list_status(
+                doc_uid=None,
+                knowledge_base_id=knowledge_base_id,
+                status=None,
+                page=1,
+                page_size=page_size,
+            )
 
         reports = [self.inspect_document_quality(str(document["doc_uid"])) for document in documents if document.get("doc_uid")]
         summary = {
@@ -345,10 +380,15 @@ class IngestService:
         }
         return {"reports": reports, "summary": summary}
 
-    def export_document_quality_reports_csv(self, *, doc_uids: list[str] | None = None) -> dict:
+    def export_document_quality_reports_csv(
+        self,
+        *,
+        doc_uids: list[str] | None = None,
+        knowledge_base_id: str | None = None,
+    ) -> dict:
         """导出批量入库质检结果 CSV。"""
 
-        batch_result = self.list_document_quality_reports(doc_uids=doc_uids)
+        batch_result = self.list_document_quality_reports(doc_uids=doc_uids, knowledge_base_id=knowledge_base_id)
         docs_dir = Path("Docs")
         docs_dir.mkdir(parents=True, exist_ok=True)
         file_path = docs_dir / f'document_ingest_quality_{utc_now_iso().replace(":", "").replace("-", "").replace("+", "_").replace("T", "_")}.csv'
@@ -407,6 +447,26 @@ class IngestService:
         """保存入库质检阈值配置。"""
 
         return self.quality_config_service.save_config(payload)
+
+    def list_knowledge_bases(self) -> list[dict]:
+        """列出知识库。"""
+
+        return self.knowledge_base_service.list_knowledge_bases()
+
+    def get_knowledge_base(self, knowledge_base_id: str | None) -> dict:
+        """读取知识库配置。"""
+
+        return self.knowledge_base_service.get_knowledge_base(knowledge_base_id)
+
+    def save_knowledge_base(self, payload: dict) -> dict:
+        """保存知识库配置。"""
+
+        return self.knowledge_base_service.save_knowledge_base(payload)
+
+    def delete_knowledge_base(self, knowledge_base_id: str) -> dict:
+        """删除知识库配置。"""
+
+        return self.knowledge_base_service.delete_knowledge_base(knowledge_base_id)
 
     def rebuild_documents(
         self,
@@ -467,6 +527,7 @@ class IngestService:
                 report("fulltext_index", "正在重建章节、分块与全文索引", 40, doc_uid=doc_uid)
                 chunk_items = self._save_document_and_chunks(
                     doc_uid=document["doc_uid"],
+                    knowledge_base_id=str(document.get("knowledge_base_id") or "default"),
                     doc_id=document["doc_id"],
                     doc_title=document["doc_title"],
                     edition=document.get("edition") or "default",
@@ -507,6 +568,7 @@ class IngestService:
         self,
         *,
         doc_uid: str,
+        knowledge_base_id: str,
         doc_id: str,
         doc_title: str,
         edition: str,
@@ -526,10 +588,11 @@ class IngestService:
             connection.execute(
                 """
                 INSERT INTO documents (
-                    doc_uid, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
+                    doc_uid, knowledge_base_id, doc_id, doc_title, edition, author, source_name, tags_json, source_path, source_hash,
                     ingest_status, index_status, error_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_uid) DO UPDATE SET
+                    knowledge_base_id = excluded.knowledge_base_id,
                     doc_id = excluded.doc_id,
                     doc_title = excluded.doc_title,
                     edition = excluded.edition,
@@ -545,6 +608,7 @@ class IngestService:
                 """,
                 (
                     doc_uid,
+                    knowledge_base_id,
                     doc_id,
                     doc_title,
                     edition,

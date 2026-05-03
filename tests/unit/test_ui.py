@@ -168,6 +168,7 @@ def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_pat
     assert dataframes
     assert dataframes[0].get("headers", [])[0] == "序号"
     assert dataframes[0].get("column_count", [])[0] == 9
+    assert "search-knowledge-base" in elem_ids
     assert "search-input-panel" in elem_ids
     assert "search-top-row" in elem_ids
     assert "search-result-workspace" in elem_ids
@@ -234,6 +235,7 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-followup-workspace" in elem_ids
     assert "quality-progress-panel" in elem_ids
     assert "quality-result-panel" in elem_ids
+    assert "quality-knowledge-base" in elem_ids
     assert "quality-claims-table" in elem_ids
     assert "quality-recent-table" in elem_ids
     assert "quality-history-panel" in elem_ids
@@ -278,6 +280,7 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "review-summary-row" in elem_ids
     assert "review-record-row" in elem_ids
     assert "review-evidence-row" in elem_ids
+    assert "review-knowledge-base" in elem_ids
     assert "review-focus-panel" in elem_ids
     assert "review-action-panel" in elem_ids
     assert "review-help-panel" in elem_ids
@@ -332,6 +335,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
     assert "settings-overview-panel" in elem_ids
     assert "settings-workspace-panel" in elem_ids
+    assert "settings-knowledge-base-panel" in elem_ids
     assert "settings-footer-panel" in elem_ids
     assert "settings-top-row" in elem_ids
     assert "settings-main-row" in elem_ids
@@ -346,16 +350,26 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-template-table" in elem_ids
     assert "settings-template-detail" in elem_ids
     assert "settings-template-form" in elem_ids
+    assert "settings-knowledge-base-table" in elem_ids
+    assert "settings-knowledge-base-detail" in elem_ids
+    assert "settings-knowledge-base-form" in elem_ids
+    assert "settings-knowledge-base-result" in elem_ids
+    assert "settings-knowledge-base-actions" in elem_ids
     assert "settings-export-row" in elem_ids
     assert "settings-export-result" in elem_ids
     assert "模板列表" in labels
     assert "模板 ID" in labels
     assert "模板名称" in labels
+    assert "知识库列表" in labels
+    assert "知识库 ID" in labels
+    assert "知识库名称" in labels
+    assert "设为默认" in labels
     assert "系统提示词" in labels
     assert "用户提示模板" in labels
     assert "我确认删除当前模板" in labels
     assert elem_ids.index("settings-overview-panel") < elem_ids.index("settings-workspace-panel")
-    assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-footer-panel")
+    assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-knowledge-base-panel")
+    assert elem_ids.index("settings-knowledge-base-panel") < elem_ids.index("settings-footer-panel")
     assert elem_ids.index("settings-top-row") < elem_ids.index("settings-main-row")
     assert elem_ids.index("settings-main-row") < elem_ids.index("settings-bottom-row")
     assert elem_ids.index("settings-help-panel") < elem_ids.index("settings-runtime-panel")
@@ -398,6 +412,7 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     }
 
     assert "document-current-panel" in elem_ids
+    assert "document-knowledge-base" in elem_ids
     assert "document-current-title" in elem_ids
     assert "document-quality-accordion" in elem_ids
     assert "document-quality-panel" in elem_ids
@@ -850,6 +865,140 @@ def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path:
     assert "第二条证据内容" in evidence_detail
 
 
+def test_settings_knowledge_base_refresh_should_return_all_selector_choices(tmp_path: Path) -> None:
+    """功能设置页知识库列表刷新后应返回完整选择项，而不是只保留首条。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    ingest_service = IngestService(settings)
+    ingest_service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_acceptance_7860",
+            "knowledge_base_name": "验收知识库7860",
+            "description": "7860端口联动验收用",
+        }
+    )
+
+    demo = create_ui_app(settings)
+    refresh_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "refresh_settings_knowledge_base_workspace_ui"
+    )
+
+    outputs = refresh_handler("default")
+    selector_update = outputs[0]
+
+    assert len(selector_update["choices"]) == 2
+    assert any(choice.startswith("default | ") for choice in selector_update["choices"])
+    assert any(choice.startswith("kb_acceptance_7860 | ") for choice in selector_update["choices"])
+    assert outputs[4] == "default"
+
+
+def test_save_knowledge_base_ui_should_refresh_all_page_dropdown_choices(tmp_path: Path) -> None:
+    """保存知识库后，四个页面顶部下拉都应同步拿到新知识库选项。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    save_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "save_settings_knowledge_base_ui"
+    )
+
+    outputs = save_handler(
+        "",
+        "kb_sync_acceptance",
+        "联动验收知识库",
+        "用于验证四个页面顶部下拉联动",
+        "active",
+        False,
+    )
+
+    settings_selector_update = outputs[0]
+    document_selector_update = outputs[12]
+    search_selector_update = outputs[13]
+    quality_selector_update = outputs[14]
+    review_selector_update = outputs[15]
+
+    for selector_update in (
+        settings_selector_update,
+        document_selector_update,
+        search_selector_update,
+        quality_selector_update,
+        review_selector_update,
+    ):
+        assert any(choice.startswith("default | ") for choice in selector_update["choices"])
+        assert any(choice.startswith("kb_sync_acceptance | ") for choice in selector_update["choices"])
+
+    assert document_selector_update["value"].startswith("kb_sync_acceptance | ")
+    assert search_selector_update["value"].startswith("kb_sync_acceptance | ")
+    assert quality_selector_update["value"].startswith("kb_sync_acceptance | ")
+    assert review_selector_update["value"].startswith("kb_sync_acceptance | ")
+
+
+def test_change_quality_knowledge_base_ui_should_sync_all_page_dropdown_values(tmp_path: Path) -> None:
+    """切换 AI 质检页知识库后，四个页面顶部下拉都应同步当前值。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    ingest_service = IngestService(settings)
+    ingest_service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_sync_runtime",
+            "knowledge_base_name": "运行时联动知识库",
+            "description": "验证页面切换时同步当前值",
+        }
+    )
+
+    demo = create_ui_app(settings)
+    change_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "change_quality_knowledge_base_ui"
+    )
+
+    outputs = change_handler("kb_sync_runtime | 运行时联动知识库")
+
+    document_selector_update = outputs[0]
+    search_selector_update = outputs[1]
+    quality_selector_update = outputs[2]
+    review_selector_update = outputs[3]
+
+    for selector_update in (
+        document_selector_update,
+        search_selector_update,
+        quality_selector_update,
+        review_selector_update,
+    ):
+        assert selector_update["value"].startswith("kb_sync_runtime | ")
+        assert any(choice.startswith("default | ") for choice in selector_update["choices"])
+        assert any(choice.startswith("kb_sync_runtime | ") for choice in selector_update["choices"])
+
+
 def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: Path) -> None:
     """点击最近质检记录时应回放对应那次质检结果。"""
 
@@ -1022,7 +1171,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     )
     event = gr.SelectData(None, {"index": [1, 0], "value": "chkres_b"})
 
-    current_page_rows = [["11", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20-00", "第一条输入"], ["12", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20-00", "第一条输入"]]
+    current_page_rows = [["11", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20:00", "第一条输入"], ["12", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20:00", "第一条输入"]]
     (
         progress_html,
         result_html,
@@ -1136,7 +1285,7 @@ def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path:
     )
     candidate_rows = pd.DataFrame(
         [
-            ["claim_review_a", "第一条 Claim", "已支持", "低级", "已通过", "文档一", "模板一", "26-05-01 20-00"],
+            ["claim_review_a", "第一条 Claim", "已支持", "低级", "已通过", "文档一", "模板一", "26-05-01 20:00"],
             ["claim_review_b", "第二条 Claim", "需复核", "中级", "待处理", "文档二", "模板二", "26-05-01 21-00"],
         ],
         columns=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
@@ -1328,8 +1477,8 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
     assert "第 1 / 1 页" in processed_page_info
     assert "第 1 / 1 页" in review_evidence_page_info
     assert "第 1 / 1 页" in review_history_page_info
-    assert pending_rows == [["1", "claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "26-05-01 20-00"]]
-    assert processed_rows == [["1", "claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "26-05-01 22-00"]]
+    assert pending_rows == [["1", "claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "26-05-01 20:00"]]
+    assert processed_rows == [["1", "claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "26-05-01 22:00"]]
     assert review_candidate_state == review_candidates
     assert selected_claim_id == "claim_pending_high"
     assert "claim_pending_high" in review_claim_detail_map
@@ -1339,7 +1488,7 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
     assert "高风险证据" in review_evidence_detail_html
     assert review_action_value == "通过"
     assert review_note_value == ""
-    assert review_history_rows == [["1", "rev_processed_high", "claim_processed_high", "通过", "已通过", "ui_user", "26-05-01 22-10", "已通过", "高风险已处理 Claim"]]
+    assert review_history_rows == [["1", "rev_processed_high", "claim_processed_high", "通过", "已通过", "ui_user", "26-05-01 22:10", "已通过", "高风险已处理 Claim"]]
     assert review_history_state == review_items
     assert selected_review_id == ""
     assert "未选择审核记录" in review_record_detail_html
@@ -1454,7 +1603,7 @@ def test_submit_review_then_switch_to_processed_scope_should_show_latest_record(
         "已通过",
         "文档一",
         "模板一",
-        "26-05-01 20-00",
+        "26-05-01 20:00",
     ]]
     assert selected_claim_id == "claim_submit_review_demo"
     assert "claim_submit_review_demo" in review_claim_detail_map

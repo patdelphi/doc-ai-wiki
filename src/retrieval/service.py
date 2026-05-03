@@ -27,13 +27,33 @@ class RetrievalService:
 
         self.reranker = reranker
 
-    def fulltext_search(self, query: str, top_k: int = 10, doc_uid: str | None = None) -> list[dict]:
+    def fulltext_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+    ) -> list[dict]:
         """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
 
         doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
+        knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
         like_doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
-        params: tuple = (query, top_k) if not doc_uid else (query, doc_uid, top_k)
-        like_params: tuple = (f"%{query}%", top_k) if not doc_uid else (f"%{query}%", doc_uid, top_k)
+        like_knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
+        params_list: list = [query]
+        if doc_uid:
+            params_list.append(doc_uid)
+        if knowledge_base_id:
+            params_list.append(knowledge_base_id)
+        params_list.append(top_k)
+        params = tuple(params_list)
+        like_params_list: list = [f"%{query}%"]
+        if doc_uid:
+            like_params_list.append(doc_uid)
+        if knowledge_base_id:
+            like_params_list.append(knowledge_base_id)
+        like_params_list.append(top_k)
+        like_params = tuple(like_params_list)
 
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
@@ -44,6 +64,7 @@ class RetrievalService:
                 JOIN documents d ON d.doc_uid = c.doc_uid
                 WHERE chunk_fts MATCH ?
                 {doc_uid_filter}
+                {knowledge_base_filter}
                 LIMIT ?
                 """,
                 params,
@@ -56,6 +77,7 @@ class RetrievalService:
                     JOIN documents d ON d.doc_uid = c.doc_uid
                     WHERE content LIKE ?
                     {like_doc_uid_filter}
+                    {like_knowledge_base_filter}
                     ORDER BY c.updated_at DESC
                     LIMIT ?
                     """,
@@ -63,19 +85,30 @@ class RetrievalService:
                 ).fetchall()
         return [self._with_source(self._normalize_metadata_fields(dict(row)), "fulltext") for row in rows]
 
-    def vector_search(self, query: str, top_k: int = 10, doc_uid: str | None = None) -> list[dict]:
+    def vector_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+    ) -> list[dict]:
         """当前阶段先以简单相似替代向量检索占位。"""
 
         if self.vector_store is None:
             return []
         items = self.vector_store.query(query, top_k=top_k, doc_uid=doc_uid)
-        return self._attach_document_metadata(items, retrieval_source="vector")
+        return self._attach_document_metadata(
+            items,
+            retrieval_source="vector",
+            knowledge_base_id=knowledge_base_id,
+        )
 
     def hybrid_search(
         self,
         query: str,
         top_k: int = 10,
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         *,
         fulltext_top_k: int | None = None,
         vector_top_k: int | None = None,
@@ -84,12 +117,22 @@ class RetrievalService:
         """合并全文与向量检索结果，并按 chunk_id 去重。"""
 
         merged: dict[str, dict] = {}
-        for item in self.fulltext_search(query, top_k=fulltext_top_k or top_k, doc_uid=doc_uid):
+        for item in self.fulltext_search(
+            query,
+            top_k=fulltext_top_k or top_k,
+            doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
+        ):
             merged[item["chunk_id"]] = {
                 **item,
                 "matched_sources": ["fulltext"],
             }
-        for item in self.vector_search(query, top_k=vector_top_k or top_k, doc_uid=doc_uid):
+        for item in self.vector_search(
+            query,
+            top_k=vector_top_k or top_k,
+            doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
+        ):
             existing = merged.get(item["chunk_id"])
             if existing:
                 matched_sources = set(existing.get("matched_sources", []))
@@ -243,7 +286,13 @@ class RetrievalService:
             item.get("retrieval_source", ""),
         )
 
-    def _attach_document_metadata(self, items: list[dict], *, retrieval_source: str) -> list[dict]:
+    def _attach_document_metadata(
+        self,
+        items: list[dict],
+        *,
+        retrieval_source: str,
+        knowledge_base_id: str | None = None,
+    ) -> list[dict]:
         """为检索结果补全文档元数据与来源字段。"""
 
         if not items:
@@ -253,19 +302,29 @@ class RetrievalService:
         metadata_map: dict[str, dict] = {}
         with create_connection(self.database_path) as connection:
             placeholders = ",".join("?" for _ in doc_uids)
+            knowledge_base_filter = " AND knowledge_base_id = ?" if knowledge_base_id else ""
+            params: tuple = (
+                (*doc_uids, knowledge_base_id) if knowledge_base_id else tuple(doc_uids)
+            )
             rows = connection.execute(
                 f"""
-                SELECT doc_uid, doc_title, author, source_name, tags_json
+                SELECT doc_uid, knowledge_base_id, doc_title, author, source_name, tags_json
                 FROM documents
                 WHERE doc_uid IN ({placeholders})
+                {knowledge_base_filter}
                 """,
-                tuple(doc_uids),
+                params,
             ).fetchall()
             metadata_map = {
                 row["doc_uid"]: self._normalize_metadata_fields(dict(row))
                 for row in rows
             }
 
+        filtered_items = [
+            item
+            for item in items
+            if item.get("doc_uid") in metadata_map
+        ]
         return [
             self._with_source(
                 {
@@ -274,7 +333,7 @@ class RetrievalService:
                 },
                 retrieval_source,
             )
-            for item in items
+            for item in filtered_items
         ]
 
     @staticmethod

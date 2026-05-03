@@ -123,12 +123,18 @@ class QualityService:
         self,
         input_text: str,
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         template_id: str | None = None,
     ) -> dict:
         """执行最小 claim 质检。"""
 
         final_result: dict | None = None
-        for event in self.run_check_stream(input_text, doc_uid=doc_uid, template_id=template_id):
+        for event in self.run_check_stream(
+            input_text,
+            doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
+            template_id=template_id,
+        ):
             if event.get("type") == "result":
                 final_result = event.get("result")
         return final_result or {"check": {}, "claims": [], "rule_hits": []}
@@ -137,6 +143,7 @@ class QualityService:
         self,
         input_text: str,
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         template_id: str | None = None,
     ) -> Iterator[dict]:
         """流式执行质检，逐步返回进度事件和最终结果。"""
@@ -208,6 +215,7 @@ class QualityService:
             evidence_list = self._retrieve_evidence_candidates(
                 claim_text=claim_text,
                 doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
                 retrieval_policy=retrieval_policy,
             )
 
@@ -313,6 +321,7 @@ class QualityService:
         result = {
             "check": {
                 "check_id": check_id,
+                "knowledge_base_id": knowledge_base_id or "default",
                 "input_text": input_text,
                 "template_id": selected_template["template_id"],
                 "template_name": selected_template["template_name"],
@@ -387,16 +396,17 @@ class QualityService:
 
         return self.repository.get_quality_result(check_id)
 
-    def list_recent_results(self, limit: int = 10) -> list[dict]:
+    def list_recent_results(self, limit: int = 10, *, knowledge_base_id: str | None = None) -> list[dict]:
         """读取最近质检结果。"""
 
-        return self.repository.list_recent_quality_results(limit=limit)
+        return self.repository.list_recent_quality_results(limit=limit, knowledge_base_id=knowledge_base_id)
 
     def run_evaluation_suite(
         self,
         cases: list[dict],
         *,
         doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
         template_id: str | None = None,
     ) -> dict:
         """批量执行 AI 质检效果评测，并输出汇总指标。"""
@@ -413,7 +423,12 @@ class QualityService:
                     details={"case_index": index, "case_id": case.get("case_id")},
                 )
 
-            result = self.run_check(input_text, doc_uid=doc_uid, template_id=template_id)
+            result = self.run_check(
+                input_text,
+                doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
+                template_id=template_id,
+            )
             check = result.get("check", {})
             claims = result.get("claims", [])
 
@@ -647,7 +662,14 @@ class QualityService:
             "reason": str(llm_result.get("reason") or heuristic.get("reason") or ""),
         }
 
-    def _retrieve_evidence_candidates(self, *, claim_text: str, doc_uid: str | None, retrieval_policy: dict) -> list[dict]:
+    def _retrieve_evidence_candidates(
+        self,
+        *,
+        claim_text: str,
+        doc_uid: str | None,
+        knowledge_base_id: str | None,
+        retrieval_policy: dict,
+    ) -> list[dict]:
         """围绕原始 claim 和放宽后的逻辑查询召回支持证据与潜在反证。"""
 
         query_specs = self._build_retrieval_queries(claim_text)
@@ -660,6 +682,7 @@ class QualityService:
                 query_spec["query"],
                 top_k=per_query_limit,
                 doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
                 fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit + 1),
                 vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit + 1),
                 use_rerank=retrieval_policy["use_rerank"],

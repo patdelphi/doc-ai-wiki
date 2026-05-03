@@ -9,6 +9,7 @@ from src.db.schema import SCHEMA_SQL
 
 
 DOCUMENT_METADATA_COLUMNS = {
+    "knowledge_base_id": "TEXT NOT NULL DEFAULT 'default'",
     "author": "TEXT",
     "source_name": "TEXT",
     "tags_json": "TEXT",
@@ -19,6 +20,7 @@ QUALITY_CLAIM_COLUMNS = {
 }
 
 QUALITY_CHECK_COLUMNS = {
+    "knowledge_base_id": "TEXT NOT NULL DEFAULT 'default'",
     "template_id": "TEXT",
     "template_name": "TEXT",
 }
@@ -38,46 +40,89 @@ def initialize_database(database_path: Path) -> None:
 
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with create_connection(database_path) as connection:
+        # 兼容旧库：先补齐会被 schema 中索引立即引用的关键列，避免 executescript 提前失败。
+        _preflight_legacy_columns(connection)
         connection.executescript(SCHEMA_SQL)
+        _ensure_default_knowledge_base(connection)
         _ensure_document_columns(connection)
         _ensure_quality_check_columns(connection)
         _ensure_quality_claim_columns(connection)
+        _backfill_knowledge_base_columns(connection)
+
+
+def _preflight_legacy_columns(connection: sqlite3.Connection) -> None:
+    """在执行完整 schema 前，先为旧表补齐关键列。"""
+
+    _ensure_table_columns(connection, "documents", {"knowledge_base_id": DOCUMENT_METADATA_COLUMNS["knowledge_base_id"]})
+    _ensure_table_columns(connection, "quality_checks", {"knowledge_base_id": QUALITY_CHECK_COLUMNS["knowledge_base_id"]})
+
+
+def _ensure_default_knowledge_base(connection: sqlite3.Connection) -> None:
+    """确保默认知识库存在，兼容历史单知识库数据。"""
+
+    connection.execute(
+        """
+        INSERT INTO knowledge_bases (
+            knowledge_base_id, knowledge_base_name, description, status, is_default, created_at, updated_at
+        )
+        SELECT 'default', '默认知识库', '历史数据兼容用默认知识库', 'active', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        WHERE NOT EXISTS (
+            SELECT 1 FROM knowledge_bases WHERE knowledge_base_id = 'default'
+        )
+        """
+    )
 
 
 def _ensure_document_columns(connection: sqlite3.Connection) -> None:
     """为历史数据库补齐新增的文档元数据列。"""
 
-    rows = connection.execute("PRAGMA table_info(documents)").fetchall()
-    existing_columns = {row["name"] for row in rows}
-    for column_name, column_type in DOCUMENT_METADATA_COLUMNS.items():
-        if column_name in existing_columns:
-            continue
-        connection.execute(f"ALTER TABLE documents ADD COLUMN {column_name} {column_type}")
+    _ensure_table_columns(connection, "documents", DOCUMENT_METADATA_COLUMNS)
 
 
 def _ensure_quality_check_columns(connection: sqlite3.Connection) -> None:
     """为历史数据库补齐新增的质检主表字段。"""
 
-    rows = connection.execute("PRAGMA table_info(quality_checks)").fetchall()
-    if not rows:
-        return
-
-    existing_columns = {row["name"] for row in rows}
-    for column_name, column_type in QUALITY_CHECK_COLUMNS.items():
-        if column_name in existing_columns:
-            continue
-        connection.execute(f"ALTER TABLE quality_checks ADD COLUMN {column_name} {column_type}")
+    _ensure_table_columns(connection, "quality_checks", QUALITY_CHECK_COLUMNS)
 
 
 def _ensure_quality_claim_columns(connection: sqlite3.Connection) -> None:
     """为历史数据库补齐新增的质检 claim 字段。"""
 
-    rows = connection.execute("PRAGMA table_info(quality_claims)").fetchall()
+    _ensure_table_columns(connection, "quality_claims", QUALITY_CLAIM_COLUMNS)
+
+
+def _ensure_table_columns(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_definitions: dict[str, str],
+) -> None:
+    """为指定表补齐缺失列；若表不存在则跳过。"""
+
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
     if not rows:
         return
 
     existing_columns = {row["name"] for row in rows}
-    for column_name, column_type in QUALITY_CLAIM_COLUMNS.items():
+    for column_name, column_type in column_definitions.items():
         if column_name in existing_columns:
             continue
-        connection.execute(f"ALTER TABLE quality_claims ADD COLUMN {column_name} {column_type}")
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _backfill_knowledge_base_columns(connection: sqlite3.Connection) -> None:
+    """为历史数据回填默认知识库归属。"""
+
+    connection.execute(
+        """
+        UPDATE documents
+        SET knowledge_base_id = 'default'
+        WHERE knowledge_base_id IS NULL OR TRIM(knowledge_base_id) = ''
+        """
+    )
+    connection.execute(
+        """
+        UPDATE quality_checks
+        SET knowledge_base_id = 'default'
+        WHERE knowledge_base_id IS NULL OR TRIM(knowledge_base_id) = ''
+        """
+    )

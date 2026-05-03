@@ -9,21 +9,26 @@ from pathlib import Path
 CN_TIMEZONE = timezone(timedelta(hours=8))
 
 
-def scan_input_documents(input_root: Path) -> list[dict]:
+def scan_input_documents(input_root: Path, knowledge_base_id: str | None = None) -> list[dict]:
     """扫描知识库输入目录，返回可注册的文档列表。"""
 
     if not input_root.exists():
         return []
 
     resolved_root = input_root.resolve()
+    normalized_knowledge_base_id = str(knowledge_base_id or "").strip()
+    scan_root = resolved_root / normalized_knowledge_base_id if normalized_knowledge_base_id else resolved_root
+    if not scan_root.exists():
+        return []
     items: list[dict] = []
-    for file_path in sorted(resolved_root.rglob("*")):
+    for file_path in sorted(scan_root.rglob("*")):
         if not file_path.is_file():
             continue
         if file_path.suffix.lower() not in {".md", ".json"}:
             continue
         items.append(
             {
+                "knowledge_base_id": normalized_knowledge_base_id or "default",
                 "file_name": file_path.name,
                 "file_path": str(file_path),
                 "file_type": file_path.suffix.lower().lstrip("."),
@@ -64,6 +69,29 @@ def build_template_choices(templates: list[dict]) -> list[str]:
     return [f'{item["template_id"]} | {item.get("template_name", "")}' for item in templates if item.get("template_id")]
 
 
+def build_knowledge_base_choices(knowledge_bases: list[dict]) -> list[str]:
+    """构建知识库下拉选项。"""
+
+    return [build_knowledge_base_choice(item) for item in knowledge_bases if item.get("knowledge_base_id")]
+
+
+def build_knowledge_base_choice(knowledge_base: dict) -> str:
+    """构建单个知识库选项。"""
+
+    return (
+        f'{knowledge_base.get("knowledge_base_id", "")} | '
+        f'{knowledge_base.get("knowledge_base_name", "")}'
+    )
+
+
+def parse_knowledge_base_choice(choice: str) -> str:
+    """从知识库选项中解析知识库标识。"""
+
+    if not choice:
+        return ""
+    return choice.split(" | ", maxsplit=1)[0].strip()
+
+
 def build_settings_template_rows(templates: list[dict]) -> list[list[str]]:
     """将模板列表转换为设置页表格行。"""
 
@@ -77,6 +105,21 @@ def build_settings_template_rows(templates: list[dict]) -> list[list[str]]:
             "是" if item.get("deletable", True) else "否",
         ]
         for item in templates
+    ]
+
+
+def build_settings_knowledge_base_rows(knowledge_bases: list[dict]) -> list[list[str]]:
+    """将知识库列表转换为设置页表格行。"""
+
+    return [
+        [
+            _display_text(item.get("knowledge_base_id")),
+            _display_text(item.get("knowledge_base_name")),
+            _display_text(item.get("description")),
+            "是" if item.get("is_default") else "否",
+            _display_text(item.get("status")),
+        ]
+        for item in knowledge_bases
     ]
 
 
@@ -305,6 +348,54 @@ def format_settings_runtime_markdown(runtime_config: dict | None) -> str:
             f'- 重排：{_display_text(resolved.get("rerank_provider"))} / 启用={_display_text(resolved.get("rerank_enabled"))}',
             f'- 最大输入长度：{_display_text(resolved.get("max_input_chars"))}',
             f'- 审核候选抓取上限：{_display_text(resolved.get("review_candidate_limit"))}',
+        ]
+    )
+
+
+def format_settings_knowledge_base_detail_html(knowledge_base: dict | None) -> str:
+    """构建设置页知识库详情面板。"""
+
+    resolved = knowledge_base or {}
+    if not resolved.get("knowledge_base_id"):
+        return _build_panel_html(
+            title="知识库详情",
+            description="请选择知识库或新建知识库。",
+            cards=[("当前状态", "未选择知识库")],
+            notes=["知识库会决定 Input 二级目录、文档归属、检索范围和 AI 质检范围。"],
+            tone="neutral",
+        )
+
+    return _build_panel_html(
+        title="知识库详情",
+        description=_display_text(resolved.get("description")),
+        cards=[
+            ("知识库 ID", _display_text(resolved.get("knowledge_base_id"))),
+            ("知识库名称", _display_text(resolved.get("knowledge_base_name"))),
+            ("默认知识库", "是" if resolved.get("is_default") else "否"),
+            ("状态", _display_text(resolved.get("status"))),
+        ],
+        notes=[
+            "Input 目录会按该知识库 ID 建立二级目录。",
+            "删除知识库前，必须先确保没有归属文档。",
+        ],
+        tone="neutral",
+    )
+
+
+def format_settings_knowledge_base_detail_markdown(knowledge_base: dict | None) -> str:
+    """将知识库详情转换为 Markdown。"""
+
+    resolved = knowledge_base or {}
+    if not resolved.get("knowledge_base_id"):
+        return "### 知识库详情\n- 当前状态：未选择知识库"
+    return "\n".join(
+        [
+            "### 知识库详情",
+            f'- 知识库 ID：{_display_text(resolved.get("knowledge_base_id"))}',
+            f'- 知识库名称：{_display_text(resolved.get("knowledge_base_name"))}',
+            f'- 默认知识库：{"是" if resolved.get("is_default") else "否"}',
+            f'- 状态：{_display_text(resolved.get("status"))}',
+            f'- 说明：{_display_text(resolved.get("description"))}',
         ]
     )
 
@@ -1614,6 +1705,7 @@ def _build_document_row(input_document: dict | None, status_item: dict | None) -
         or Path(file_name).stem
     )
     return {
+        "knowledge_base_id": (input_document or {}).get("knowledge_base_id") or (status_item or {}).get("knowledge_base_id") or "default",
         "source_path": source_path,
         "file_name": file_name,
         "doc_title": doc_title,
@@ -2441,7 +2533,7 @@ def _format_display_datetime(value: object) -> str:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     localized = parsed.astimezone(CN_TIMEZONE)
-    return localized.strftime("%y-%m-%d %H-%M")
+    return localized.strftime("%y-%m-%d %H:%M")
 
 
 def _format_score(value: object) -> str:

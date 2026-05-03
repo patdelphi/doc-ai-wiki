@@ -160,10 +160,10 @@ def test_recent_quality_helpers_should_build_reviewable_choices() -> None:
 
 
 def test_format_display_datetime_should_use_east_eight_and_friendly_pattern() -> None:
-    """时间展示应统一转为东八区并使用 yy-mm-dd hh-mm。"""
+    """时间展示应统一转为东八区并使用 yy-mm-dd hh:mm。"""
 
-    assert _format_display_datetime("2026-04-30T12:00:00Z") == "26-04-30 20-00"
-    assert _format_display_datetime("2026-05-01T12:00:00+00:00") == "26-05-01 20-00"
+    assert _format_display_datetime("2026-04-30T12:00:00Z") == "26-04-30 20:00"
+    assert _format_display_datetime("2026-05-01T12:00:00+00:00") == "26-05-01 20:00"
     assert _format_display_datetime("") == "-"
 
 

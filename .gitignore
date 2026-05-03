@@ -4,6 +4,4 @@ __pycache__/
 *.pyc
 **/__pycache__/
 .env
-chat_history.md
-todo.md
 .trae_ui_*.log
