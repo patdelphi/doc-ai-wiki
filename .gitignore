@@ -3,10 +3,6 @@ __pycache__/
 .coverage
 *.pyc
 **/__pycache__/
-index/*.db
-index/chroma/
-index/Docs/
-index/test_*.db
 .env
 chat_history.md
 todo.md
