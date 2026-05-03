@@ -64,6 +64,18 @@ def test_app_metadata_should_expose_current_version(tmp_path: Path) -> None:
     assert app.version == "0.5"
 
 
+def test_gradio_startup_scripts_should_only_launch_ui_entry() -> None:
+    """Gradio 启动脚本应仅调用 UI 启动入口。"""
+
+    script_paths = [Path("start_gradio.ps1"), Path("start_gradio.sh")]
+
+    for script_path in script_paths:
+        assert script_path.exists() is True
+        script_content = script_path.read_text(encoding="utf-8")
+        assert "src.ui.app" in script_content
+        assert "src.app" not in script_content
+
+
 def test_register_document_and_query_status_should_work(tmp_path: Path) -> None:
     """文档注册后应可查询状态。"""
 

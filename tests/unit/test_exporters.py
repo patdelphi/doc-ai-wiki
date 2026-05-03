@@ -53,11 +53,8 @@ def test_build_download_url_should_return_gradio_file_url(tmp_path: Path) -> Non
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text("ok", encoding="utf-8")
 
-    download_url = build_download_url(
-        file_path=file_path,
-        request_host="127.0.0.1",
-        request_port=7860,
-    )
+    download_url = build_download_url(file_path=file_path)
 
-    assert download_url.startswith("http://127.0.0.1:7860/gradio_api/file=")
+    assert download_url.startswith("/gradio_api/file=")
+    assert "127.0.0.1" not in download_url
     assert "result.txt" in download_url

@@ -58,15 +58,12 @@ def resolve_export_docs_dir(base_path: str | Path) -> Path:
 def build_download_url(
     *,
     file_path: str | Path,
-    request_host: str = "127.0.0.1",
-    request_port: int = 7860,
 ) -> str:
-    """根据导出文件路径构造 Gradio 可访问的下载 URL。"""
+    """根据导出文件路径构造 Gradio 可访问的相对下载 URL。"""
 
     resolved_path = Path(file_path).resolve()
-    resolved_host = "127.0.0.1" if str(request_host or "").strip() in {"", "0.0.0.0"} else str(request_host)
     encoded_path = quote(str(resolved_path).replace("\\", "/"), safe="/:")
-    return f"http://{resolved_host}:{request_port}/gradio_api/file={encoded_path}"
+    return f"/gradio_api/file={encoded_path}"
 
 
 def _sanitize_file_name_part(value: str) -> str:

@@ -1456,8 +1456,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     "message": f'已生成下载文件：{export_result["file_name"]}',
                     "download_url": build_download_url(
                         file_path=export_result["file_path"],
-                        request_host=str(settings_runtime_payload.get("app_host") or "127.0.0.1"),
-                        request_port=int(settings_runtime_payload.get("gradio_port") or 7860),
                     ),
                     "download_file_name": export_result["file_name"],
                 },
