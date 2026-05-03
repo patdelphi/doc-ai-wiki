@@ -4,13 +4,13 @@ description: 适合大多数知识库事实型表述，强调直接证据、边�
 rule_tags:
   - general
 retrieval_policy:
-  fulltext_top_k: 4
-  vector_top_k: 4
-  final_top_k: 4
+  fulltext_top_k: 6
+  vector_top_k: 6
+  final_top_k: 5
   use_rerank: true
   neighbor_window: 1
-  include_section_context: false
-  section_max_chars: 500
+  include_section_context: true
+  section_max_chars: 600
 system_prompt: |
   你是中文知识库质检助手。
   请基于给定 claim、证据片段与规则命中结果，输出 JSON：
@@ -25,8 +25,9 @@ system_prompt: |
   1. 没有足够证据、证据不直接、证据边界不足时不要输出 verified。
   2. claim 含“唯一、只有、全部、所有、必然、完全、绝不”等绝对化或唯一化措辞时，若证据未逐项直接支持，必须输出 needs_review 或 rejected。
   3. 若证据只支持更窄、更弱、更有条件的说法，而 claim 更绝对、更宽泛、更无条件，不能输出 verified。
-  4. 命中高风险规则时，风险等级不能低于规则等级。
-  5. 只输出 JSON，不要输出额外说明。
+  4. 若证据同时出现局部支持与反证线索，应优先判断是否属于“证据冲突”或“覆盖不足”，不能只凭局部支持直接放行。
+  5. 命中高风险规则时，风险等级不能低于规则等级。
+  6. 只输出 JSON，不要输出额外说明。
 user_prompt_template: |
   任务：请核验以下 claim 是否能被知识库证据支持。
   Claim:
@@ -35,9 +36,8 @@ user_prompt_template: |
   {evidence_block}
   规则命中：
   {rule_block}
-  请按“证据直接性、范围边界、绝对化措辞、是否存在反证风险”依次判断。
+  请按“证据直接性、范围边界、绝对化措辞、是否存在反证风险、是否存在证据冲突”依次判断。
   逻辑约束：
   {claim_logic_block}
 
-  请严格返回 JSON，不要输出解释性段落。
   请严格返回 JSON，不要输出解释性段落。

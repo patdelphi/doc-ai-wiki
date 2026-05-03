@@ -45,7 +45,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         logger.info("数据库初始化完成")
         yield
 
-    app = FastAPI(title="中文知识库系统 MVP", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="中文知识库系统 MVP", version="0.5", lifespan=lifespan)
     embedding_client = build_embedding_client(settings)
     llm_client = build_llm_client(settings)
     reranker = build_reranker(settings)

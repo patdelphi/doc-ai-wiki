@@ -24,8 +24,9 @@ DEFAULT_SYSTEM_PROMPT = """你是中文知识库质检助手。
 1. 先判断证据对 claim 是 support、contradict 还是 insufficient，再给 verdict。
 2. 没有足够证据时不要输出 verified；存在反证时优先输出 rejected。
 3. 若 claim 含唯一化、绝对化、全称化、否定化限制，必须核对这些限制本身是否被证据直接支持。
-4. 命中高风险规则时，风险等级不能低于规则等级。
-5. 只输出 JSON，不要输出额外说明。"""
+4. 若证据同时存在支持与矛盾线索，优先判断是否已形成“证据冲突”或“覆盖不足”，不要只凭局部支持就输出 verified。
+5. 命中高风险规则时，风险等级不能低于规则等级。
+6. 只输出 JSON，不要输出额外说明。"""
 
 DEFAULT_USER_PROMPT_TEMPLATE = """任务：请核验以下 claim 是否能被知识库证据支持。
 
@@ -273,6 +274,8 @@ def _build_quality_prompts(
         (
             f'- 文档: {item.get("doc_uid")} | 位置: {item.get("source_span")} | '
             f'查询来源: {"/".join(item.get("matched_queries", [])) or "-"} | '
+            f'证据关系: {item.get("evidence_relation") or "-"} | '
+            f'关系说明: {item.get("relation_reason") or "-"} | '
             f'内容: {str(item.get("expanded_content") or item.get("content") or "")[:400]}'
         )
         for item in evidence_list

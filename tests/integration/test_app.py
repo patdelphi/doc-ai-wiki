@@ -55,6 +55,15 @@ def test_health_endpoint_should_return_ok(tmp_path: Path) -> None:
     assert payload["data"]["status"] == "healthy"
 
 
+def test_app_metadata_should_expose_current_version(tmp_path: Path) -> None:
+    """应用元数据应暴露当前项目版本。"""
+
+    app = create_app(build_test_settings(tmp_path))
+
+    assert app.title == "中文知识库系统 MVP"
+    assert app.version == "0.5"
+
+
 def test_register_document_and_query_status_should_work(tmp_path: Path) -> None:
     """文档注册后应可查询状态。"""
 

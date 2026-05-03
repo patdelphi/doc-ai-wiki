@@ -2,8 +2,12 @@ __pycache__/
 .pytest_cache/
 .coverage
 *.pyc
+**/__pycache__/
 index/*.db
 index/chroma/
+index/Docs/
 index/test_*.db
 .env
-Input/
+chat_history.md
+todo.md
+.trae_ui_*.log

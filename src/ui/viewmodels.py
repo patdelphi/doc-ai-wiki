@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
+
+CN_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def scan_input_documents(input_root: Path) -> list[dict]:
@@ -125,7 +128,7 @@ def format_search_help_html() -> str:
 
     return _build_panel_html(
         title="功能说明",
-        description="文档检索用于在当前知识库中查找相关内容，结果来自全文召回、向量召回和重排的综合排序。",
+        description="知识库检索用于在当前知识库中查找相关内容，结果来自全文召回、向量召回和重排的综合排序。",
         cards=[
             ("支持输入", "支持关键词、短语、整句和多组关键词"),
             ("匹配方式", "混合召回，偏模糊，不是严格逐字匹配"),
@@ -147,7 +150,7 @@ def format_document_management_help_html() -> str:
 
     return _build_panel_html(
         title="功能说明",
-        description="文档管理用于查看输入文档、执行入库与重建，并检查数据库和索引状态。",
+        description="知识库管理用于查看输入文档、执行入库与重建，并检查数据库和索引状态。",
         cards=[
             ("先看哪里", "先看文档概览、数据库状态和现有文档列表"),
             ("常用操作", "刷新列表、注册当前文档、注册全部待处理、重建索引"),
@@ -1622,7 +1625,7 @@ def _build_document_row(input_document: dict | None, status_item: dict | None) -
         "registered_label": "是" if is_registered else "否",
         "registered_sort": 0 if is_registered else 1,
         "source_exists": source_exists,
-        "ingested_at": str((status_item or {}).get("created_at") or "-"),
+        "ingested_at": _format_display_datetime((status_item or {}).get("created_at")),
         "ingest_status": str((status_item or {}).get("ingest_status") or "not_registered"),
         "index_status": index_status,
         "needs_rebuild": needs_rebuild,
@@ -1727,9 +1730,8 @@ def format_quality_result_markdown(formatted: dict | None) -> str:
 def format_quality_export_markdown(
     formatted: dict | None,
     claim_detail: dict | None,
-    evidence_detail: dict | None,
 ) -> str:
-    """汇总 AI 质检摘要、Claim 列表和当前详情，用于导出。"""
+    """汇总 AI 质检摘要、Claim 列表和当前 Claim 的完整详情，用于导出。"""
 
     sections = [format_quality_result_markdown(formatted), "", "#### Claim 列表"]
     claim_rows = build_quality_claim_rows(formatted)
@@ -1746,10 +1748,30 @@ def format_quality_export_markdown(
         [
             "",
             format_claim_detail_markdown(claim_detail),
-            "",
-            format_evidence_detail_markdown(evidence_detail),
         ]
     )
+    evidence_rows = build_claim_evidence_rows(claim_detail)
+    sections.extend(["", "#### 当前 Claim 证据列表"])
+    if evidence_rows:
+        sections.append(
+            _build_markdown_table(
+                ["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                evidence_rows,
+            )
+        )
+    else:
+        sections.append("- 当前 Claim 暂无证据条目")
+    evidence_items = (claim_detail or {}).get("evidence_table") or []
+    if evidence_items:
+        sections.extend(["", "#### 当前 Claim 完整证据详情"])
+        for index, evidence_item in enumerate(evidence_items, start=1):
+            sections.extend(
+                [
+                    "",
+                    f"##### 证据 {index}",
+                    format_evidence_detail_markdown(evidence_item),
+                ]
+            )
     return "\n".join(sections)
 
 
@@ -1773,6 +1795,37 @@ def format_quality_result_html(formatted: dict | None) -> str:
         ],
         notes=["下方展示 Claim 列表、最近质检记录与证据详情"],
         tone=tone,
+    )
+
+
+def format_active_quality_check_html(formatted: dict | None) -> str:
+    """构建当前激活质检记录的高亮提示。"""
+
+    resolved = formatted or {}
+    check = resolved.get("check") or {}
+    check_id = _display_text(check.get("check_id"))
+    if check_id == "-":
+        return _build_panel_html(
+            title="当前激活质检",
+            description="尚未加载质检结果",
+            cards=[("质检 ID", "-"), ("模板", "-"), ("Claim 数", "0")],
+            notes=["点击最近质检记录或执行新质检后，这里会同步显示当前激活任务。"],
+            tone="neutral",
+        )
+    claims = resolved.get("claims") or []
+    return _build_panel_html(
+        title="当前激活质检",
+        description="当前 Claim 列表与证据详情均跟随这条质检记录联动。",
+        cards=[
+            ("质检 ID", check_id),
+            ("模板", _display_text(check.get("template_name"))),
+            ("Claim 数", str(len(claims))),
+        ],
+        notes=[
+            f'总体结论：{_format_verdict_label(check.get("overall_verdict"))}',
+            f'时间：{_format_display_datetime(check.get("created_at"))}',
+        ],
+        tone="success" if len(claims) > 1 else "neutral",
     )
 
 
@@ -2000,7 +2053,7 @@ def format_review_record_detail_html(record: dict | None) -> str:
             ("审核动作", _format_review_action_label(resolved.get("review_action"))),
             ("审核状态", _format_review_status_label(resolved.get("review_status"))),
             ("审核人", _display_text(resolved.get("reviewer"))),
-            ("审核时间", _display_text(resolved.get("created_at"))),
+            ("审核时间", _format_display_datetime(resolved.get("created_at"))),
             ("关联模板", _display_text(resolved.get("template_name"))),
         ],
         notes=[
@@ -2027,7 +2080,7 @@ def format_review_record_detail_markdown(record: dict | None) -> str:
             f'- 审核动作：{_format_review_action_label(resolved.get("review_action"))}',
             f'- 审核状态：{_format_review_status_label(resolved.get("review_status"))}',
             f'- 审核人：{_display_text(resolved.get("reviewer"))}',
-            f'- 审核时间：{_display_text(resolved.get("created_at"))}',
+            f'- 审核时间：{_format_display_datetime(resolved.get("created_at"))}',
             f'- 关联模板：{_display_text(resolved.get("template_name"))}',
             f'- Claim 摘要：{_display_text(resolved.get("claim_text"))}',
             f'- 审核备注：{_display_text(resolved.get("review_note"))}',
@@ -2173,17 +2226,18 @@ def format_recent_quality_checks(quality_results: list[dict]) -> list[dict]:
     return formatted
 
 
-def build_recent_quality_rows(quality_results: list[dict] | None) -> list[list[str]]:
+def build_recent_quality_rows(quality_results: list[dict] | None, *, active_check_id: str | None = None) -> list[list[str]]:
     """将最近质检记录转换为表格行。"""
 
     rows = quality_results or []
     return [
         [
+            "当前" if str(item.get("check_id") or "") == str(active_check_id or "") else "",
             _display_text(item.get("check_id")),
             _display_text(item.get("template_name")),
             _format_verdict_label(item.get("overall_verdict")),
             str(len(item.get("claims") or [])),
-            _display_text(item.get("created_at")),
+            _format_display_datetime(item.get("created_at")),
             _truncate_text(item.get("input_text")),
         ]
         for item in rows
@@ -2275,7 +2329,7 @@ def build_review_candidate_rows(formatted: dict | None) -> list[list[str]]:
             _format_review_status_label(item.get("review_status")),
             _display_text(item.get("source_doc")),
             _display_text(item.get("template_name")),
-            _display_text(item.get("check_created_at")),
+            _format_display_datetime(item.get("check_created_at")),
         ]
         for item in items
     ]
@@ -2324,7 +2378,7 @@ def build_review_history_rows(formatted: dict | None) -> list[list[str]]:
             _format_review_action_label(item.get("review_action")),
             _format_review_status_label(item.get("review_status")),
             _display_text(item.get("reviewer")),
-            _display_text(item.get("created_at")),
+            _format_display_datetime(item.get("created_at")),
             _display_text(item.get("review_note")),
             _truncate_text(item.get("claim_text")),
         ]
@@ -2369,6 +2423,25 @@ def _display_text(value: object) -> str:
         return "、".join(_display_text(item) for item in value)
     text = str(value).strip()
     return text or "-"
+
+
+def _format_display_datetime(value: object) -> str:
+    """将时间统一格式化为东八区友好展示文本。"""
+
+    if value in (None, ""):
+        return "-"
+    text = str(value).strip()
+    if not text:
+        return "-"
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    localized = parsed.astimezone(CN_TIMEZONE)
+    return localized.strftime("%y-%m-%d %H-%M")
 
 
 def _format_score(value: object) -> str:

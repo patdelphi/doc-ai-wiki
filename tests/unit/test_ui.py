@@ -97,7 +97,7 @@ def test_create_ui_app_should_include_database_status_module(tmp_path: Path) -> 
 
     assert any("数据库状态" in value for value in html_values)
     assert "document-management-help-panel" in elem_ids
-    assert any("文档管理用于查看输入文档、执行入库与重建" in value for value in html_values)
+    assert any("知识库管理用于查看输入文档、执行入库与重建" in value for value in html_values)
 
 
 def test_create_ui_app_should_use_html_status_panels(tmp_path: Path) -> None:
@@ -202,6 +202,21 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     ]
     elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    claim_selectors = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "radio" and component.get("props", {}).get("elem_id") == "quality-claims-table"
+    ]
+    evidence_tables = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-evidence-table"
+    ]
+    recent_tables = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-recent-table"
+    ]
 
     assert any("AI 质检会把输入内容拆成多条 Claim" in value for value in html_values)
     assert any("模板内容" in value for value in html_values)
@@ -227,6 +242,10 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-evidence-detail" in elem_ids
     assert "quality-export-result" in elem_ids
     assert "quality-evaluation-export-result" in elem_ids
+    assert claim_selectors
+    assert claim_selectors[0].get("label") == "Claim 列表"
+    assert evidence_tables and evidence_tables[0].get("max_height") == 420
+    assert recent_tables and recent_tables[0].get("max_height") == 420
     assert elem_ids.index("quality-template-row") < elem_ids.index("quality-main-workspace")
     assert elem_ids.index("quality-main-workspace") < elem_ids.index("quality-followup-workspace")
 
@@ -310,7 +329,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     ]
 
     assert any("功能设置" in value for value in html_values)
-    assert tab_labels[-1] == "功能设置"
+    assert tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
     assert "settings-overview-panel" in elem_ids
     assert "settings-workspace-panel" in elem_ids
     assert "settings-footer-panel" in elem_ids
@@ -581,18 +600,86 @@ def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> 
         for component in components
         if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-recent-table"
     ]
-    claim_tables = [
+    claim_selectors = [
         component.get("props", {})
         for component in components
-        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-claims-table"
+        if component.get("type") == "radio" and component.get("props", {}).get("elem_id") == "quality-claims-table"
     ]
 
     assert recent_tables
-    assert claim_tables
+    assert claim_selectors
     assert recent_tables[0].get("value")
-    assert recent_tables[0]["value"]["data"][0][1] == "chkres_demo_001"
-    assert claim_tables[0].get("value")
-    assert claim_tables[0]["value"]["data"][0][1] == "claim_demo_001"
+    assert recent_tables[0]["value"]["data"][0][1] == "当前"
+    assert recent_tables[0]["value"]["data"][0][2] == "chkres_demo_001"
+    assert claim_selectors[0].get("value")
+    assert "claim_demo_001" in str(claim_selectors[0].get("value"))
+    assert any("claim_demo_001" in str(choice) for choice in claim_selectors[0].get("choices", []))
+
+
+def test_create_ui_app_should_paginate_more_than_ten_recent_quality_records(tmp_path: Path) -> None:
+    """最近质检记录超过 10 条时，应通过分页继续展示后续数据。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    repository = QualityRepository(settings.sqlite_db_path)
+    for index in range(12):
+        check_id = f"chkres_demo_{index:03d}"
+        claim_id = f"claim_demo_{index:03d}"
+        repository.create_quality_result(
+            quality_check={
+                "check_id": check_id,
+                "input_text": f"样例输入 {index}",
+                "template_id": "general_fact_check",
+                "template_name": "通用事实核检",
+                "overall_verdict": "needs_review",
+                "risk_level": "medium",
+                "summary": f"样例摘要 {index}",
+                "created_at": f"2026-05-01T12:{index:02d}:00+00:00",
+                "updated_at": f"2026-05-01T12:{index:02d}:00+00:00",
+            },
+            claims=[
+                {
+                    "claim_id": claim_id,
+                    "check_id": check_id,
+                    "claim_text": f"样例 Claim {index}",
+                    "verdict": "needs_review",
+                    "risk_level": "medium",
+                    "confidence": 0.8,
+                    "evidence": f"样例证据 {index}",
+                    "source_doc": "测试文档",
+                    "source_span": f"section-{index}",
+                    "review_status": "pending",
+                    "created_at": f"2026-05-01T12:{index:02d}:00+00:00",
+                    "updated_at": f"2026-05-01T12:{index:02d}:00+00:00",
+                }
+            ],
+            rule_hits=[],
+        )
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    recent_tables = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-recent-table"
+    ]
+    recent_page_infos = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html" and component.get("props", {}).get("elem_id") == "quality-recent-page-info"
+    ]
+
+    assert recent_tables
+    assert len(recent_tables[0]["value"]["data"]) == 10
+    assert recent_page_infos
+    assert "第 1 / 2 页" in recent_page_infos[0]
 
 
 def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path: Path) -> None:
@@ -613,13 +700,6 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
         block_fn.fn
         for block_fn in demo.fns.values()
         if getattr(block_fn.fn, "__name__", "") == "select_quality_claim"
-    )
-    claim_rows = pd.DataFrame(
-        [
-            ["claim_1", "第一条 Claim", "rejected", "high", "1.000", "contradict", "标题一", "section-1:chunk-1"],
-            ["claim_2", "第二条 Claim", "needs_review", "medium", "0.800", "insufficient", "标题二", "section-2:chunk-2"],
-        ],
-        columns=["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
     )
     claim_detail_map = {
         "claim_1": {
@@ -677,7 +757,6 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
             ],
         },
     }
-    event = gr.SelectData(None, {"index": [1, 0], "value": "claim_2"})
     formatted_result = {"check": {"overall_verdict": "needs_review", "risk_level": "medium"}}
 
     (
@@ -691,15 +770,14 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
         evidence_detail,
         evaluation_cases,
     ) = select_handler(
-        claim_rows,
+        "claim_2 | 第 2 条 | 需复核 | 中级 | 第二条 Claim",
         claim_detail_map,
         formatted_result,
-        event,
     )
 
     assert evidence_page == 1
     assert "第 1 / 1 页" in evidence_page_info
-    assert selected_claim_id == "claim_2"
+    assert selected_claim_id.startswith("claim_2")
     assert "第二条 Claim" in claim_view
     assert "证据关系" in claim_view
     assert "证据不足" in claim_view
@@ -791,90 +869,164 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
         for block_fn in demo.fns.values()
         if getattr(block_fn.fn, "__name__", "") == "select_recent_quality_result"
     )
-    recent_results = [
-        {
-            "check_id": "chkres_a",
-            "input_text": "第一条输入",
-            "template_id": "t1",
-            "template_name": "模板一",
-            "overall_verdict": "supported",
-            "risk_level": "low",
-            "created_at": "2026-05-01T12:00:00+00:00",
-            "claims": [
-                {
-                    "claim_id": "claim_a1",
-                    "claim_text": "第一条 Claim",
-                    "verdict": "supported",
-                    "risk_level": "low",
-                    "confidence": 0.95,
-                    "evidence_judgement": "support",
-                    "evidence": "第一条证据摘要",
-                    "evidence_reason": "第一条说明",
-                    "source_doc": "文档一",
-                    "source_span": "section-1",
-                    "review_status": "pending",
-                    "evidence_details": [
-                        {
-                            "chunk_id": "chunk_a1",
-                            "doc_title": "文档一",
-                            "source_span": "section-1",
-                            "evidence_relation": "support",
-                            "retrieval_source": "vector",
-                            "matched_sources": ["vector"],
-                            "matched_queries": ["claim_literal"],
-                            "rerank_score": 0.91,
-                            "relation_reason": "直接支持。",
-                            "content_preview": "第一条证据内容",
-                        }
-                    ],
-                }
-            ],
-        },
-        {
-            "check_id": "chkres_b",
-            "input_text": "第二条输入",
-            "template_id": "t2",
-            "template_name": "模板二",
-            "overall_verdict": "needs_review",
-            "risk_level": "medium",
-            "created_at": "2026-05-01T13:00:00+00:00",
-            "claims": [
-                {
-                    "claim_id": "claim_b1",
-                    "claim_text": "第二条 Claim",
-                    "verdict": "needs_review",
-                    "risk_level": "medium",
-                    "confidence": 0.82,
-                    "evidence_judgement": "insufficient",
-                    "evidence": "第二条证据摘要",
-                    "evidence_reason": "第二条说明",
-                    "source_doc": "文档二",
-                    "source_span": "section-2",
-                    "review_status": "pending",
-                    "evidence_details": [
-                        {
-                            "chunk_id": "chunk_b1",
-                            "doc_title": "文档二",
-                            "source_span": "section-2",
-                            "evidence_relation": "contradict",
-                            "retrieval_source": "fulltext",
-                            "matched_sources": ["fulltext"],
-                            "matched_queries": ["logic_relaxed"],
-                            "rerank_score": 0.73,
-                            "relation_reason": "补充检索命中反证。",
-                            "content_preview": "第二条证据内容",
-                        }
-                    ],
-                }
-            ],
-        },
-    ]
+    recent_results = []
+    for index in range(10):
+        recent_results.append(
+            {
+                "check_id": f"chkres_pre_{index}",
+                "input_text": f"前置输入 {index}",
+                "template_id": "t_pre",
+                "template_name": f"模板前置{index}",
+                "overall_verdict": "supported",
+                "risk_level": "low",
+                "created_at": f"2026-05-01T0{index}:00:00+00:00",
+                "claims": [
+                    {
+                        "claim_id": f"claim_pre_{index}",
+                        "claim_text": f"前置 Claim {index}",
+                        "verdict": "supported",
+                        "risk_level": "low",
+                        "confidence": 0.95,
+                        "evidence_judgement": "support",
+                        "evidence": f"前置证据摘要 {index}",
+                        "evidence_reason": f"前置说明 {index}",
+                        "source_doc": "文档前置",
+                        "source_span": f"section-pre-{index}",
+                        "review_status": "pending",
+                        "evidence_details": [],
+                    }
+                ],
+            }
+        )
+    recent_results.extend(
+        [
+            {
+                "check_id": "chkres_a",
+                "input_text": "第一条输入",
+                "template_id": "t1",
+                "template_name": "模板一",
+                "overall_verdict": "supported",
+                "risk_level": "low",
+                "created_at": "2026-05-01T12:00:00+00:00",
+                "claims": [
+                    {
+                        "claim_id": "claim_a1",
+                        "claim_text": "第一条 Claim",
+                        "verdict": "supported",
+                        "risk_level": "low",
+                        "confidence": 0.95,
+                        "evidence_judgement": "support",
+                        "evidence": "第一条证据摘要",
+                        "evidence_reason": "第一条说明",
+                        "source_doc": "文档一",
+                        "source_span": "section-1",
+                        "review_status": "pending",
+                        "evidence_details": [
+                            {
+                                "chunk_id": "chunk_a1",
+                                "doc_title": "文档一",
+                                "source_span": "section-1",
+                                "evidence_relation": "support",
+                                "retrieval_source": "vector",
+                                "matched_sources": ["vector"],
+                                "matched_queries": ["claim_literal"],
+                                "rerank_score": 0.91,
+                                "relation_reason": "直接支持。",
+                                "content_preview": "第一条证据内容",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "check_id": "chkres_b",
+                "input_text": "第二条输入",
+                "template_id": "t2",
+                "template_name": "模板二",
+                "overall_verdict": "needs_review",
+                "risk_level": "medium",
+                "created_at": "2026-05-01T13:00:00+00:00",
+                "claims": [
+                    {
+                        "claim_id": "claim_b1",
+                        "claim_text": "第二条 Claim 1",
+                        "verdict": "needs_review",
+                        "risk_level": "medium",
+                        "confidence": 0.82,
+                        "evidence_judgement": "insufficient",
+                        "evidence": "第二条证据摘要 1",
+                        "evidence_reason": "第二条说明 1",
+                        "source_doc": "文档二",
+                        "source_span": "section-2",
+                        "review_status": "pending",
+                        "evidence_details": [
+                            {
+                                "chunk_id": "chunk_b1",
+                                "doc_title": "文档二",
+                                "source_span": "section-2",
+                                "evidence_relation": "contradict",
+                                "retrieval_source": "fulltext",
+                                "matched_sources": ["fulltext"],
+                                "matched_queries": ["logic_relaxed"],
+                                "rerank_score": 0.73,
+                                "relation_reason": "补充检索命中反证。",
+                                "content_preview": "第二条证据内容 1",
+                            }
+                        ],
+                    },
+                    {
+                        "claim_id": "claim_b2",
+                        "claim_text": "第二条 Claim 2",
+                        "verdict": "rejected",
+                        "risk_level": "high",
+                        "confidence": 0.88,
+                        "evidence_judgement": "contradict",
+                        "evidence": "第二条证据摘要 2",
+                        "evidence_reason": "第二条说明 2",
+                        "source_doc": "文档二",
+                        "source_span": "section-3",
+                        "review_status": "pending",
+                        "evidence_details": [],
+                    },
+                    {
+                        "claim_id": "claim_b3",
+                        "claim_text": "第二条 Claim 3",
+                        "verdict": "supported",
+                        "risk_level": "low",
+                        "confidence": 0.77,
+                        "evidence_judgement": "support",
+                        "evidence": "第二条证据摘要 3",
+                        "evidence_reason": "第二条说明 3",
+                        "source_doc": "文档二",
+                        "source_span": "section-4",
+                        "review_status": "pending",
+                        "evidence_details": [],
+                    },
+                    {
+                        "claim_id": "claim_b4",
+                        "claim_text": "第二条 Claim 4",
+                        "verdict": "needs_review",
+                        "risk_level": "medium",
+                        "confidence": 0.69,
+                        "evidence_judgement": "insufficient",
+                        "evidence": "第二条证据摘要 4",
+                        "evidence_reason": "第二条说明 4",
+                        "source_doc": "文档二",
+                        "source_span": "section-5",
+                        "review_status": "pending",
+                        "evidence_details": [],
+                    },
+                ],
+            },
+        ]
+    )
     event = gr.SelectData(None, {"index": [1, 0], "value": "chkres_b"})
 
-    current_page_rows = [["1", "chkres_a", "模板一", "通过", "1", "2026-05-01T12:00:00+00:00", "第一条输入"], ["2", "chkres_b", "模板二", "需复核", "1", "2026-05-01T13:00:00+00:00", "第二条输入"]]
+    current_page_rows = [["11", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20-00", "第一条输入"], ["12", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20-00", "第一条输入"]]
     (
         progress_html,
         result_html,
+        active_check_html,
         formatted_result,
         claim_rows,
         claim_page,
@@ -893,29 +1045,74 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
         recent_page,
         recent_page_info,
         evaluation_cases,
-    ) = select_handler(current_page_rows, recent_results, event)
+    ) = select_handler(current_page_rows, recent_results, 2, event)
 
+    assert claim_rows.get("__type__") == "update"
     assert claim_page == 1
     assert evidence_page == 1
-    assert recent_page == 1
-    assert "第 1 / 1 页" in claim_page_info
-    assert "第 1 / 1 页" in evidence_page_info
-    assert "第 1 / 1 页" in recent_page_info
+    assert recent_page == 2
+    assert "第 1 / 1 页" in claim_page_info["value"]
+    assert "第 1 / 1 页" in evidence_page_info["value"]
+    assert "第 2 / 2 页" in recent_page_info["value"]
     assert recent_state == recent_results
-    assert recent_rows[0][1] == "chkres_a"
-    assert "已加载历史质检记录" in progress_html
-    assert "模板二" in result_html
+    assert recent_rows.get("__type__") == "update"
+    assert recent_rows.get("value", [])[0][1] == ""
+    assert recent_rows.get("value", [])[0][2] == "chkres_a"
+    assert recent_rows.get("value", [])[1][1] == "当前"
+    assert recent_rows.get("value", [])[1][2] == "chkres_b"
+    assert "已加载历史质检记录" in progress_html["value"]
+    assert "模板二" in result_html["value"]
+    assert "当前激活质检" in active_check_html["value"]
+    assert "chkres_b" in active_check_html["value"]
     assert formatted_result["check"]["check_id"] == "chkres_b"
-    assert "第二条 Claim" in claim_detail_html
-    assert "证据关系" in claim_detail_html
-    assert "第二条 Claim" in review_view
+    assert "第二条 Claim 1" in claim_detail_html["value"]
+    assert "证据关系" in claim_detail_html["value"]
+    assert "第二条 Claim 1" in review_view["value"]
     assert selected_claim_id.startswith("claim_b1 |")
     assert "claim_b1" in claim_detail_map
-    assert claim_rows == [["1", "claim_b1", "第二条 Claim", "需复核", "中级", "0.820", "证据不足", "文档二", "section-2"]]
-    assert evidence_rows == [["1", "chunk_b1", "文档二", "section-2", "矛盾", "fulltext", "logic_relaxed", "0.730", "第二条证据内容"]]
+    assert len(claim_rows.get("choices", [])) == 4
+    assert "claim_b1" in str(claim_rows.get("value"))
+    assert "claim_b1" in str(claim_rows.get("choices", [])[0])
+    assert "claim_b4" in str(claim_rows.get("choices", [])[3])
+    assert evidence_rows.get("__type__") == "update"
+    assert evidence_rows.get("row_count") == 1
+    assert evidence_rows.get("value") == [["1", "chunk_b1", "文档二", "section-2", "矛盾", "fulltext", "logic_relaxed", "0.730", "第二条证据内容 1"]]
     assert len(evidence_items) == 1
-    assert "claim_b1" in evaluation_cases
-    assert "第二条证据内容" in evidence_detail_html
+    assert "claim_b1" in evaluation_cases["value"]
+    assert "claim_b1" in evaluation_cases["value"]
+    assert "第二条证据内容 1" in evidence_detail_html["value"]
+
+
+def test_quality_interactions_should_disable_queue_for_table_refresh(tmp_path: Path) -> None:
+    """最近记录与 Claim/证据表轻量联动应禁用队列，避免前端刷新中断。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    dependencies = demo.config.get("dependencies", [])
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    assert any(name == "select_recent_quality_result" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+    assert any(name == "select_quality_claim" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+    assert any(
+        name == "select_quality_evidence"
+        and dependency.get("queue") is False
+        and dependency.get("api_name") == "select_quality_evidence"
+        for name, dependency in dependency_pairs
+    )
 
 
 def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path: Path) -> None:
@@ -939,8 +1136,8 @@ def test_review_candidate_select_handler_should_restore_selected_claim(tmp_path:
     )
     candidate_rows = pd.DataFrame(
         [
-            ["claim_review_a", "第一条 Claim", "已支持", "低级", "已通过", "文档一", "模板一", "2026-05-01T12:00:00+00:00"],
-            ["claim_review_b", "第二条 Claim", "需复核", "中级", "待处理", "文档二", "模板二", "2026-05-01T13:00:00+00:00"],
+            ["claim_review_a", "第一条 Claim", "已支持", "低级", "已通过", "文档一", "模板一", "26-05-01 20-00"],
+            ["claim_review_b", "第二条 Claim", "需复核", "中级", "待处理", "文档二", "模板二", "26-05-01 21-00"],
         ],
         columns=["Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
     )
@@ -1131,8 +1328,8 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
     assert "第 1 / 1 页" in processed_page_info
     assert "第 1 / 1 页" in review_evidence_page_info
     assert "第 1 / 1 页" in review_history_page_info
-    assert pending_rows == [["1", "claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "2026-05-01T12:00:00+00:00"]]
-    assert processed_rows == [["1", "claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "2026-05-01T14:00:00+00:00"]]
+    assert pending_rows == [["1", "claim_pending_high", "高风险待处理 Claim", "需复核", "高级", "待处理", "文档一", "模板一", "26-05-01 20-00"]]
+    assert processed_rows == [["1", "claim_processed_high", "高风险已处理 Claim", "不通过", "高级", "已通过", "文档三", "模板三", "26-05-01 22-00"]]
     assert review_candidate_state == review_candidates
     assert selected_claim_id == "claim_pending_high"
     assert "claim_pending_high" in review_claim_detail_map
@@ -1142,7 +1339,7 @@ def test_review_filter_handler_should_split_candidates_by_scope_and_risk(tmp_pat
     assert "高风险证据" in review_evidence_detail_html
     assert review_action_value == "通过"
     assert review_note_value == ""
-    assert review_history_rows == [["1", "rev_processed_high", "claim_processed_high", "通过", "已通过", "ui_user", "2026-05-01T14:10:00+00:00", "已通过", "高风险已处理 Claim"]]
+    assert review_history_rows == [["1", "rev_processed_high", "claim_processed_high", "通过", "已通过", "ui_user", "26-05-01 22-10", "已通过", "高风险已处理 Claim"]]
     assert review_history_state == review_items
     assert selected_review_id == ""
     assert "未选择审核记录" in review_record_detail_html
@@ -1257,7 +1454,7 @@ def test_submit_review_then_switch_to_processed_scope_should_show_latest_record(
         "已通过",
         "文档一",
         "模板一",
-        "2026-05-01T12:00:00+00:00",
+        "26-05-01 20-00",
     ]]
     assert selected_claim_id == "claim_submit_review_demo"
     assert "claim_submit_review_demo" in review_claim_detail_map
@@ -1444,7 +1641,7 @@ def test_review_history_select_handler_should_restore_selected_record(tmp_path: 
         review_note_value,
         selected_review_id,
         review_record_detail,
-    ) = select_handler(review_items, review_candidates, "全部记录", "全部风险", build_review_history_dataframe := [["1", "rev_review_b", "claim_review_b", "不通过", "已驳回", "ui_user", "2026-05-01T13:10:00+00:00", "需要驳回", "第二条 Claim"], ["2", "rev_review_a", "claim_review_a", "通过", "已通过", "ui_user", "2026-05-01T12:10:00+00:00", "确认通过", "第一条 Claim"]], event)
+    ) = select_handler(review_items, review_candidates, "全部记录", "全部风险", build_review_history_dataframe := [["1", "rev_review_b", "claim_review_b", "不通过", "已驳回", "ui_user", "26-05-01 21-10", "需要驳回", "第二条 Claim"], ["2", "rev_review_a", "claim_review_a", "通过", "已通过", "ui_user", "26-05-01 20-10", "确认通过", "第一条 Claim"]], event)
 
     assert selected_claim_id == "claim_review_a"
     assert selected_review_id == "rev_review_a"
@@ -1485,10 +1682,13 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#quality-history-row" in UI_CSS
     assert "#quality-input-panel" in UI_CSS
     assert "#quality-history-panel" in UI_CSS
+    assert "#quality-active-check" in UI_CSS
     assert "#quality-claims-table" in UI_CSS
     assert "#quality-recent-table" in UI_CSS
     assert "#quality-evidence-table" in UI_CSS
     assert "#quality-evidence-detail" in UI_CSS
+    assert "#quality-recent-table table td:nth-child(2)" in UI_CSS
+    assert "#quality-recent-table tr:has(td:nth-child(2) button:not(:empty)) td" in UI_CSS
     assert "#quality-claims-table tr:has(td:focus-within) td" in UI_CSS
     assert "#quality-evidence-table tr:has(button:focus) td" in UI_CSS
     assert "#quality-recent-table tr:has(.selected) td" in UI_CSS

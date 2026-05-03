@@ -1,71 +1,217 @@
 # 中文知识库系统 MVP
 
-## 项目说明
+## 项目背景
 
-本项目用于构建一个面向中文内容的知识库系统，当前 MVP 已支持：
+本项目面向中文知识内容的整理、检索与质检场景，目标是提供一套可本地运行、可持续扩展的知识库工作台。系统围绕“文档入库 -> 索引构建 -> 混合检索 -> AI 质检 -> 人工审核 -> 结果导出”这一完整链路展开，适用于古籍、医学、企业知识、专题资料等需要可信证据支撑的中文内容治理场景。
 
-- Markdown 文档入库
-- SQLite 元数据与 FTS5 全文检索
-- ChromaDB 向量索引
-- 混合检索
-- AI 质检
-- 规则命中与风险分级
-- 人工审核
-- Gradio 最小操作界面
+项目当前版本为 `0.5`，已经具备可演示、可测试、可继续迭代的 MVP 形态。
 
-## 目录约定
+## 建设目标
 
-- `Docs`：开发文档目录，只存方案、设计、接口、任务等文档
-- `Input`：知识库原始文档目录，存放已处理好的 `md`、`json` 等业务输入文件
-- `src`：项目源码
-- `tests`：自动化测试
-- `config`：配置文件
-- `index`：SQLite 与 ChromaDB 本地索引数据
+- 建立统一的中文知识库入库与索引能力
+- 支持全文检索、向量检索与混合检索
+- 支持基于知识库证据的 AI 质检，而不是只做文本表面匹配
+- 支持人工审核闭环，降低误判风险
+- 支持本地页面操作和 API 调用两种使用方式
+- 为后续模板增强、规则增强、部署扩展预留清晰边界
 
-## 环境准备
+## 核心能力
 
-建议使用 Python `3.11+`。
+### 1. 文档入库
 
-安装依赖：
+- 支持从 `"Input"` 目录扫描 `Markdown`、`JSON` 文档
+- 自动完成元数据整理、章节提取、分块、全文索引和向量索引构建
+- 支持查看入库状态、失败原因和重建结果
+- 支持文档入库质检与结果导出
+
+### 2. 知识库检索
+
+- 支持全文检索、向量检索、混合检索
+- 支持候选重排与多路召回结果融合
+- 支持查看命中文档、章节位置、检索来源和重排分数
+- 支持页面内结果详情和下载导出
+
+### 3. AI 质检
+
+- 支持对输入文本进行 Claim 拆分与逐条核验
+- 支持根据模板切换不同质检策略
+- 支持显示 Claim、证据关系、证据列表、证据详情、风险等级
+- 支持查看最近质检记录、分页切换、历史结果回放
+- 支持效果评测与结果导出
+
+### 4. 人工审核
+
+- 支持从待审核 Claim 列表进入审核流程
+- 支持查看 Claim 详情、证据详情、审核历史
+- 支持提交审核结论并回写审核记录
+- 支持最近审核结果回看与定位
+
+### 5. 功能设置
+
+- 支持质检模板查看、增删改
+- 支持运行配置展示
+- 支持后续扩展更多可配置能力
+
+## 页面结构
+
+当前 Gradio 页面包含以下主要模块：
+
+- `"AI 质检"`
+- `"人工审核"`
+- `"知识库管理"`
+- `"知识库检索"`
+- `"功能设置"`
+
+其中 `"AI 质检"` 是当前最完整的工作台页面，已经串起模板、质检、最近记录、Claim 选择、证据查看、效果评测等功能。
+
+## 技术栈
+
+### 后端与接口
+
+- `Python 3.11+`
+- `FastAPI`
+- `Pydantic / pydantic-settings`
+
+作用说明：
+
+- `FastAPI`：提供健康检查、入库、检索、质检、审核等 API
+- `Pydantic`：负责请求响应建模与配置校验
+
+### 前端与交互
+
+- `Gradio`
+
+作用说明：
+
+- 提供本地可用的中文操作界面
+- 用于承载文档管理、检索、AI 质检、人工审核、功能设置等页面
+
+### 数据与索引
+
+- `SQLite`
+- `ChromaDB`
+
+作用说明：
+
+- `SQLite`：保存文档元数据、章节、分块、质检记录、审核记录，并提供全文检索能力
+- `ChromaDB`：保存向量索引，支持语义召回
+
+### AI 与排序
+
+- `LLM`：支持 `disabled`、`openai`、`anthropic`
+- `Embedding`：支持本地确定性向量或 OpenAI 兼容接口
+- `Rerank`：支持 `dashscope` 或 OpenAI 兼容接口
+
+作用说明：
+
+- `LLM`：负责 Claim 判断、证据关系解释、质检辅助推理
+- `Embedding`：负责语义向量召回
+- `Rerank`：负责对多路召回结果再排序，提升证据相关性
+
+## 目录说明
+
+```text
+wiki-donge/
+├── "Docs"                  开发文档目录
+├── "Input"                 知识库输入目录
+├── "config"                配置文件
+├── "rules"                 规则文件
+├── "templates/quality"     质检模板
+├── "src"                   源码
+├── "tests"                 测试
+├── "index"                 本地运行期索引与导出目录
+├── "pyproject.toml"        项目元数据
+├── "readme.md"             项目说明
+└── "chat_history.md"       会话记录
+```
+
+重点约定：
+
+- `"Docs"` 只放开发文档，不放知识库业务输入
+- `"Input"` 放待入库或已整理好的知识库源文档
+- `"index/app.db"`、`"index/chroma"` 属于本地运行期数据，不建议直接同步到远端仓库
+- 如果需要同步知识库内容到 GitHub，应优先同步 `"Input"`、模板、规则和源码，而不是运行生成的数据库与索引目录
+
+## 快速开始
+
+### 1. 环境要求
+
+- 操作系统：Windows / Linux / macOS
+- Python：`3.11` 或以上
+- 推荐使用虚拟环境
+
+### 2. 安装依赖
 
 ```bash
 python -m pip install -e .
 ```
 
-如果只做本地开发，也可以：
+如需开发测试依赖：
 
 ```bash
-python -m pip install fastapi uvicorn chromadb gradio pydantic pydantic-settings pyyaml pytest httpx
+python -m pip install -e ".[dev]"
 ```
 
-## 配置说明
+### 3. 准备配置
 
-可参考：
+复制环境变量模板：
 
-- `.env.example`
-- `Docs/env.MD`
+```bash
+copy ".env.example" ".env"
+```
 
-关键配置项：
+或手工创建 `".env"`，常用配置如下：
 
-- `INPUT_ROOT`：知识库输入目录，默认 `Input`
+```env
+APP_ENV=dev
+APP_HOST=127.0.0.1
+APP_PORT=8000
+GRADIO_PORT=7860
+INPUT_ROOT=Input
+SQLITE_DB_PATH=index/app.db
+CHROMA_PERSIST_DIR=index/chroma
+RULES_DIR=rules
+TEMPLATES_DIR=templates
+EMBEDDING_PROVIDER=openai
+LLM_PROVIDER=openai
+RERANK_ENABLED=true
+```
+
+关键配置说明：
+
+- `INPUT_ROOT`：知识库输入目录
 - `SQLITE_DB_PATH`：SQLite 数据库路径
-- `CHROMA_PERSIST_DIR`：ChromaDB 持久化目录
+- `CHROMA_PERSIST_DIR`：向量索引持久化目录
 - `RULES_DIR`：规则目录
-- `TEMPLATES_DIR`：模板目录
-- `LLM_PROVIDER`：`disabled`、`openai`、`anthropic`
-- `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`：LLM 在线调用配置
-- `LLM_ENABLE_THINKING`：OpenAI 兼容推理模型是否开启 thinking，默认建议 `false`
+- `TEMPLATES_DIR`：质检模板目录
 - `EMBEDDING_PROVIDER`：`local` 或 `openai`
-- `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`：Embedding 配置
-- `RERANK_ENABLED` / `RERANK_PROVIDER` / `RERANK_MODEL`：候选重排配置，支持 `dashscope` / `openai`
-- `RERANK_BASE_URL` / `RERANK_API_KEY`：自定义重排服务地址与密钥；未配置密钥时自动降级为关闭
+- `LLM_PROVIDER`：`disabled`、`openai`、`anthropic`
+- `RERANK_ENABLED`：是否启用重排
+- `GRADIO_PORT`：Gradio 页面端口，当前默认 `7860`
 
-当前建议：
+## 部署与启动
 
-- `LLM` 生产环境优先使用在线 API，通过 `.env` 在 `openai` / `anthropic` 间切换
-- `Embedding` 优先使用在线模型；测试和离线开发默认回退到本地确定性向量
+### 方式一：启动 Gradio 页面
 
-## 启动 FastAPI
+这是最常用的本地使用方式：
+
+```bash
+python -m src.ui.app
+```
+
+默认访问地址：
+
+- `http://127.0.0.1:7860`
+
+适用场景：
+
+- 本地知识库管理
+- AI 质检与人工审核
+- 页面操作验收
+
+### 方式二：启动 FastAPI 服务
+
+如果需要通过接口调用，可启动 API：
 
 ```bash
 python -m uvicorn src.app:app --host 127.0.0.1 --port 8000 --reload
@@ -86,32 +232,23 @@ python -m uvicorn src.app:app --host 127.0.0.1 --port 8000 --reload
 - `POST /review/submit`
 - `GET /review/list`
 
-## 启动 Gradio
+### 方式三：同时使用
 
-```bash
-python -m src.ui.app
-```
+本地开发时可以：
 
-启动后可使用最小页面：
+- 使用 `FastAPI` 做接口调试
+- 使用 `Gradio` 做页面操作与验收
 
-- 文档管理：扫描 `Input`、注册文档、查看入库状态
-- 文档检索：执行混合检索，并展示 `doc_title/author/source_name/tags`
-- 混合检索：支持 `use_rerank` 开关；命中多路召回时会返回 `matched_sources`，启用重排后会返回 `rerank_score`
-- AI 质检：执行 `2000` 字以内 claim 质检，可按 `doc_uid` 限制证据范围，并支持切换预设 Prompt 模板
-- 人工审核：可直接选择 claim，查看 claim 摘要区和证据表后再提交审核结果；提交后会自动刷新当前 claim 状态、最近质检结果和最近审核记录
-- 审核定位：支持从“最近审核记录”下拉中直接定位回对应 claim，减少手工查找
-- 文档状态：注册后自动刷新可重建列表，并显示 `edition/author/source_name/tags`
+如果只做页面使用，直接启动 `Gradio` 即可。
 
-## Input 使用方式
+## 输入文档格式
 
-`Input` 目录是知识库输入目录，不是开发文档目录。
-
-推荐放置：
+`"Input"` 目录支持以下常见格式：
 
 - `*.md`
 - `*.json`
 
-`JSON` 最小推荐格式：
+推荐的 `JSON` 最小格式：
 
 ```json
 {
@@ -124,66 +261,100 @@ python -m src.ui.app
 }
 ```
 
-说明：
+字段说明：
 
 - `title`、`content` 为最小推荐字段
-- `source` 与 `source_name` 都可识别
-- `tags` 支持单个字符串或字符串数组
+- `source` 与 `source_name` 均可识别
+- `tags` 支持单字符串或字符串数组
 
-当前内置质检模板：
+## 内置质检模板
+
+当前内置模板包括：
 
 - `general_fact_check`：通用事实核检
 - `strict_evidence_check`：严格证据核验
 - `ancient_text_review`：古文审慎解读
 - `medical_safety_review`：医学内容审慎质检
 
-模板不仅切换 Prompt，还会联动质检策略：
+模板不仅影响提示词，还会联动检索与判定策略，例如：
 
-- `rule_tags`：控制当前模板会启用哪些规则包
-- `retrieval_policy.fulltext_top_k`：控制全文检索候选数
-- `retrieval_policy.vector_top_k`：控制向量检索候选数
-- `retrieval_policy.final_top_k`：控制最终送入质检的证据条数
-- `retrieval_policy.use_rerank`：控制当前模板在质检检索时是否启用重排
-- `retrieval_policy.neighbor_window`：控制是否补邻接 chunk 上下文
-- `retrieval_policy.include_section_context`：控制是否补章节级上下文摘要
+- `rule_tags`
+- `retrieval_policy.fulltext_top_k`
+- `retrieval_policy.vector_top_k`
+- `retrieval_policy.final_top_k`
+- `retrieval_policy.use_rerank`
+- `retrieval_policy.neighbor_window`
+- `retrieval_policy.include_section_context`
 
-自定义模板文件放在 `"templates/quality"` 下，支持使用同名 `template_id` 覆盖内置模板。
+自定义模板目录：
 
-示例：
+- `"templates/quality"`
 
-```text
-Input/
-├── a1.md
-└── a2.json
-```
+## 测试与校验
 
-当前 UI 的“扫描 Input 文档”会读取该目录下的 `md/json` 文件。
-
-## 测试
-
-运行当前测试：
+### 运行测试
 
 ```bash
 python -m pytest tests
 ```
 
-模型连通性自检：
+### 模型连通性自检
 
 ```bash
 python ".aipython/check_model_connectivity.py"
 ```
 
-说明：
+该脚本会检查：
 
-- 该脚本会读取当前 `.env`
-- 该脚本会分别测试 `LLM`、`Embedding` 与 `Rerank`
-- 输出统一的 `JSON` 结果，便于排查模型地址、密钥和模型名是否可用
+- `LLM`
+- `Embedding`
+- `Rerank`
 
-## 当前状态
+输出统一 `JSON` 结果，便于排查模型地址、密钥和模型名配置问题。
 
-当前 MVP 已完成基础开发链路，后续建议继续补：
+### 索引状态检查
 
-- 更细的规则包
-- 更丰富的审核视图
-- 更完整的 JSON 元数据映射
-- 更完整的部署与运行文档
+```bash
+python ".aipython/inspect_index_status.py"
+```
+
+适用场景：
+
+- 检查当前数据库与索引状态
+- 辅助排查入库是否完整
+
+## 部署建议
+
+### 本地开发
+
+- 优先使用 `Gradio` 页面进行操作和验收
+- `Embedding`、`LLM`、`Rerank` 可按需接入在线服务
+- 未配置 `LLM` 时系统会降级到更保守的规则与启发式逻辑
+
+### 生产或演示环境
+
+- 建议显式配置 `LLM`、`Embedding`、`Rerank`
+- 建议将 `".env"` 与密钥文件排除出版本控制
+- 建议不要把 `"index/app.db"`、`"index/chroma"` 直接作为 Git 仓库内容同步
+- 如果需要共享知识库基础数据，优先共享 `"Input"`、规则文件、模板文件和导出的开发文档
+
+## 当前版本边界
+
+当前 `0.5` 版本已完成 MVP 主链路，但仍有以下边界：
+
+- 更复杂的知识图谱能力尚未接入
+- PDF/OCR 解析不是当前默认范围
+- 多模型投票与大规模调度未做成标准能力
+- 质检效果仍依赖知识库质量、模板设计与模型配置
+- 运行期索引数据默认走本地目录，不适合直接当作长期版本资产管理
+
+## 相关文档
+
+- `"Docs/design.MD"`：详细设计
+- `"Docs/api.MD"`：API 设计
+- `"Docs/tasks.MD"`：任务清单
+- `"Docs/env.MD"`：环境说明
+
+## 适用场景总结
+
+如果你希望构建一套“中文资料可入库、可检索、可质检、可人工复核”的本地系统，这个项目已经提供了一个可以直接运行和继续扩展的起点。

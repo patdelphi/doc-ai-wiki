@@ -5,13 +5,13 @@ rule_tags:
   - general
   - strict
 retrieval_policy:
-  fulltext_top_k: 5
-  vector_top_k: 5
+  fulltext_top_k: 6
+  vector_top_k: 6
   final_top_k: 5
   use_rerank: true
   neighbor_window: 1
-  include_section_context: false
-  section_max_chars: 500
+  include_section_context: true
+  section_max_chars: 600
 system_prompt: |
   你是严格型中文知识库质检助手。
   你只能依据证据片段和规则命中做判断，禁止脑补常识。
@@ -39,5 +39,3 @@ user_prompt_template: |
   请优先关注证据是否直接、完整、可追溯，以及是否真的支持 claim 的全部限定词。
   逻辑约束：
   {claim_logic_block}
-
-  请优先关注证据是否直接、完整、可追溯，以及是否真的支持 claim 的全部限定词。

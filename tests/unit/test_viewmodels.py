@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from src.ui.viewmodels import (
+    _format_display_datetime,
     build_claim_evidence_rows,
     build_database_summary_rows,
     build_quality_claim_rows,
@@ -158,6 +159,14 @@ def test_recent_quality_helpers_should_build_reviewable_choices() -> None:
     assert doc_uid_choices == ["doc_1 | 标题一", "doc_2 | 标题二"]
 
 
+def test_format_display_datetime_should_use_east_eight_and_friendly_pattern() -> None:
+    """时间展示应统一转为东八区并使用 yy-mm-dd hh-mm。"""
+
+    assert _format_display_datetime("2026-04-30T12:00:00Z") == "26-04-30 20-00"
+    assert _format_display_datetime("2026-05-01T12:00:00+00:00") == "26-05-01 20-00"
+    assert _format_display_datetime("") == "-"
+
+
 def test_review_candidate_helpers_should_prioritize_claim_display() -> None:
     """人工审核待选列表应能输出可读表格与 Claim 详情映射。"""
 
@@ -183,7 +192,7 @@ def test_review_candidate_helpers_should_prioritize_claim_display() -> None:
 
     assert formatted["count"] == 1
     assert "claim_review_1" in formatted["claim_detail_map"]
-    assert rows == [["claim_review_1", "第一条待审核 Claim", "需复核", "中级", "待处理", "文档一", "模板一", "2026-05-01T12:00:00+00:00"]]
+    assert rows == [["claim_review_1", "第一条待审核 Claim", "需复核", "中级", "待处理", "文档一", "模板一", "26-05-01 20-00"]]
 
 
 def test_parse_doc_uid_choice_should_return_doc_uid() -> None:
@@ -893,8 +902,8 @@ def test_operation_and_history_display_helpers_should_generate_readable_content(
 
     assert "执行状态：成功" in operation_markdown
     assert "最后进度：100%" in operation_markdown
-    assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "2026-04-30T12:00:00Z", "测试输入"]]
-    assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "2026-04-30T12:30:00Z", "通过", "第一条结论"]]
+    assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "26-04-30 20-00", "测试输入"]]
+    assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "26-04-30 20-30", "通过", "第一条结论"]]
 
 
 def test_operation_result_html_should_generate_card_layout() -> None:
@@ -1040,7 +1049,7 @@ def test_quality_help_and_template_panels_should_be_human_readable() -> None:
     assert "完全命中" in evaluation_help_html
     assert "为什么会出现 0 条完全命中" in evaluation_help_html
     assert "预期结论 / 预期风险 / 预期 Claim 数" in evaluation_help_html
-    assert "文档管理用于查看输入文档、执行入库与重建" in document_help_html
+    assert "知识库管理用于查看输入文档、执行入库与重建" in document_help_html
     assert "严格证据核验" in template_html
     assert "系统提示词" in template_html
     assert "用户提示模板" in template_html
@@ -1141,7 +1150,6 @@ def test_search_and_quality_export_markdown_should_include_summary_table_and_det
     quality_markdown = format_quality_export_markdown(
         formatted_quality,
         claim_detail,
-        claim_detail["evidence_table"][0],
     )
     evaluation_markdown = format_quality_evaluation_export_markdown(
         {
@@ -1176,7 +1184,9 @@ def test_search_and_quality_export_markdown_should_include_summary_table_and_det
     assert "#### Claim 列表" in quality_markdown
     assert "阿胶可以治疗所有贫血" in quality_markdown
     assert "证据关系" in quality_markdown
-    assert "#### 当前证据详情" in quality_markdown
+    assert "#### 当前 Claim 证据列表" in quality_markdown
+    assert "#### 当前 Claim 完整证据详情" in quality_markdown
+    assert "##### 证据 1" in quality_markdown
     assert "### 效果评测" in evaluation_markdown
     assert "核心命中" in evaluation_markdown
     assert "宽松命中" in evaluation_markdown

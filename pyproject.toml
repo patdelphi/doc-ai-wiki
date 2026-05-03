@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wiki-donge"
-version = "0.1.0"
+version = "0.5"
 description = "中文知识库系统 MVP"
 readme = "readme.md"
 requires-python = ">=3.11"

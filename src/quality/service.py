@@ -23,6 +23,7 @@ class QualityService:
     _STRICT_EXCLUSIVE_MARKERS = ("只有", "唯一", "仅有", "仅限", "独家")
     _STRICT_UNIVERSAL_MARKERS = ("全部", "所有", "一律", "必然", "总是", "完全")
     _STRICT_NEGATION_MARKERS = ("不会", "不能", "没有", "不存在", "绝不", "从不")
+    _STRICT_COMPARISON_MARKERS = ("高于", "低于", "强于", "弱于", "优于", "不如", "最多", "最少", "超过", "不少于", "不低于")
     _LOGIC_STOPWORDS = (
         "只有",
         "唯一",
@@ -41,6 +42,9 @@ class QualityService:
         "不存在",
         "绝不",
         "从不",
+        "都是",
+        "全都",
+        "必须",
     )
     _COUNTER_EVIDENCE_MARKERS = (
         "也有",
@@ -55,6 +59,23 @@ class QualityService:
         "多家",
         "多个",
         "均有",
+        "并非全部",
+        "未必",
+        "不一定",
+        "例外",
+    )
+    _TOPIC_STRIP_MARKERS = (
+        "是一种",
+        "是一个",
+        "是一类",
+        "属于",
+        "可以",
+        "能够",
+        "用于",
+        "具有",
+        "存在",
+        "采用",
+        "使用",
     )
 
     def __init__(
@@ -212,6 +233,10 @@ class QualityService:
                 evidence_list=evidence_list,
                 claim_logic=claim_logic,
             )
+            evidence_list = self._finalize_evidence_list(
+                evidence_list,
+                final_top_k=retrieval_policy["final_top_k"],
+            )
 
             yield {
                 "type": "progress",
@@ -335,7 +360,6 @@ class QualityService:
             matched_rules=matched_rules,
             claim_logic=claim_logic,
         )
-        heuristic["reason"] = "heuristic"
         if self.llm_client is None:
             return heuristic
 
@@ -463,13 +487,46 @@ class QualityService:
         logic_snapshot = claim_logic or QualityService._build_claim_logic_snapshot(claim_text)
 
         if max_hit_level == "block":
-            return {"verdict": "rejected", "confidence": 0.15, "risk_level": "high", "has_evidence": has_evidence, "evidence_judgement": "contradict"}
+            return {
+                "verdict": "rejected",
+                "confidence": 0.15,
+                "risk_level": "high",
+                "has_evidence": has_evidence,
+                "evidence_judgement": "contradict",
+                "reason": "命中阻断级规则，当前内容不能直接放行。",
+            }
         if QualityService._has_counter_evidence(evidence_list, logic_snapshot):
-            return {"verdict": "rejected", "confidence": 0.25, "risk_level": "high", "has_evidence": has_evidence, "evidence_judgement": "contradict"}
+            return {
+                "verdict": "rejected",
+                "confidence": 0.25,
+                "risk_level": "high",
+                "has_evidence": has_evidence,
+                "evidence_judgement": "contradict",
+                "reason": QualityService._build_heuristic_reason(
+                    claim_text=claim_text,
+                    evidence_list=evidence_list,
+                    logic_snapshot=logic_snapshot,
+                    mode="contradict",
+                ),
+            }
         if max_hit_level == "error":
-            return {"verdict": "needs_review", "confidence": 0.35, "risk_level": "high", "has_evidence": has_evidence, "evidence_judgement": "insufficient"}
+            return {
+                "verdict": "needs_review",
+                "confidence": 0.35,
+                "risk_level": "high",
+                "has_evidence": has_evidence,
+                "evidence_judgement": "insufficient",
+                "reason": "命中高风险规则，当前证据不足以直接放行。",
+            }
         if max_hit_level == "warn":
-            return {"verdict": "needs_review", "confidence": 0.55, "risk_level": "medium", "has_evidence": has_evidence, "evidence_judgement": "insufficient"}
+            return {
+                "verdict": "needs_review",
+                "confidence": 0.55,
+                "risk_level": "medium",
+                "has_evidence": has_evidence,
+                "evidence_judgement": "insufficient",
+                "reason": "命中提示级规则，建议结合更直接证据继续核对。",
+            }
         if logic_snapshot.get("requires_strict_evidence"):
             return {
                 "verdict": "needs_review",
@@ -477,10 +534,30 @@ class QualityService:
                 "risk_level": "high" if logic_snapshot.get("has_exclusive") or logic_snapshot.get("has_negation") else "medium",
                 "has_evidence": has_evidence,
                 "evidence_judgement": "insufficient",
+                "reason": QualityService._build_heuristic_reason(
+                    claim_text=claim_text,
+                    evidence_list=evidence_list,
+                    logic_snapshot=logic_snapshot,
+                    mode="insufficient",
+                ),
             }
         if has_evidence:
-            return {"verdict": "verified", "confidence": 0.85, "risk_level": "low", "has_evidence": True, "evidence_judgement": "support"}
-        return {"verdict": "needs_review", "confidence": 0.2, "risk_level": "medium", "has_evidence": False, "evidence_judgement": "insufficient"}
+            return {
+                "verdict": "verified",
+                "confidence": 0.85,
+                "risk_level": "low",
+                "has_evidence": True,
+                "evidence_judgement": "support",
+                "reason": "已检索到直接相关且未见明显冲突的支持证据。",
+            }
+        return {
+            "verdict": "needs_review",
+            "confidence": 0.2,
+            "risk_level": "medium",
+            "has_evidence": False,
+            "evidence_judgement": "insufficient",
+            "reason": "当前未检索到足够直接的证据，建议人工复核。",
+        }
 
     @staticmethod
     def _max_rule_level(matched_rules: list[dict]) -> str | None:
@@ -574,15 +651,17 @@ class QualityService:
         """围绕原始 claim 和放宽后的逻辑查询召回支持证据与潜在反证。"""
 
         query_specs = self._build_retrieval_queries(claim_text)
-        per_query_limit = max(int(retrieval_policy["final_top_k"]), 4)
+        final_top_k = max(int(retrieval_policy["final_top_k"]), 4)
+        per_query_limit = max(final_top_k + 1, 5)
+        candidate_limit = max(final_top_k * 2, len(query_specs) * 2, 8)
         merged: dict[str, dict] = {}
         for query_spec in query_specs:
             items = self.retrieval_service.hybrid_search(
                 query_spec["query"],
                 top_k=per_query_limit,
                 doc_uid=doc_uid,
-                fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit),
-                vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit),
+                fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit + 1),
+                vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit + 1),
                 use_rerank=retrieval_policy["use_rerank"],
             )
             for item in items:
@@ -594,23 +673,47 @@ class QualityService:
                     existing_queries = set(existing.get("matched_queries", []))
                     existing_queries.add(query_spec["label"])
                     existing["matched_queries"] = sorted(existing_queries)
+                    existing_sources = set(existing.get("matched_sources", []))
+                    for source in item.get("matched_sources", []) or []:
+                        existing_sources.add(str(source))
+                    if item.get("retrieval_source"):
+                        existing_sources.add(str(item.get("retrieval_source")))
+                    existing["matched_sources"] = sorted(value for value in existing_sources if value)
+                    existing["rerank_score"] = self._pick_higher_score(existing.get("rerank_score"), item.get("rerank_score"))
+                    if len(str(item.get("content") or "")) > len(str(existing.get("content") or "")):
+                        existing["content"] = item.get("content")
                     continue
                 merged[chunk_id] = {
                     **item,
                     "matched_queries": [query_spec["label"]],
+                    "matched_sources": sorted(
+                        {
+                            *(str(source) for source in (item.get("matched_sources", []) or [])),
+                            str(item.get("retrieval_source") or ""),
+                        }
+                        - {""}
+                    ),
                 }
 
-        return list(merged.values())[: max(per_query_limit, 6)]
+        return self._sort_evidence_candidates(list(merged.values()))[:candidate_limit]
 
     @classmethod
     def _build_retrieval_queries(cls, claim_text: str) -> list[dict]:
         """构建原始查询与放宽逻辑约束后的查询。"""
 
-        query_specs = [{"label": "claim_literal", "query": claim_text.strip()}]
+        literal_query = claim_text.strip()
+        claim_logic = cls._build_claim_logic_snapshot(claim_text)
+        query_specs = [{"label": "claim_literal", "query": literal_query}]
         normalized_query = cls._normalize_claim_query_for_retrieval(claim_text)
-        if normalized_query and normalized_query != claim_text.strip():
+        if normalized_query and normalized_query != literal_query:
             query_specs.append({"label": "logic_relaxed", "query": normalized_query})
-        return query_specs
+        topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
+        if topic_query:
+            query_specs.append({"label": "topic_focus", "query": topic_query})
+        counter_query = cls._build_counter_probe_query(normalized_query or literal_query, claim_logic)
+        if counter_query:
+            query_specs.append({"label": "counter_probe", "query": counter_query})
+        return cls._deduplicate_query_specs(query_specs)
 
     @classmethod
     def _normalize_claim_query_for_retrieval(cls, claim_text: str) -> str:
@@ -619,9 +722,67 @@ class QualityService:
         normalized = str(claim_text or "")
         for marker in cls._LOGIC_STOPWORDS:
             normalized = normalized.replace(marker, " ")
-        normalized = re.sub(r"[，。！？；：、“”‘’\"'（）()\[\]{}<>《》]+", " ", normalized)
+        return cls._sanitize_retrieval_query_text(normalized)
+
+    @classmethod
+    def _sanitize_retrieval_query_text(cls, text: str) -> str:
+        """清洗检索查询中的噪声字符。"""
+
+        normalized = re.sub(r"[，。！？；：、“”‘’\"'（）()\[\]{}<>《》]+", " ", str(text or ""))
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
+
+    @classmethod
+    def _build_topic_focus_query(cls, normalized_query: str) -> str:
+        """提取更聚焦的主题查询，便于补召回上下文和同主题证据。"""
+
+        topic_query = str(normalized_query or "")
+        for marker in cls._TOPIC_STRIP_MARKERS:
+            topic_query = topic_query.replace(marker, " ")
+        parts = [part.strip() for part in topic_query.split() if part.strip()]
+        if len(parts) >= 2:
+            focused_parts = [part for part in parts if len(part) > 1]
+            if len(focused_parts) >= 2:
+                focused_query = " ".join(focused_parts[:2])
+                if focused_query == cls._sanitize_retrieval_query_text(normalized_query):
+                    return "".join(focused_parts[:2])
+                return focused_query
+            focused_query = " ".join(parts[:2])
+            if focused_query == cls._sanitize_retrieval_query_text(normalized_query):
+                return "".join(parts[:2])
+            return focused_query
+        return cls._sanitize_retrieval_query_text(topic_query)
+
+    @classmethod
+    def _build_counter_probe_query(cls, normalized_query: str, claim_logic: dict) -> str:
+        """为强约束 Claim 构造更偏向反证和例外的探测查询。"""
+
+        base_query = cls._sanitize_retrieval_query_text(normalized_query)
+        if not base_query or not claim_logic.get("requires_strict_evidence"):
+            return ""
+        if claim_logic.get("has_exclusive"):
+            return f"{base_query} 也有 并非唯一"
+        if claim_logic.get("has_universal"):
+            return f"{base_query} 部分 有些 例外"
+        if claim_logic.get("has_negation"):
+            return f"{base_query} 可以 能够 已有"
+        if claim_logic.get("has_comparison"):
+            return f"{base_query} 相比 差异 不同"
+        return ""
+
+    @staticmethod
+    def _deduplicate_query_specs(query_specs: list[dict]) -> list[dict]:
+        """按查询文本去重，避免重复检索。"""
+
+        deduplicated: list[dict] = []
+        seen: set[str] = set()
+        for item in query_specs:
+            query_text = str(item.get("query") or "").strip()
+            if not query_text or query_text in seen:
+                continue
+            deduplicated.append({"label": str(item.get("label") or ""), "query": query_text})
+            seen.add(query_text)
+        return deduplicated
 
     @classmethod
     def _build_claim_logic_snapshot(cls, claim_text: str) -> dict:
@@ -631,11 +792,13 @@ class QualityService:
         has_exclusive = any(marker in text for marker in cls._STRICT_EXCLUSIVE_MARKERS)
         has_universal = any(marker in text for marker in cls._STRICT_UNIVERSAL_MARKERS)
         has_negation = any(marker in text for marker in cls._STRICT_NEGATION_MARKERS)
+        has_comparison = any(marker in text for marker in cls._STRICT_COMPARISON_MARKERS)
         return {
             "has_exclusive": has_exclusive,
             "has_universal": has_universal,
             "has_negation": has_negation,
-            "requires_strict_evidence": has_exclusive or has_universal or has_negation,
+            "has_comparison": has_comparison,
+            "requires_strict_evidence": has_exclusive or has_universal or has_negation or has_comparison,
         }
 
     @classmethod
@@ -655,6 +818,10 @@ class QualityService:
         if claim_logic.get("has_exclusive") and any(marker in evidence_text for marker in cls._COUNTER_EVIDENCE_MARKERS):
             return True
         if claim_logic.get("has_universal") and any(marker in evidence_text for marker in ("部分", "有些", "可能", "未必", "不一定", "之一")):
+            return True
+        if claim_logic.get("has_negation") and any(marker in evidence_text for marker in ("可以", "能够", "已有", "曾经", "存在")):
+            return True
+        if claim_logic.get("has_comparison") and any(marker in evidence_text for marker in ("不如", "相近", "接近", "部分情况", "因情况而异")):
             return True
         return False
 
@@ -709,6 +876,36 @@ class QualityService:
         ]
 
     @classmethod
+    def _build_heuristic_reason(
+        cls,
+        *,
+        claim_text: str,
+        evidence_list: list[dict],
+        logic_snapshot: dict,
+        mode: str,
+    ) -> str:
+        """生成更具体的启发式说明，避免仅返回笼统占位词。"""
+
+        claim_preview = str(claim_text or "")[:28]
+        contradiction_count = sum(1 for item in evidence_list if item.get("evidence_relation") == "contradict")
+        support_count = sum(1 for item in evidence_list if item.get("evidence_relation") == "support")
+        if mode == "contradict":
+            if contradiction_count:
+                return f'Claim“{claim_preview}”检索到 {contradiction_count} 条矛盾证据，说明其排他或绝对化约束被反证。'
+            return f'Claim“{claim_preview}”存在明显反证线索，当前不能判定为通过。'
+        if logic_snapshot.get("has_exclusive"):
+            return f'Claim“{claim_preview}”包含“只有/唯一”类排他表述，现有证据不足以证明其唯一性。'
+        if logic_snapshot.get("has_universal"):
+            return f'Claim“{claim_preview}”包含“所有/全部”类全称表述，现有证据不足以覆盖其全部范围。'
+        if logic_snapshot.get("has_negation"):
+            return f'Claim“{claim_preview}”包含否定性约束，现有证据不足以证明该否定结论始终成立。'
+        if logic_snapshot.get("has_comparison"):
+            return f'Claim“{claim_preview}”包含比较型结论，现有证据不足以支撑其比较优势或劣势。'
+        if support_count:
+            return f'Claim“{claim_preview}”有 {support_count} 条相关证据，但直接性仍不足，建议继续复核。'
+        return f'Claim“{claim_preview}”当前缺少足够直接的证据支持。'
+
+    @classmethod
     def _annotate_evidence_relations(cls, *, claim_text: str, evidence_list: list[dict], claim_logic: dict) -> list[dict]:
         """为每条证据补充支持/矛盾/不足关系，便于前端解释。"""
 
@@ -724,8 +921,19 @@ class QualityService:
                 if cls._content_contains_counter_signal(content, claim_logic):
                     relation = "contradict"
                     reason = "证据中出现例外、并列对象或范围放宽，和 Claim 的强约束相冲突。"
+                elif cls._content_supports_strict_logic(
+                    content,
+                    claim_logic,
+                    item.get("matched_queries", []),
+                ):
+                    relation = "support"
+                    reason = cls._build_strict_support_reason(claim_logic)
                 elif "logic_relaxed" in item.get("matched_queries", []):
                     reason = "该证据来自放宽逻辑约束后的补充检索，用于检查例外、边界或反证。"
+                elif "counter_probe" in item.get("matched_queries", []):
+                    reason = "该证据来自反证探测查询，用于补召回例外、相反条件或边界约束。"
+                elif "claim_literal" in item.get("matched_queries", []):
+                    reason = "该证据和原始 Claim 最接近，但还没有直接覆盖其强约束本身。"
             annotated_items.append(
                 {
                     **item,
@@ -737,6 +945,126 @@ class QualityService:
         return sorted(annotated_items, key=cls._evidence_relation_sort_key)
 
     @classmethod
+    def _finalize_evidence_list(cls, evidence_list: list[dict], *, final_top_k: int) -> list[dict]:
+        """在上下文扩展后收敛最终证据，优先保留最有解释价值的片段。"""
+
+        if not evidence_list:
+            return []
+        limit = max(int(final_top_k), 1)
+        sorted_items = sorted(evidence_list, key=cls._evidence_relation_sort_key)
+        contradict_items = [item for item in sorted_items if str(item.get("evidence_relation") or "") == "contradict"]
+        support_items = [item for item in sorted_items if str(item.get("evidence_relation") or "") == "support"]
+        insufficient_items = [item for item in sorted_items if str(item.get("evidence_relation") or "") == "insufficient"]
+
+        selected: list[dict] = []
+        selected_ids: set[str] = set()
+
+        def add_item(item: dict) -> None:
+            chunk_id = str(item.get("chunk_id") or "")
+            if chunk_id and chunk_id in selected_ids:
+                return
+            selected.append(item)
+            if chunk_id:
+                selected_ids.add(chunk_id)
+
+        # 同时存在支持与反证时，预留 1 个名额给支持证据，避免结果只剩单边反证。
+        reserve_support_slot = 1 if contradict_items and support_items and limit >= 3 else 0
+        contradict_quota = max(limit - reserve_support_slot, 0)
+        for item in contradict_items[:contradict_quota]:
+            add_item(item)
+            if len(selected) >= limit:
+                break
+        if reserve_support_slot and len(selected) < limit:
+            add_item(support_items[0])
+        if len(selected) < limit:
+            remaining_support_items = support_items[1:] if reserve_support_slot else support_items
+            for item in remaining_support_items:
+                add_item(item)
+                if len(selected) >= limit:
+                    break
+        if len(selected) < limit:
+            informative_insufficient_items = sorted(
+                insufficient_items,
+                key=cls._insufficient_complementarity_sort_key,
+            )
+            max_insufficient_count = limit - len(selected)
+            if len(contradict_items) >= 2:
+                max_insufficient_count = min(max_insufficient_count, 1)
+            added_insufficient_count = 0
+            for item in informative_insufficient_items:
+                if added_insufficient_count >= max_insufficient_count:
+                    break
+                add_item(item)
+                added_insufficient_count += 1
+                if len(selected) >= limit:
+                    break
+        if len(selected) < limit and len(contradict_items) < 2:
+            for item in sorted_items:
+                add_item(item)
+                if len(selected) >= limit:
+                    break
+        return selected
+
+    @staticmethod
+    def _insufficient_complementarity_sort_key(item: dict) -> tuple[int, int, int, float]:
+        """为证据不足项做补充排序，尽量保留更有解释价值的证据。"""
+
+        matched_queries = {str(value) for value in (item.get("matched_queries") or []) if str(value).strip()}
+        literal_bonus = 1 if "claim_literal" in matched_queries else 0
+        counter_bonus = 1 if "counter_probe" in matched_queries else 0
+        topic_penalty = 1 if matched_queries == {"topic_focus"} else 0
+        try:
+            score = -float(item.get("rerank_score")) if item.get("rerank_score") is not None else 0.0
+        except (TypeError, ValueError):
+            score = 0.0
+        return (
+            -literal_bonus,
+            -counter_bonus,
+            topic_penalty,
+            score,
+        )
+
+    @classmethod
+    def _content_supports_strict_logic(
+        cls,
+        content: str,
+        claim_logic: dict,
+        matched_queries: list[str] | None = None,
+    ) -> bool:
+        """识别是否存在直接覆盖强约束本身的支持性证据。"""
+
+        if not content:
+            return False
+        matched_query_set = {str(value) for value in (matched_queries or []) if str(value).strip()}
+        if claim_logic.get("has_exclusive"):
+            return any(marker in content for marker in cls._STRICT_EXCLUSIVE_MARKERS) and not any(
+                marker in content for marker in cls._COUNTER_EVIDENCE_MARKERS
+            )
+        if claim_logic.get("has_universal"):
+            return any(marker in content for marker in cls._STRICT_UNIVERSAL_MARKERS) and not any(
+                marker in content for marker in ("部分", "有些", "未必", "不一定", "例外")
+            )
+        if claim_logic.get("has_negation"):
+            return any(marker in content for marker in cls._STRICT_NEGATION_MARKERS) and "claim_literal" in matched_query_set
+        if claim_logic.get("has_comparison"):
+            return any(marker in content for marker in cls._STRICT_COMPARISON_MARKERS) and "claim_literal" in matched_query_set
+        return False
+
+    @classmethod
+    def _build_strict_support_reason(cls, claim_logic: dict) -> str:
+        """生成强约束 Claim 的直接支持说明。"""
+
+        if claim_logic.get("has_exclusive"):
+            return "证据中直接出现“只有/唯一”等排他表达，覆盖了 Claim 的唯一性约束。"
+        if claim_logic.get("has_universal"):
+            return "证据中直接出现“所有/全部”等全称表达，更接近对 Claim 全范围结论的支持。"
+        if claim_logic.get("has_negation"):
+            return "证据中直接出现否定性约束，能够更直接地支撑 Claim 的否定结论。"
+        if claim_logic.get("has_comparison"):
+            return "证据中直接出现比较表达，能够更直接地支撑 Claim 的比较结论。"
+        return "证据直接覆盖了 Claim 的关键约束。"
+
+    @classmethod
     def _content_contains_counter_signal(cls, content: str, claim_logic: dict) -> bool:
         """判断证据文本中是否含有与 Claim 强约束相冲突的信号。"""
 
@@ -746,17 +1074,61 @@ class QualityService:
             return True
         if claim_logic.get("has_universal") and any(marker in content for marker in ("部分", "有些", "可能", "未必", "不一定", "之一")):
             return True
+        if claim_logic.get("has_negation") and any(marker in content for marker in ("可以", "能够", "已有", "曾经", "存在")):
+            return True
+        if claim_logic.get("has_comparison") and any(marker in content for marker in ("不如", "相近", "接近", "部分情况", "因情况而异")):
+            return True
         return False
 
     @staticmethod
-    def _evidence_relation_sort_key(item: dict) -> tuple[int, float]:
+    def _pick_higher_score(left: object, right: object) -> object:
+        """保留更高的重排分，避免重复召回时丢失更强证据。"""
+
+        try:
+            left_score = float(left) if left is not None else float("-inf")
+        except (TypeError, ValueError):
+            left_score = float("-inf")
+        try:
+            right_score = float(right) if right is not None else float("-inf")
+        except (TypeError, ValueError):
+            right_score = float("-inf")
+        return right if right_score >= left_score else left
+
+    @classmethod
+    def _sort_evidence_candidates(cls, evidence_list: list[dict]) -> list[dict]:
+        """优先保留多查询命中和高分证据，减少早期截断导致的漏召回。"""
+
+        def sort_key(item: dict) -> tuple[int, int, float]:
+            matched_query_count = len(item.get("matched_queries", []) or [])
+            matched_source_count = len(item.get("matched_sources", []) or [])
+            try:
+                score = float(item.get("rerank_score")) if item.get("rerank_score") is not None else 0.0
+            except (TypeError, ValueError):
+                score = 0.0
+            return (-matched_query_count, -matched_source_count, -score)
+
+        return sorted(evidence_list, key=sort_key)
+
+    @staticmethod
+    def _evidence_relation_sort_key(item: dict) -> tuple[int, int, int, float]:
         """让矛盾证据优先展示，其次支持证据。"""
 
         priority = {"contradict": 0, "support": 1, "insufficient": 2}
         relation = str(item.get("evidence_relation") or "insufficient")
+        matched_queries = set(str(value) for value in (item.get("matched_queries") or []) if str(value).strip())
+        query_bonus = 0
+        if "counter_probe" in matched_queries:
+            query_bonus += 2
+        if "topic_focus" in matched_queries:
+            query_bonus += 1
         rerank_score = item.get("rerank_score")
         try:
             score = -float(rerank_score) if rerank_score is not None else 0.0
         except (TypeError, ValueError):
             score = 0.0
-        return (priority.get(relation, 2), score)
+        return (
+            priority.get(relation, 2),
+            -len(matched_queries),
+            -query_bonus,
+            score,
+        )

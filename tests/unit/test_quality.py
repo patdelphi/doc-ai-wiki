@@ -120,8 +120,8 @@ def test_quality_service_should_apply_template_rule_tags_and_retrieval_policy(tm
     assert result["check"]["active_rule_tags"] == ["medical", "strict"]
     assert result["check"]["retrieval_policy"]["final_top_k"] == 5
     assert result["check"]["retrieval_policy"]["use_rerank"] is True
-    assert captured_search_kwargs["fulltext_top_k"] == 6
-    assert captured_search_kwargs["vector_top_k"] == 6
+    assert captured_search_kwargs["fulltext_top_k"] >= 6
+    assert captured_search_kwargs["vector_top_k"] >= 6
     assert captured_search_kwargs["use_rerank"] is True
     assert captured_expand_kwargs["neighbor_window"] == 1
     assert captured_expand_kwargs["include_section_context"] is True
@@ -352,3 +352,187 @@ def test_quality_service_should_retrieve_counter_evidence_and_reject_exclusive_c
     assert result["claims"][0]["verdict"] == "rejected"
     assert result["check"]["overall_verdict"] == "rejected"
     assert len(result["claims"][0]["evidence_details"]) >= 2
+
+
+def test_quality_service_should_build_complementary_queries_for_strict_claim() -> None:
+    """强约束 Claim 应构造更多互补查询，兼顾主题、放宽检索与反证探测。"""
+
+    query_specs = QualityService._build_retrieval_queries("阿胶只有东阿一家有")
+
+    labels = [item["label"] for item in query_specs]
+    queries = [item["query"] for item in query_specs]
+
+    assert labels[0] == "claim_literal"
+    assert "logic_relaxed" in labels
+    assert "topic_focus" in labels
+    assert "counter_probe" in labels
+    assert len(query_specs) >= 4
+    assert queries[0] == "阿胶只有东阿一家有"
+    assert any("只有" not in query for query in queries[1:])
+    assert any("也有" in query or "并非唯一" in query for query in queries)
+
+
+def test_quality_service_should_keep_broader_candidate_pool_before_final_judgement(tmp_path: Path) -> None:
+    """多查询召回时，不应在整理上下文前过早截断候选证据。"""
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path)
+
+    service._build_retrieval_queries = lambda claim_text: [  # type: ignore[method-assign]
+        {"label": "claim_literal", "query": "q1"},
+        {"label": "logic_relaxed", "query": "q2"},
+        {"label": "counter_probe", "query": "q3"},
+    ]
+
+    def fake_hybrid_search(query, top_k=5, doc_uid=None, **kwargs):  # noqa: ANN001
+        if query == "q1":
+            return [
+                {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "s1", "content": "证据1", "rerank_score": 0.91},
+                {"chunk_id": "chk_2", "doc_uid": "doc_1", "source_span": "s2", "content": "证据2", "rerank_score": 0.90},
+                {"chunk_id": "chk_3", "doc_uid": "doc_1", "source_span": "s3", "content": "证据3", "rerank_score": 0.89},
+            ]
+        if query == "q2":
+            return [
+                {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "s1", "content": "证据1", "rerank_score": 0.91},
+                {"chunk_id": "chk_4", "doc_uid": "doc_1", "source_span": "s4", "content": "证据4", "rerank_score": 0.88},
+                {"chunk_id": "chk_5", "doc_uid": "doc_1", "source_span": "s5", "content": "证据5", "rerank_score": 0.87},
+            ]
+        return [
+            {"chunk_id": "chk_6", "doc_uid": "doc_1", "source_span": "s6", "content": "证据6", "rerank_score": 0.95},
+            {"chunk_id": "chk_7", "doc_uid": "doc_1", "source_span": "s7", "content": "证据7", "rerank_score": 0.86},
+            {"chunk_id": "chk_8", "doc_uid": "doc_1", "source_span": "s8", "content": "证据8", "rerank_score": 0.85},
+        ]
+
+    service.retrieval_service.hybrid_search = fake_hybrid_search  # type: ignore[method-assign]
+
+    results = service._retrieve_evidence_candidates(
+        claim_text="阿胶只有东阿一家有",
+        doc_uid=None,
+        retrieval_policy={
+            "fulltext_top_k": 4,
+            "vector_top_k": 4,
+            "final_top_k": 4,
+            "use_rerank": True,
+        },
+    )
+
+    assert len(results) >= 8
+    merged_item = next(item for item in results if item["chunk_id"] == "chk_1")
+    assert set(merged_item["matched_queries"]) == {"claim_literal", "logic_relaxed"}
+
+
+def test_quality_service_should_finalize_evidence_list_by_relation_priority() -> None:
+    """最终证据列表应优先保留矛盾证据，并限制到 final_top_k。"""
+
+    evidence_list = [
+        {"chunk_id": "c1", "evidence_relation": "insufficient", "matched_queries": ["claim_literal"], "rerank_score": 0.95},
+        {"chunk_id": "c2", "evidence_relation": "contradict", "matched_queries": ["counter_probe", "logic_relaxed"], "rerank_score": 0.70},
+        {"chunk_id": "c3", "evidence_relation": "support", "matched_queries": ["claim_literal"], "rerank_score": 0.90},
+        {"chunk_id": "c4", "evidence_relation": "contradict", "matched_queries": ["counter_probe"], "rerank_score": 0.88},
+        {"chunk_id": "c5", "evidence_relation": "insufficient", "matched_queries": ["topic_focus"], "rerank_score": 0.92},
+        {"chunk_id": "c6", "evidence_relation": "insufficient", "matched_queries": ["logic_relaxed"], "rerank_score": 0.85},
+    ]
+
+    final_list = QualityService._finalize_evidence_list(evidence_list, final_top_k=4)
+
+    assert len(final_list) == 4
+    assert [item["chunk_id"] for item in final_list[:2]] == ["c2", "c4"]
+    assert any(item["chunk_id"] == "c3" for item in final_list)
+
+
+def test_quality_service_should_keep_one_support_evidence_when_contradictions_dominate() -> None:
+    """存在明显反证时，最终证据仍应尽量保留一条直接支持证据，便于人工对比。"""
+
+    evidence_list = [
+        {"chunk_id": "c1", "evidence_relation": "contradict", "matched_queries": ["counter_probe"], "rerank_score": 0.96},
+        {"chunk_id": "c2", "evidence_relation": "contradict", "matched_queries": ["counter_probe", "logic_relaxed"], "rerank_score": 0.95},
+        {"chunk_id": "c3", "evidence_relation": "contradict", "matched_queries": ["logic_relaxed"], "rerank_score": 0.94},
+        {"chunk_id": "c4", "evidence_relation": "contradict", "matched_queries": ["topic_focus"], "rerank_score": 0.93},
+        {"chunk_id": "c5", "evidence_relation": "support", "matched_queries": ["claim_literal"], "rerank_score": 0.80},
+    ]
+
+    final_list = QualityService._finalize_evidence_list(evidence_list, final_top_k=4)
+
+    assert len(final_list) == 4
+    assert [item["chunk_id"] for item in final_list[:2]] == ["c2", "c1"]
+    assert any(item["chunk_id"] == "c5" for item in final_list)
+
+
+def test_quality_service_should_mark_direct_strict_evidence_as_support() -> None:
+    """强约束 Claim 若证据直接覆盖约束本身，应标记为 support 而不是 insufficient。"""
+
+    claim_logic = QualityService._build_claim_logic_snapshot("阿胶只有东阿一家有")
+    evidence_list = [
+        {
+            "chunk_id": "c1",
+            "content": "阿胶只有东阿所产最为正宗，其他地区并不具备同等来源。",
+            "matched_queries": ["claim_literal"],
+        }
+    ]
+
+    annotated_items = QualityService._annotate_evidence_relations(
+        claim_text="阿胶只有东阿一家有",
+        evidence_list=evidence_list,
+        claim_logic=claim_logic,
+    )
+
+    assert annotated_items[0]["evidence_relation"] == "support"
+    assert "唯一性约束" in annotated_items[0]["relation_reason"]
+
+
+def test_quality_service_should_prefer_more_informative_insufficient_evidence() -> None:
+    """补充证据不足项时，应优先保留原句或反证探测相关项，减少纯主题噪声。"""
+
+    evidence_list = [
+        {"chunk_id": "c1", "evidence_relation": "contradict", "matched_queries": ["counter_probe"], "rerank_score": 0.99},
+        {"chunk_id": "c2", "evidence_relation": "support", "matched_queries": ["claim_literal"], "rerank_score": 0.90},
+        {"chunk_id": "c3", "evidence_relation": "insufficient", "matched_queries": ["topic_focus"], "rerank_score": 0.96},
+        {"chunk_id": "c4", "evidence_relation": "insufficient", "matched_queries": ["claim_literal"], "rerank_score": 0.80},
+        {"chunk_id": "c5", "evidence_relation": "insufficient", "matched_queries": ["counter_probe"], "rerank_score": 0.81},
+    ]
+
+    final_list = QualityService._finalize_evidence_list(evidence_list, final_top_k=4)
+
+    assert len(final_list) == 4
+    final_ids = [item["chunk_id"] for item in final_list]
+    assert "c4" in final_ids
+    assert "c5" in final_ids
+    assert "c3" not in final_ids
+
+
+def test_quality_service_should_limit_insufficient_noise_when_conflicts_are_strong() -> None:
+    """当矛盾证据已经较强时，最终列表最多补 1 条证据不足，避免噪声过多。"""
+
+    evidence_list = [
+        {"chunk_id": "c1", "evidence_relation": "contradict", "matched_queries": ["counter_probe"], "rerank_score": 0.99},
+        {"chunk_id": "c2", "evidence_relation": "contradict", "matched_queries": ["logic_relaxed"], "rerank_score": 0.96},
+        {"chunk_id": "c3", "evidence_relation": "contradict", "matched_queries": ["claim_literal"], "rerank_score": 0.93},
+        {"chunk_id": "c4", "evidence_relation": "insufficient", "matched_queries": ["claim_literal"], "rerank_score": 0.90},
+        {"chunk_id": "c5", "evidence_relation": "insufficient", "matched_queries": ["counter_probe"], "rerank_score": 0.89},
+        {"chunk_id": "c6", "evidence_relation": "insufficient", "matched_queries": ["topic_focus"], "rerank_score": 0.98},
+    ]
+
+    final_list = QualityService._finalize_evidence_list(evidence_list, final_top_k=5)
+
+    assert [item["chunk_id"] for item in final_list[:3]] == ["c1", "c2", "c3"]
+    assert len([item for item in final_list if item["evidence_relation"] == "insufficient"]) == 1
+    assert len(final_list) == 4
+
+
+def test_quality_service_should_return_specific_heuristic_reason_for_strict_claim(tmp_path: Path) -> None:
+    """强约束 Claim 在无模型时也应返回具体原因，而不是占位词。"""
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path)
+    service.retrieval_service.hybrid_search = lambda query, top_k=3, doc_uid=None, **kwargs: [  # type: ignore[method-assign]
+        {"chunk_id": "chk_only", "doc_uid": "doc_1", "source_span": "section-1:chunk-0", "content": "东阿所产阿胶最为著名。"}
+    ]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    result = service.run_check("阿胶只有东阿一家有", template_id="general_fact_check")
+
+    reason = result["claims"][0]["evidence_reason"]
+    assert "唯一性" in reason or "排他" in reason
+    assert "heuristic" not in reason
