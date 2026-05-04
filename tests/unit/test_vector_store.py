@@ -74,6 +74,20 @@ class StubClient:
         self._collections.pop(name, None)
 
 
+class RaisingLegacyConfigClient(StubClient):
+    """测试用客户端：首次打开集合时模拟旧版 Chroma 配置格式异常。"""
+
+    def __init__(self, collection: StubCollection) -> None:
+        super().__init__(collection)
+        self._raised = False
+
+    def get_or_create_collection(self, *, name: str) -> StubCollection:
+        if not self._raised:
+            self._raised = True
+            raise KeyError("_type")
+        return super().get_or_create_collection(name=name)
+
+
 def seed_chunk_database(database_path: Path) -> None:
     """写入最小 chunk 记录，供自动修复重建向量集合。"""
 
@@ -251,3 +265,35 @@ def test_vector_store_should_clear_legacy_collection_when_auto_repair_enabled_bu
     assert store.last_repair_summary["repaired"] is True
     assert store.last_repair_summary["repaired_docs"] == 0
     assert store.last_repair_summary["repaired_chunks"] == 0
+
+
+def test_vector_store_should_rebuild_from_sqlite_when_legacy_collection_config_is_incompatible(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """旧版 Chroma 集合配置不兼容时，应重建目录并从 SQLite 回填向量。"""
+
+    database_path = tmp_path / "app.db"
+    persist_directory = tmp_path / "chroma"
+    seed_chunk_database(database_path)
+    persist_directory.mkdir(parents=True, exist_ok=True)
+    (persist_directory / "legacy.txt").write_text("legacy", encoding="utf-8")
+    client = RaisingLegacyConfigClient(StubCollection())
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: client,
+    )
+
+    store = VectorStore(
+        persist_directory,
+        embedding_client=StubEmbeddingClient(dimension=1024),
+        sqlite_db_path=database_path,
+        auto_repair_dimension_mismatch=True,
+    )
+
+    assert store.collection.peek(limit=1)["ids"] == ["chunk_1"]
+    assert store.last_repair_summary["repaired"] is True
+    assert store.last_repair_summary["repair_reason"] == "legacy_collection_config"
+    assert store.last_repair_summary["repaired_docs"] == 1
+    assert store.last_repair_summary["repaired_chunks"] == 1
+    assert store.last_repair_summary["legacy_backup_path"].endswith("chroma_legacy_backup")

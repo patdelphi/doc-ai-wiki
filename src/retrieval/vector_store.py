@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import chromadb
 
 from src.ai.embedding import BaseEmbeddingClient, DeterministicEmbeddingClient
@@ -25,14 +28,65 @@ class VectorStore:
         self.embedding = embedding_client or DeterministicEmbeddingClient()
         self.sqlite_db_path = str(sqlite_db_path) if sqlite_db_path is not None else None
         self.auto_repair_dimension_mismatch = auto_repair_dimension_mismatch
-        self.client = chromadb.PersistentClient(path=str(persist_directory))
-        self.collection = self.client.get_or_create_collection(name=collection_name)
+        self.last_repair_summary: dict | None = None
+        self._initialize_collection()
         try:
             self._validate_embedding_dimension()
         except ValidationAppError as exc:
             if not self._should_auto_repair_dimension_mismatch(exc):
                 raise
             self._repair_dimension_mismatch(exc)
+
+    def _initialize_collection(self) -> None:
+        """初始化 Chroma 客户端与集合，并在旧索引格式不兼容时尝试自修复。"""
+
+        try:
+            self.client = chromadb.PersistentClient(path=self.persist_directory)
+            self.collection = self.client.get_or_create_collection(name=self.collection_name)
+        except Exception as exc:  # noqa: BLE001
+            if not self._should_auto_repair_legacy_index(exc):
+                raise
+            self._repair_legacy_index(exc)
+
+    def _should_auto_repair_legacy_index(self, exc: Exception) -> bool:
+        """判断是否命中了可自动修复的旧版 Chroma 索引格式异常。"""
+
+        message = str(exc)
+        return bool(
+            self.auto_repair_dimension_mismatch
+            and self.sqlite_db_path
+            and (
+                (isinstance(exc, KeyError) and message.strip("'") == "_type")
+                or "_type" in message
+                or "configuration" in message.lower()
+            )
+        )
+
+    def _repair_legacy_index(self, exc: Exception) -> None:
+        """旧版 Chroma 集合元数据不兼容时，重建索引目录并从 SQLite 回填。"""
+
+        persist_path = Path(self.persist_directory)
+        backup_path = persist_path.with_name(f"{persist_path.name}_legacy_backup")
+        if backup_path.exists():
+            if backup_path.is_dir():
+                shutil.rmtree(backup_path)
+            else:
+                backup_path.unlink()
+        if persist_path.exists():
+            shutil.move(str(persist_path), str(backup_path))
+        persist_path.mkdir(parents=True, exist_ok=True)
+        self.client = chromadb.PersistentClient(path=self.persist_directory)
+        self.collection = self.client.get_or_create_collection(name=self.collection_name)
+        repaired_docs, repaired_chunks = self.rebuild_from_sqlite()
+        self.last_repair_summary = {
+            "repaired": True,
+            "repair_reason": "legacy_collection_config",
+            "repaired_docs": repaired_docs,
+            "repaired_chunks": repaired_chunks,
+            "persist_directory": self.persist_directory,
+            "legacy_backup_path": str(backup_path),
+            "repair_error": str(exc),
+        }
 
     def _validate_embedding_dimension(self) -> None:
         """启动时校验当前 embedding 维度与现有集合维度是否一致。"""

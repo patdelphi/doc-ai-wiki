@@ -621,7 +621,7 @@ def test_search_display_helpers_should_build_readable_rows() -> None:
 
     rows = build_search_result_rows(formatted)
 
-    assert rows == [["1", "标题一", "-", "chunk_1", "hybrid", "0.750", "0.950", "fulltext、vector", "这是一段<mark>很长</mark>的<mark>检索</mark>内容"]]
+    assert rows == [["1", "标题一", "-", "hybrid", "fulltext、vector", "这是一段<mark>很长</mark>的<mark>检索</mark>内容"]]
 
 
 def test_search_display_helpers_should_mark_selected_row() -> None:
@@ -691,6 +691,8 @@ def test_search_result_detail_html_should_include_original_content() -> None:
     assert "卷一 / 第3段" in detail_html
     assert "<mark>阿胶</mark>" in detail_html
     assert "<mark>补血</mark>" in detail_html
+    assert "overflow-wrap:anywhere" in detail_html.replace(" ", "")
+    assert "max-width:100%" in detail_html.replace(" ", "")
     assert "font-size:20px" not in detail_html
     assert "font-size:18px" not in detail_html
 
@@ -964,7 +966,7 @@ def test_operation_result_html_should_show_pending_state_when_not_started() -> N
 
 
 def test_operation_result_html_should_render_download_link_when_present() -> None:
-    """下载结果应渲染可点击链接。"""
+    """下载结果应渲染可点击的下载与预览链接。"""
 
     operation_html = format_operation_result_html(
         {
@@ -972,13 +974,19 @@ def test_operation_result_html_should_render_download_link_when_present() -> Non
             "message": "已生成下载文件",
             "download_url": "http://127.0.0.1:7860/gradio_api/file=C:/demo/result.txt",
             "download_file_name": "result.txt",
+            "preview_url": "http://127.0.0.1:7860/gradio_api/file=C:/demo/result.preview.html",
+            "preview_file_name": "result.preview.html",
         },
         title="下载结果",
     )
 
     assert "下载文件" in operation_html
+    assert "查看渲染效果" in operation_html
     assert "href=" in operation_html
     assert "result.txt" in operation_html
+    assert "result.preview.html" in operation_html
+    assert "margin:0 0 8px 0" in operation_html
+    assert "　|　" not in operation_html
 
 
 def test_document_management_helpers_should_return_detail_and_button_states() -> None:

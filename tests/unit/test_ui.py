@@ -1817,8 +1817,11 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "display:none" in UI_CSS.replace(" ", "")
     assert "font-size:14px" in UI_CSS.replace(" ", "")
     assert "#search-top-row" in UI_CSS
+    assert "#search-result-row > .gradio-column" in UI_CSS
     assert "#search-input-panel" in UI_CSS
     assert "min-height:260px" in UI_CSS.replace(" ", "")
+    assert "table-layout:fixed" in UI_CSS.replace(" ", "")
+    assert "overflow-wrap:anywhere" in UI_CSS.replace(" ", "")
     assert ".search-result-cell-selected" in UI_CSS
     assert "border-left:5pxsolid" in UI_CSS.replace(" ", "")
     assert "font-weight:700" in UI_CSS.replace(" ", "")

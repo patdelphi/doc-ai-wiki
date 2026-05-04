@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import gradio as gr
 
@@ -549,8 +550,21 @@ UI_CSS = """
   font-size: 14px !important;
   white-space: pre-wrap !important;
   word-break: break-word !important;
+  overflow-wrap: anywhere !important;
   line-height: 1.7 !important;
   vertical-align: top !important;
+}
+#search-result-row > .gradio-column {
+  min-width: 0 !important;
+}
+#search-results-table,
+#search-results-table > div,
+#search-results-table > div > div {
+  max-width: 100% !important;
+}
+#search-results-table table {
+  width: 100% !important;
+  table-layout: fixed !important;
 }
 #search-results-table button[aria-label="Select column"],
 #search-results-table button[aria-label="Select row"] {
@@ -1664,6 +1678,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         file_path=export_result["file_path"],
                     ),
                     "download_file_name": export_result["file_name"],
+                    "preview_url": build_download_url(
+                        file_path=export_result["preview_file_path"],
+                    ),
+                    "preview_file_name": export_result["preview_file_name"],
                 },
                 title="下载结果",
             )
@@ -1781,6 +1799,29 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         if id_column_index >= len(selected_row):
             return []
         return list(selected_row)
+
+    def get_selected_search_item_from_page_rows(
+        page_rows: object,
+        raw_rows: list[dict] | None,
+        evt: gr.SelectData,
+    ) -> dict | None:
+        """根据当前页表格的序号列，定位被点击的原始检索结果。"""
+
+        normalized_page_rows = normalize_table_rows(page_rows)
+        normalized_raw_rows = raw_rows or []
+        if not normalized_page_rows or not normalized_raw_rows:
+            return None
+        selected_row = get_row_from_paged_table(normalized_page_rows, evt, id_column_index=0)
+        if not selected_row:
+            return None
+        sequence_text = re.sub(r"<[^>]+>", "", str(selected_row[0] if selected_row else "")).strip()
+        matched = re.search(r"\d+", sequence_text)
+        if not matched:
+            return None
+        raw_index = int(matched.group()) - 1
+        if raw_index < 0 or raw_index >= len(normalized_raw_rows):
+            return None
+        return normalized_raw_rows[raw_index]
 
     def format_table_pagination_html(page_info: str) -> str:
         """格式化表格分页提示。"""
@@ -2326,9 +2367,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         raw_rows = results or []
         if not page_rows or not raw_rows:
             return format_search_result_detail_html(None, query_text=query_text), page_rows
-        selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=3)
-        selected_chunk_id = str(selected_row[3]) if len(selected_row) > 3 else ""
-        matched_row = next((item for item in raw_rows if str(item.get("chunk_id") or "") == selected_chunk_id), None)
+        matched_row = get_selected_search_item_from_page_rows(page_rows, raw_rows, evt)
         if not matched_row:
             return format_search_result_detail_html(None, query_text=query_text), page_rows
         return build_search_detail(matched_row, query_text), page_rows
@@ -2449,9 +2488,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         page_rows = normalize_table_rows(current_page_rows)
         if not search_rows or not page_rows:
             return format_search_result_detail_html(None, query_text=query_text), page_rows, {}
-        selected_display_row = get_row_from_paged_table(page_rows, evt, id_column_index=3)
-        selected_chunk_id = str(selected_display_row[3]) if len(selected_display_row) > 3 else ""
-        matched_row = next((item for item in search_rows if str(item.get("chunk_id") or "") == selected_chunk_id), None)
+        matched_row = get_selected_search_item_from_page_rows(page_rows, search_rows, evt)
         selected_row = build_search_detail_payload(matched_row) or {}
         return (
             format_search_result_detail_html(selected_row, query_text=query_text),
@@ -5097,11 +5134,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row(elem_id="document-quality-result-row", equal_height=True):
                             with gr.Column(scale=5):
                                 document_quality_search_results = gr.Dataframe(
-                                    headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                                    datatype=["markdown"] * 9,
+                                    headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
+                                    datatype=["markdown"] * 6,
                                     interactive=False,
                                     row_count=0,
-                                    column_count=9,
+                                    column_count=6,
                                     label="文档内检索结果",
                                     elem_id="document-quality-search-results",
                                     value=initial_document_quality_search_table_rows,
@@ -5216,11 +5253,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Row(elem_id="search-result-row", equal_height=True):
                         with gr.Column(scale=5):
                             search_result = gr.Dataframe(
-                                headers=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                                datatype=["markdown"] * 9,
+                                headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
+                                datatype=["markdown"] * 6,
                                 interactive=False,
                                 row_count=0,
-                                column_count=9,
+                                column_count=6,
                                 label="检索结果列表",
                                 elem_id="search-results-table",
                                 value=initial_search_table_rows,

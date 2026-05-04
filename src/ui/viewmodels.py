@@ -853,9 +853,9 @@ def format_search_result_detail_html(item: dict | None, *, query_text: str = "")
     return (
         f"{metadata_html}"
         f"""
-        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;margin:0 0 12px 0;">
+        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;margin:0 0 12px 0;max-width:100%;overflow:hidden;">
             <div style="font-size:16px;font-weight:700;color:var(--body-text-color);margin:0 0 8px 0;">原文内容</div>
-            <div style="font-size:14px;line-height:1.8;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;">{content_html}</div>
+            <div style="font-size:14px;line-height:1.8;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;max-width:100%;overflow:hidden;">{content_html}</div>
         </div>
         """
     )
@@ -1440,10 +1440,23 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
     footer_html = None
     if resolved.get("download_url"):
         file_name = _display_text(resolved.get("download_file_name") or "点击下载")
-        footer_html = (
-            f'<a href="{escape(str(resolved.get("download_url")))}" '
-            f'target="_blank" rel="noopener noreferrer">下载文件：{escape(file_name)}</a>'
-        )
+        link_items = [
+            (
+                f'<div style="margin:0 0 8px 0;">'
+                f'<a href="{escape(str(resolved.get("download_url")))}" '
+                f'target="_blank" rel="noopener noreferrer">下载文件：{escape(file_name)}</a>'
+                f"</div>"
+            )
+        ]
+        if resolved.get("preview_url"):
+            preview_name = _display_text(resolved.get("preview_file_name") or "查看渲染效果")
+            link_items.append(
+                f'<div style="margin:0;">'
+                f'<a href="{escape(str(resolved.get("preview_url")))}" '
+                f'target="_blank" rel="noopener noreferrer">查看渲染效果：{escape(preview_name)}</a>'
+                f"</div>"
+            )
+        footer_html = "".join(link_items)
 
     cards = [("执行状态", "成功" if success else "失败")]
     if jobs:
@@ -1492,10 +1505,7 @@ def build_search_result_rows(formatted: dict | None, *, selected_row_index: int 
             _wrap_search_row_cell(str(index + 1), is_selected=index == selected_row_index, is_first=True),
             _wrap_search_row_cell(_display_text(item.get("doc_title") or item.get("source_name")), is_selected=index == selected_row_index),
             _wrap_search_row_cell(_display_text(item.get("source_span")), is_selected=index == selected_row_index),
-            _wrap_search_row_cell(_display_text(item.get("chunk_id")), is_selected=index == selected_row_index),
             _wrap_search_row_cell(_display_text(item.get("retrieval_source")), is_selected=index == selected_row_index),
-            _wrap_search_row_cell(_format_score(item.get("score")), is_selected=index == selected_row_index),
-            _wrap_search_row_cell(_format_score(item.get("rerank_score")), is_selected=index == selected_row_index),
             _wrap_search_row_cell(_display_text(item.get("matched_sources")), is_selected=index == selected_row_index),
             _wrap_search_row_cell(
                 _display_text(item.get("content_preview_highlighted") or item.get("content_preview")),
