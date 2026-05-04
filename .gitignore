@@ -11,3 +11,9 @@ index/*.db
 index/**/*.db
 index/**/*.sqlite3
 index/chroma/
+
+# 运行过程中的导出结果与临时文件不再同步到 GitHub
+Docs/*.csv
+index/Docs/
+chat_history.md
+todo - 副本.md
