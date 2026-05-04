@@ -413,6 +413,9 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
 
     assert "document-current-panel" in elem_ids
     assert "document-knowledge-base" in elem_ids
+    assert "document-target-knowledge-base" in elem_ids
+    assert "document-move-button" in elem_ids
+    assert "document-relationship-row" in elem_ids
     assert "document-current-title" in elem_ids
     assert "document-quality-accordion" in elem_ids
     assert "document-quality-panel" in elem_ids

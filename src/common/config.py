@@ -75,6 +75,7 @@ class AppSettings(BaseSettings):
         """确保运行期依赖目录存在。"""
 
         self.input_root.mkdir(parents=True, exist_ok=True)
+        (self.input_root / "default").mkdir(parents=True, exist_ok=True)
         self.sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self.rules_dir.mkdir(parents=True, exist_ok=True)

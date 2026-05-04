@@ -98,6 +98,27 @@ def test_scan_input_documents_should_only_return_md_and_json(tmp_path: Path) -> 
     assert Path(documents[0]["file_path"]).is_absolute()
 
 
+def test_scan_input_documents_should_include_legacy_root_files_for_default_knowledge_base(tmp_path: Path) -> None:
+    """默认知识库应兼容扫描 Input 根目录中的历史文档。"""
+
+    input_root = tmp_path / "Input"
+    default_dir = input_root / "default"
+    kb_b_dir = input_root / "kb_b"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    kb_b_dir.mkdir(parents=True, exist_ok=True)
+    (input_root / "legacy.md").write_text("# 旧文档", encoding="utf-8")
+    (default_dir / "default.json").write_text("{}", encoding="utf-8")
+    (kb_b_dir / "kb_b.md").write_text("# B", encoding="utf-8")
+
+    default_documents = scan_input_documents(input_root, "default")
+    kb_b_documents = scan_input_documents(input_root, "kb_b")
+
+    assert {item["file_name"] for item in default_documents} == {"legacy.md", "default.json"}
+    assert all(item["knowledge_base_id"] == "default" for item in default_documents)
+    assert any("兼容旧结构" in str(item.get("storage_label")) for item in default_documents)
+    assert {item["file_name"] for item in kb_b_documents} == {"kb_b.md"}
+
+
 def test_format_quality_result_should_build_claim_choices() -> None:
     """质检结果应转换为便于审核的 claim 选项。"""
 
@@ -263,11 +284,13 @@ def test_document_html_helpers_should_generate_card_layout() -> None:
         {
             "file_name": "a1.md",
             "doc_title": "阿胶历史文化通典",
+            "knowledge_base_id": "default",
             "size_display": "588.4 KB",
             "registered_label": "是",
             "index_status": "indexed",
             "needs_rebuild_label": "否",
             "action_hint": "已就绪",
+            "storage_label": "Input 根目录（兼容旧结构）",
             "source_path": "C:/Input/a1.md",
         }
     )
@@ -278,6 +301,8 @@ def test_document_html_helpers_should_generate_card_layout() -> None:
     assert "<div" in detail_html
     assert "文件名" in detail_html
     assert "阿胶历史文化通典" in detail_html
+    assert "归属知识库" in detail_html
+    assert "Input 根目录（兼容旧结构）" in detail_html
     assert "var(--body-text-color)" in summary_html
     assert "min-height:260px" in summary_html
 

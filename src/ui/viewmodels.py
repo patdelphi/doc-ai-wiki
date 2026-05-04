@@ -17,25 +17,44 @@ def scan_input_documents(input_root: Path, knowledge_base_id: str | None = None)
 
     resolved_root = input_root.resolve()
     normalized_knowledge_base_id = str(knowledge_base_id or "").strip()
-    scan_root = resolved_root / normalized_knowledge_base_id if normalized_knowledge_base_id else resolved_root
-    if not scan_root.exists():
-        return []
     items: list[dict] = []
-    for file_path in sorted(scan_root.rglob("*")):
+    seen_paths: set[str] = set()
+
+    def append_file(file_path: Path, *, storage_label: str) -> None:
         if not file_path.is_file():
-            continue
+            return
         if file_path.suffix.lower() not in {".md", ".json"}:
-            continue
+            return
+        resolved_path = str(file_path.resolve())
+        if resolved_path in seen_paths:
+            return
+        seen_paths.add(resolved_path)
         items.append(
             {
                 "knowledge_base_id": normalized_knowledge_base_id or "default",
                 "file_name": file_path.name,
-                "file_path": str(file_path),
+                "file_path": resolved_path,
                 "file_type": file_path.suffix.lower().lstrip("."),
                 "size_bytes": file_path.stat().st_size,
                 "size_display": format_file_size(file_path.stat().st_size),
+                "storage_label": storage_label,
             }
         )
+
+    if not normalized_knowledge_base_id:
+        for file_path in sorted(resolved_root.rglob("*")):
+            append_file(file_path, storage_label="Input 根目录")
+        return items
+
+    scan_root = resolved_root / normalized_knowledge_base_id
+    if scan_root.exists():
+        for file_path in sorted(scan_root.rglob("*")):
+            append_file(file_path, storage_label=f'{normalized_knowledge_base_id} 目录')
+
+    if normalized_knowledge_base_id == "default":
+        # 兼容旧结构：默认知识库仍应看到 Input 根目录直接放置的文档。
+        for file_path in sorted(resolved_root.glob("*")):
+            append_file(file_path, storage_label="Input 根目录（兼容旧结构）")
     return items
 
 
@@ -949,12 +968,16 @@ def format_document_detail_html(detail: dict | None) -> str:
         cards=[
             ("文件名", _display_text(resolved.get("file_name"))),
             ("文档名称", _display_text(resolved.get("doc_title"))),
+            ("归属知识库", _display_text(resolved.get("knowledge_base_id"))),
             ("文件大小", _display_text(resolved.get("size_display"))),
             ("是否已注册", _display_text(resolved.get("registered_label"))),
             ("索引状态", _display_text(resolved.get("index_status"))),
             ("是否需重建", _display_text(resolved.get("needs_rebuild_label"))),
         ],
-        notes=[f'文件路径：{_display_text(resolved.get("source_path"))}'],
+        notes=[
+            f'存放位置：{_display_text(resolved.get("storage_label"))}',
+            f'文件路径：{_display_text(resolved.get("source_path"))}',
+        ],
         tone=tone,
     )
 
@@ -1609,6 +1632,7 @@ def build_document_management_state(input_documents: list[dict], status_items: l
         [
             item["file_name"],
             item["doc_title"],
+            item["knowledge_base_id"],
             item["size_display"],
             item["ingested_at"],
             item["registered_label"],
@@ -1629,7 +1653,7 @@ def build_document_management_state(input_documents: list[dict], status_items: l
             "pending_register_files": sum(1 for item in rows if not item["is_registered"] and item["source_exists"]),
             "needs_rebuild_files": sum(1 for item in rows if item["needs_rebuild"]),
         },
-        "table_headers": ["文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+        "table_headers": ["文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
         "table_rows": table_rows,
         "document_choices": choices,
         "default_choice": default_choice,
@@ -1706,6 +1730,7 @@ def _build_document_row(input_document: dict | None, status_item: dict | None) -
     )
     return {
         "knowledge_base_id": (input_document or {}).get("knowledge_base_id") or (status_item or {}).get("knowledge_base_id") or "default",
+        "storage_label": (input_document or {}).get("storage_label") or ("数据库记录" if status_item else "-"),
         "source_path": source_path,
         "file_name": file_name,
         "doc_title": doc_title,

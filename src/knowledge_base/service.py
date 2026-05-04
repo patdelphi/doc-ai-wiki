@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 from src.common.errors import NotFoundAppError, ValidationAppError
@@ -15,6 +16,8 @@ class KnowledgeBaseService:
     def __init__(self, database_path: Path, input_root: Path) -> None:
         self.repository = KnowledgeBaseRepository(database_path)
         self.input_root = input_root
+        self.input_root.mkdir(parents=True, exist_ok=True)
+        self.get_input_directory("default").mkdir(parents=True, exist_ok=True)
 
     def list_knowledge_bases(self) -> list[dict]:
         """列出所有知识库。"""
@@ -83,6 +86,51 @@ class KnowledgeBaseService:
 
         normalized_id = self._normalize_knowledge_base_id(knowledge_base_id)
         return self.input_root / normalized_id
+
+    def relocate_document_file(self, source_path: Path | str, target_knowledge_base_id: str) -> Path:
+        """将输入文档移动到目标知识库目录，并返回最终路径。"""
+
+        source = Path(source_path)
+        normalized_target_id = self._normalize_knowledge_base_id(target_knowledge_base_id)
+        target_directory = self.get_input_directory(normalized_target_id)
+        target_directory.mkdir(parents=True, exist_ok=True)
+
+        if not source.exists():
+            return source
+
+        resolved_source = source.resolve()
+        resolved_input_root = self.input_root.resolve()
+        try:
+            resolved_source.relative_to(resolved_input_root)
+        except ValueError:
+            return resolved_source
+
+        if resolved_source.parent == target_directory.resolve():
+            return resolved_source
+
+        target_path = self._build_available_target_path(resolved_source, target_directory)
+        shutil.move(str(resolved_source), str(target_path))
+        return target_path.resolve()
+
+    @staticmethod
+    def _build_available_target_path(source_path: Path, target_directory: Path) -> Path:
+        """为迁移文档生成不冲突的目标路径。"""
+
+        candidate = target_directory / source_path.name
+        if not candidate.exists():
+            return candidate
+
+        if candidate.resolve() == source_path.resolve():
+            return candidate
+
+        stem = source_path.stem
+        suffix = source_path.suffix
+        index = 2
+        while True:
+            candidate = target_directory / f"{stem}_{index}{suffix}"
+            if not candidate.exists():
+                return candidate
+            index += 1
 
     @staticmethod
     def _normalize_knowledge_base_id(raw_value: object) -> str:

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from src.common.config import AppSettings
 from src.common.errors import ValidationAppError
 from src.db.connection import create_connection, initialize_database
 from src.db.repositories import DocumentRepository, QualityRepository
+from src.ingest.service import IngestService
 from src.knowledge_base.service import KnowledgeBaseService
 from src.review.service import ReviewService
 
@@ -432,6 +434,54 @@ def test_document_repository_should_build_database_summary_by_knowledge_base(tmp
     assert kb_b_summary["quality_check_count"] == 1
     assert kb_b_summary["claim_count"] == 1
     assert kb_b_summary["review_count"] == 0
+
+
+def test_ingest_service_should_relocate_document_to_target_knowledge_base(tmp_path: Path) -> None:
+    """调整文档归属时，应同时移动源文件并更新数据库归属。"""
+
+    input_root = tmp_path / "Input"
+    default_dir = input_root / "default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = input_root / "legacy.md"
+    legacy_file.write_text("# 旧文档\n\n用于迁移测试。", encoding="utf-8")
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=input_root,
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    service = IngestService(settings)
+    service.vector_store.upsert_chunks = lambda items, **kwargs: None  # type: ignore[method-assign]
+    service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_b",
+            "knowledge_base_name": "知识库B",
+            "description": "用于迁移测试",
+        }
+    )
+    job = service.register_document({"file_path": str(legacy_file)}, knowledge_base_id="default")
+
+    moved_item = service.relocate_document_to_knowledge_base(
+        source_path=str(default_dir / "legacy.md"),
+        target_knowledge_base_id="kb_b",
+        doc_uid=job["doc_uid"],
+    )
+
+    assert moved_item["knowledge_base_id"] == "kb_b"
+    assert not (default_dir / "legacy.md").exists()
+    assert (input_root / "kb_b" / "legacy.md").exists()
+
+    repository = DocumentRepository(settings.sqlite_db_path)
+    moved_document = repository.get_by_doc_uid(job["doc_uid"])
+    assert moved_document is not None
+    assert moved_document["knowledge_base_id"] == "kb_b"
+    assert Path(moved_document["source_path"]).resolve() == (input_root / "kb_b" / "legacy.md").resolve()
 
 
 def test_review_service_should_filter_review_candidates_by_knowledge_base(tmp_path: Path) -> None:

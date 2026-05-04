@@ -1217,6 +1217,88 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         outputs = register_all_documents(knowledge_base_choice, progress)
         return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
+    def reassign_selected_document(
+        choice: str,
+        target_knowledge_base_choice: str | None,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        gr.Dropdown,
+        str,
+        gr.Button,
+        gr.Button,
+        str,
+        str,
+        list[list[str]],
+        list[list[str]],
+        str,
+        list[list[str]],
+        list[dict],
+        str,
+        str,
+        list[list[str]],
+        str,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        str,
+        str,
+    ]:
+        """调整当前文档归属知识库，并刷新文档管理页。"""
+
+        file_path = parse_document_choice(choice)
+        target_knowledge_base_id = parse_knowledge_base_choice(target_knowledge_base_choice or "")
+        if not file_path:
+            refreshed_outputs = refresh_document_management_state(knowledge_base_choice=knowledge_base_choice)
+            return (
+                format_operation_result_html({"success": False, "message": "请选择文档"}, title="归属调整结果"),
+                *refreshed_outputs,
+            )
+        if not target_knowledge_base_id:
+            refreshed_outputs = refresh_document_management_state(choice, knowledge_base_choice)
+            return (
+                format_operation_result_html({"success": False, "message": "请选择目标知识库"}, title="归属调整结果"),
+                *refreshed_outputs,
+            )
+
+        selected_detail = get_document_management_state(choice, knowledge_base_choice)["selected_detail"]
+        try:
+            moved_item = ingest_service.relocate_document_to_knowledge_base(
+                source_path=file_path,
+                target_knowledge_base_id=target_knowledge_base_id,
+                doc_uid=str(selected_detail.get("doc_uid") or "") or None,
+            )
+            payload = {
+                "success": True,
+                "message": (
+                    f'文档已调整到知识库“{target_knowledge_base_id}”，'
+                    f'当前路径：{moved_item.get("source_path") or file_path}'
+                ),
+            }
+        except AppError as exc:
+            payload = {"success": False, "message": exc.message, "error_code": exc.error_code, "details": exc.details}
+
+        refreshed_outputs = refresh_document_management_state(knowledge_base_choice=knowledge_base_choice)
+        return (format_operation_result_html(payload, title="归属调整结果"), *refreshed_outputs)
+
+    def reassign_selected_document_ui(
+        choice: str,
+        target_knowledge_base_choice: str | None,
+        knowledge_base_choice: str | None = None,
+    ) -> tuple:
+        """调整当前文档归属知识库，并返回分页后的文档管理界面输出。"""
+
+        outputs = reassign_selected_document(choice, target_knowledge_base_choice, knowledge_base_choice)
+        return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
+
     def query_ingest_status(
         knowledge_base_choice: str | None = None,
     ) -> tuple[
@@ -4888,6 +4970,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 interactive=True,
                             )
                             document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
+                            with gr.Row(elem_id="document-relationship-row"):
+                                document_target_knowledge_base = gr.Dropdown(
+                                    label="调整归属到",
+                                    choices=knowledge_base_choices,
+                                    value=initial_knowledge_base_choice,
+                                    interactive=True,
+                                    elem_id="document-target-knowledge-base",
+                                )
+                                move_document_button = gr.Button("调整当前文档归属", elem_id="document-move-button")
                     with gr.Column(scale=4):
                         database_summary_table = gr.Dataframe(
                             headers=["序号", "指标", "数量"],
@@ -4906,11 +4997,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="database-page-info",
                         )
                 document_table = gr.Dataframe(
-                    headers=["序号", "文件名", "文档名称", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
-                    datatype=["str"] * 10,
+                    headers=["序号", "文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+                    datatype=["str"] * 11,
                     interactive=False,
                     row_count=0,
-                    column_count=10,
+                    column_count=11,
                     label="现有文档列表",
                     value=initial_document_table_rows,
                 )
@@ -5344,10 +5435,62 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_csv_export_result,
             ],
         )
+        document_knowledge_base.change(
+            fn=lambda choice: gr.Dropdown(value=choice),
+            inputs=[document_knowledge_base],
+            outputs=[document_target_knowledge_base],
+        )
         scan_button.click(
             fn=load_document_management_state_ui,
             inputs=[document_knowledge_base],
             outputs=[
+                document_summary,
+                database_summary,
+                database_summary_table,
+                database_page_state,
+                database_page_info,
+                document_table,
+                document_page_state,
+                document_page_info,
+                document_choices,
+                document_detail,
+                register_button,
+                rebuild_button,
+                document_quality_report,
+                document_quality_checks,
+                document_quality_sections,
+                document_quality_sections_page_state,
+                document_quality_sections_page_info,
+                document_quality_chunks,
+                document_quality_chunks_page_state,
+                document_quality_chunks_page_info,
+                document_quality_search_summary,
+                document_quality_search_results,
+                document_quality_search_page_state,
+                document_quality_search_page_info,
+                document_quality_search_state,
+                document_quality_search_detail,
+                document_quality_batch_summary,
+                document_quality_batch_table,
+                document_quality_batch_page_state,
+                document_quality_batch_page_info,
+                document_quality_config_panel,
+                document_quality_sample_limit,
+                document_quality_long_document_char_threshold,
+                document_quality_min_sections_for_long_doc,
+                document_quality_max_avg_chunks_per_section,
+                document_quality_max_chunk_chars,
+                document_quality_short_chunk_chars,
+                document_quality_short_chunk_warn_min_chunk_count,
+                document_quality_config_result,
+                document_quality_csv_export_result,
+            ],
+        )
+        move_document_button.click(
+            fn=reassign_selected_document_ui,
+            inputs=[document_choices, document_target_knowledge_base, document_knowledge_base],
+            outputs=[
+                register_result,
                 document_summary,
                 database_summary,
                 database_summary_table,

@@ -228,6 +228,35 @@ class DocumentRepository:
                 (ingest_status, index_status, error_message, utc_now_iso(), doc_uid),
             )
 
+    def reassign_document_knowledge_base(
+        self,
+        *,
+        doc_uid: str,
+        knowledge_base_id: str,
+        source_path: str | None = None,
+    ) -> None:
+        """调整文档归属知识库，并在需要时同步源文件路径。"""
+
+        with transaction(self.database_path) as connection:
+            if source_path:
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET knowledge_base_id = ?, source_path = ?, updated_at = ?
+                    WHERE doc_uid = ?
+                    """,
+                    (knowledge_base_id, source_path, utc_now_iso(), doc_uid),
+                )
+                return
+            connection.execute(
+                """
+                UPDATE documents
+                SET knowledge_base_id = ?, updated_at = ?
+                WHERE doc_uid = ?
+                """,
+                (knowledge_base_id, utc_now_iso(), doc_uid),
+            )
+
     def list_documents(
         self,
         *,

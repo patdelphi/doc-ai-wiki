@@ -37,7 +37,14 @@ class IngestService:
             auto_repair_dimension_mismatch=True,
         )
 
-    def register_documents(self, documents: list[dict], rebuild_if_exists: bool = False, progress_callback=None) -> list[dict]:
+    def register_documents(
+        self,
+        documents: list[dict],
+        *,
+        knowledge_base_id: str | None = None,
+        rebuild_if_exists: bool = False,
+        progress_callback=None,
+    ) -> list[dict]:
         """注册文档，并完成最小可用入库流程。"""
 
         if not documents:
@@ -59,7 +66,7 @@ class IngestService:
             jobs.append(
                 self.register_document(
                     document,
-                    knowledge_base_id=document.get("knowledge_base_id"),
+                    knowledge_base_id=knowledge_base_id or document.get("knowledge_base_id"),
                     rebuild_if_exists=rebuild_if_exists,
                     progress_callback=child_callback,
                 )
@@ -98,6 +105,7 @@ class IngestService:
         resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(
             knowledge_base_id or document.get("knowledge_base_id")
         )["knowledge_base_id"]
+        file_path = self.knowledge_base_service.relocate_document_file(file_path, resolved_knowledge_base_id)
 
         report("prepare", "开始读取输入文档", 5, file_path=str(file_path))
         try:
@@ -115,6 +123,12 @@ class IngestService:
         existing = self.document_repository.get_by_source_path(str(file_path))
 
         if existing and existing["source_hash"] == source_hash and not rebuild_if_exists:
+            if str(existing.get("knowledge_base_id") or "") != resolved_knowledge_base_id:
+                self.document_repository.reassign_document_knowledge_base(
+                    doc_uid=existing["doc_uid"],
+                    knowledge_base_id=resolved_knowledge_base_id,
+                    source_path=str(file_path),
+                )
             return {
                 "job_id": f"job_{uuid4().hex[:12]}",
                 "doc_uid": existing["doc_uid"],
@@ -469,6 +483,39 @@ class IngestService:
         """删除知识库配置。"""
 
         return self.knowledge_base_service.delete_knowledge_base(knowledge_base_id)
+
+    def relocate_document_to_knowledge_base(
+        self,
+        *,
+        source_path: str,
+        target_knowledge_base_id: str,
+        doc_uid: str | None = None,
+    ) -> dict:
+        """调整文档归属知识库，并在可能时同步移动输入文件。"""
+
+        if not source_path:
+            raise ValidationAppError("source_path 不能为空")
+        resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(target_knowledge_base_id)[
+            "knowledge_base_id"
+        ]
+        resolved_path = self.knowledge_base_service.relocate_document_file(source_path, resolved_knowledge_base_id)
+
+        document = self.document_repository.get_by_doc_uid(doc_uid) if doc_uid else None
+        if not document:
+            document = self.document_repository.get_by_source_path(source_path)
+        if document:
+            self.document_repository.reassign_document_knowledge_base(
+                doc_uid=document["doc_uid"],
+                knowledge_base_id=resolved_knowledge_base_id,
+                source_path=str(resolved_path),
+            )
+            return self.document_repository.get_by_doc_uid(document["doc_uid"]) or document
+
+        return {
+            "doc_uid": "",
+            "knowledge_base_id": resolved_knowledge_base_id,
+            "source_path": str(resolved_path),
+        }
 
     def rebuild_documents(
         self,
