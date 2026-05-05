@@ -179,6 +179,7 @@ def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_pat
     assert elem_ids.index("search-top-row") < elem_ids.index("search-result-workspace")
     assert elem_ids.index("search-result-summary") < elem_ids.index("search-results-table")
     assert elem_ids.index("search-results-table") < elem_ids.index("search-result-detail")
+    assert elem_ids.index("search-export-row") < elem_ids.index("search-export-result")
 
 
 def test_create_ui_app_should_configure_quality_help_progress_and_template_panel(tmp_path: Path) -> None:
@@ -355,6 +356,7 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "review-knowledge-base" in elem_ids
     assert "review-focus-panel" in elem_ids
     assert "review-action-panel" in elem_ids
+    assert "review-action-buttons" in elem_ids
     assert "review-help-panel" in elem_ids
     assert "review-result-panel" in elem_ids
     assert "review-claim-detail" in elem_ids
@@ -457,6 +459,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
     assert elem_ids.index("settings-basic-group") < elem_ids.index("settings-policy-group")
     assert elem_ids.index("settings-policy-group") < elem_ids.index("settings-prompt-group")
+    assert elem_ids.index("settings-export-row") < elem_ids.index("settings-export-result")
 
 
 def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
@@ -507,12 +510,15 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-quality-search-summary" in elem_ids
     assert "document-quality-search-results" in elem_ids
     assert "document-quality-search-detail" in elem_ids
+    assert "document-quality-search-export-result" in elem_ids
     assert "document-quality-batch-summary" in elem_ids
     assert "document-quality-batch-table" in elem_ids
     assert "document-quality-config-panel" in elem_ids
     assert "document-quality-config-result" in elem_ids
+    assert "document-quality-config-action-row" in elem_ids
     assert "document-quality-config-form" in elem_ids
     assert "document-quality-export-result" in elem_ids
+    assert "document-quality-csv-export-result" in elem_ids
     assert "document-quality-batch-export-result" in elem_ids
     assert "document-quality-config-export-result" in elem_ids
     assert "database-page-info" in elem_ids
@@ -537,6 +543,7 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert dataframes["document-quality-sections-table"]["headers"][0] == "序号"
     assert dataframes["document-quality-chunks-table"]["headers"][0] == "序号"
     assert dataframes["document-quality-batch-table"]["headers"][0] == "序号"
+    assert elem_ids.index("document-quality-search-row") < elem_ids.index("document-quality-search-export-result")
 
 
 def test_create_ui_app_should_include_quality_evaluation_workspace(tmp_path: Path) -> None:
@@ -1898,6 +1905,12 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "font-size:14px" in UI_CSS.replace(" ", "")
     assert "#search-top-row" in UI_CSS
     assert "#search-result-row > .gradio-column" in UI_CSS
+    assert "#search-export-row" in UI_CSS
+    assert "#search-export-result" in UI_CSS
+    assert "#document-quality-search-export-result" in UI_CSS
+    assert "#document-quality-config-action-row" in UI_CSS
+    assert "#settings-export-row" in UI_CSS
+    assert "#settings-export-result" in UI_CSS
     assert "#search-input-panel" in UI_CSS
     assert "min-height:260px" in UI_CSS.replace(" ", "")
     assert "table-layout:fixed" in UI_CSS.replace(" ", "")
@@ -1936,6 +1949,8 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-record-row" in UI_CSS
     assert "#review-evidence-row" in UI_CSS
     assert "#review-result-panel" in UI_CSS
+    assert "#review-export-result" in UI_CSS
+    assert "#review-action-buttons" in UI_CSS
     assert "#review-help-panel > div" in UI_CSS
     assert "#review-pending-table" in UI_CSS
     assert "#review-processed-table" in UI_CSS

@@ -36,12 +36,14 @@ from src.ui.viewmodels import (
     format_database_summary_html,
     format_document_management_help_html,
     format_document_detail_html,
+    format_document_quality_batch_export_markdown,
     format_document_quality_batch_summary_markdown,
     format_document_quality_batch_summary_html,
     format_document_quality_checks_markdown,
     format_document_quality_config_markdown,
     format_document_quality_config_html,
     format_document_quality_checks_html,
+    format_document_quality_export_markdown,
     format_document_quality_report_markdown,
     format_document_quality_report_html,
     format_document_quality_search_summary_markdown,
@@ -70,6 +72,7 @@ from src.ui.viewmodels import (
     format_quality_template_html,
     format_recent_quality_checks,
     format_review_candidates,
+    format_review_export_markdown,
     format_review_help_html,
     format_review_history,
     format_review_record_detail_markdown,
@@ -206,11 +209,67 @@ UI_CSS = """
   padding-top: 10px;
 }
 #document-quality-top-actions,
+#document-quality-batch-action-row,
+#document-quality-config-action-row,
 #search-export-row,
 #quality-export-row,
 #settings-export-row {
   align-items: center !important;
   gap: 10px;
+}
+#document-quality-top-actions,
+#document-quality-batch-action-row,
+#document-quality-config-action-row {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+#document-quality-top-actions > *,
+#document-quality-batch-action-row > *,
+#document-quality-config-action-row > * {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+#document-quality-top-actions button,
+#document-quality-batch-action-row button,
+#document-quality-config-action-row button {
+  width: 100% !important;
+}
+#settings-export-row {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+#settings-export-row > * {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+#settings-export-row button {
+  width: 100% !important;
+}
+#document-quality-export-result,
+#document-quality-search-export-result,
+#document-quality-csv-export-result,
+#document-quality-batch-export-result,
+#document-quality-config-export-result,
+#document-quality-export-result *,
+#document-quality-search-export-result *,
+#document-quality-csv-export-result *,
+#document-quality-batch-export-result *,
+#document-quality-config-export-result * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+#settings-export-result,
+#settings-export-result * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
 }
 #search-result-workspace,
 #quality-main-workspace,
@@ -508,6 +567,7 @@ UI_CSS = """
 }
 #review-help-panel,
 #review-result-panel,
+#review-export-result,
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail {
@@ -515,6 +575,7 @@ UI_CSS = """
 }
 #review-help-panel > div,
 #review-result-panel > div,
+#review-export-result > div,
 #review-claim-detail > div,
 #review-record-detail > div,
 #review-evidence-detail > div {
@@ -526,8 +587,19 @@ UI_CSS = """
 #review-result-panel {
   min-height: 260px;
 }
-#review-action-panel button {
-  margin-top: 8px;
+#review-export-result {
+  min-height: 260px;
+}
+#review-action-buttons {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+  margin: 8px 0 12px 0 !important;
+}
+#review-action-buttons > * {
+  flex: 1 1 180px !important;
+  min-width: 0 !important;
 }
 #review-pending-table table th,
 #review-pending-table table td,
@@ -606,7 +678,8 @@ UI_CSS = """
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail,
-#review-result-panel {
+#review-result-panel,
+#review-export-result {
   font-size: 14px !important;
 }
 #search-results-table table th,
@@ -670,6 +743,26 @@ UI_CSS = """
 #search-result-detail,
 #search-result-summary {
   font-size: 14px !important;
+}
+#search-export-row {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+#search-export-row > * {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+#search-export-row button {
+  width: 100% !important;
+}
+#search-export-result,
+#search-export-result * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
 }
 #settings-top-row,
 #settings-main-row,
@@ -2969,40 +3062,22 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
         report = ingest_service.inspect_document_quality(doc_uid)
         batch_result = ingest_service.list_document_quality_reports(doc_uids=[doc_uid], page_size=1)
-        markdown_sections = [
-            format_document_detail_markdown(detail),
-            "",
-            format_document_quality_report_markdown(report),
-            "",
-            format_document_quality_checks_markdown(report),
-            "",
-            "#### 章节抽样",
-            build_markdown_table(
-                ["定位", "章节标题", "层级", "章节字数", "内容预览"],
-                build_document_quality_section_rows(report),
-            ),
-            "",
-            "#### 分块抽样",
-            build_markdown_table(
-                ["片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
-                build_document_quality_chunk_rows(report),
-            ),
-            "",
-            format_document_quality_search_summary_markdown({"count": len(search_rows or []), "query_text": query_text}, doc_title=detail.get("doc_title", "")),
-            "",
-            format_search_result_detail_markdown((search_rows or [None])[0], query_text=query_text),
-            "",
-            format_document_quality_batch_summary_markdown(batch_result),
-            "",
-            "#### 批量质检结果",
-            build_markdown_table(
-                ["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                build_document_quality_batch_rows(batch_result),
-            ),
-            "",
-            format_document_quality_config_markdown(ingest_service.get_document_quality_config()),
-        ]
-        return export_markdown_result("文档管理", "入库质检", "\n".join(markdown_sections), linked_id=doc_uid)
+        markdown_text = "\n".join(
+            [
+                format_document_detail_markdown(detail),
+                "",
+                format_document_quality_export_markdown(
+                    report,
+                    batch_result,
+                    {"count": len(search_rows or []), "query_text": query_text, "table": search_rows or []},
+                    build_search_detail_payload((search_rows or [None])[0]) if search_rows else None,
+                    query_text=query_text,
+                ),
+                "",
+                format_document_quality_config_markdown(ingest_service.get_document_quality_config()),
+            ]
+        )
+        return export_markdown_result("文档管理", "入库质检", markdown_text, linked_id=doc_uid)
 
     def export_document_quality_search_result(
         choice: str,
@@ -3015,21 +3090,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         detail = get_document_management_state(choice, knowledge_base_choice)["selected_detail"]
         doc_uid = str(detail.get("doc_uid") or "")
         selected_row = build_search_detail_payload((search_rows or [None])[0]) if search_rows else None
-        markdown_text = "\n".join(
-            [
-                format_document_quality_search_summary_markdown(
-                    {"count": len(search_rows or []), "query_text": query_text},
-                    doc_title=detail.get("doc_title", ""),
-                ),
-                "",
-                "#### 结果列表",
-                build_markdown_table(
-                    ["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                    build_search_result_rows({"table": search_rows or []}),
-                ) if search_rows else "- 暂无检索结果",
-                "",
-                format_search_result_detail_markdown(selected_row, query_text=query_text),
-            ]
+        markdown_text = format_search_export_markdown(
+            {
+                "count": len(search_rows or []),
+                "query_text": query_text,
+                "table": search_rows or [],
+            },
+            selected_row,
+            query_text=query_text,
         )
         return export_markdown_result("文档管理", "文档检索验证", markdown_text, linked_id=doc_uid or None)
 
@@ -3039,17 +3107,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         batch_result = ingest_service.list_document_quality_reports(
             knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
         )
-        markdown_text = "\n".join(
-            [
-                format_document_quality_batch_summary_markdown(batch_result),
-                "",
-                "#### 批量质检结果",
-                build_markdown_table(
-                    ["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                    build_document_quality_batch_rows(batch_result),
-                ),
-            ]
-        )
+        markdown_text = format_document_quality_batch_export_markdown(batch_result)
         return export_markdown_result("文档管理", "批量入库质检", markdown_text)
 
     def export_document_quality_config_result(
@@ -3086,15 +3144,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         claim_detail = format_claim_detail_for_review(selected_claim_id, claim_detail_map)
         selected_record = next((item for item in (review_items or []) if str(item.get("review_id") or "") == str(selected_review_id or "")), None)
-        markdown_text = "\n".join(
-            [
-                format_claim_detail_markdown(claim_detail),
-                "",
-                format_evidence_detail_markdown((evidence_items or [None])[0]),
-                "",
-                format_review_record_detail_markdown(selected_record),
-            ]
-        )
+        markdown_text = format_review_export_markdown(claim_detail, evidence_items, selected_record)
         return export_markdown_result("人工审核", "审核结果", markdown_text, linked_id=selected_claim_id or None)
 
     def export_settings_result(selected_template_id: str) -> str:
@@ -5294,14 +5344,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 interactive=True,
                             )
                             review_note_input = gr.Textbox(label="审核备注", lines=4, value=initial_review_note_value)
-                            review_button = gr.Button("提交审核")
-                            review_history_button = gr.Button("刷新审核列表")
+                            with gr.Row(elem_id="review-action-buttons"):
+                                review_button = gr.Button("提交审核")
+                                review_history_button = gr.Button("刷新审核列表")
+                                review_export_button = gr.Button("下载当前审核结果")
                             review_result = gr.HTML(
                                 value=format_operation_result_html(None, title="审核结果"),
                                 elem_id="review-result-panel",
                             )
-                            review_export_button = gr.Button("下载当前审核结果")
-                            review_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="review-export-result")
+                            review_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="下载结果"),
+                                elem_id="review-export-result",
+                            )
                 with gr.Row(elem_id="review-record-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_history = gr.Dataframe(
@@ -5429,7 +5483,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row(elem_id="document-quality-top-actions"):
                             document_quality_run_button = gr.Button("执行入库质检")
                             document_quality_result_export_button = gr.Button("下载质检结果")
-                        document_quality_result_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="document-quality-export-result")
+                        document_quality_result_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="document-quality-export-result",
+                        )
                         with gr.Row(elem_id="document-quality-summary-row", equal_height=True):
                             with gr.Column(scale=1):
                                 document_quality_report = gr.HTML(
@@ -5492,6 +5549,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_document_quality_search_summary,
                                     elem_id="document-quality-search-summary",
                                 )
+                        document_quality_search_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="document-quality-search-export-result",
+                        )
                         document_quality_search_state = gr.State(initial_document_quality_search_state)
                         document_quality_search_query_state = gr.State("")
                         with gr.Row(elem_id="document-quality-result-row", equal_height=True):
@@ -5581,7 +5642,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                         precision=0,
                                     )
                                     document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
-                                    document_quality_config_export_button = gr.Button("下载当前配置")
+                                    with gr.Row(elem_id="document-quality-config-action-row"):
+                                        document_quality_config_export_button = gr.Button("下载当前配置")
                                     document_quality_config_export_result = gr.HTML(
                                         value=format_operation_result_html(None, title="下载结果"),
                                         elem_id="document-quality-config-export-result",
@@ -5636,7 +5698,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
                     with gr.Row(elem_id="search-export-row"):
                         search_export_button = gr.Button("下载结果")
-                        search_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="search-export-result")
+                    search_export_result = gr.HTML(
+                        value=format_operation_result_html(None, title="下载结果"),
+                        elem_id="search-export-result",
+                    )
 
             with gr.Tab("功能设置"):
                 settings_template_state = gr.State(initial_settings_template_state)
@@ -5783,7 +5848,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Column(scale=4):
                             with gr.Row(elem_id="settings-export-row"):
                                 settings_export_button = gr.Button("下载当前配置")
-                                settings_export_result = gr.HTML(value=format_operation_result_html(None, title="下载结果"), elem_id="settings-export-result")
+                            settings_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="下载结果"),
+                                elem_id="settings-export-result",
+                            )
 
         document_knowledge_base.change(
             fn=change_document_knowledge_base_ui,
@@ -6203,7 +6271,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         document_quality_search_export_button.click(
             fn=export_document_quality_search_result,
             inputs=[document_choices, document_quality_search_state, document_quality_search_query_state, document_knowledge_base],
-            outputs=[document_quality_result_export_result],
+            outputs=[document_quality_search_export_result],
         )
         document_quality_batch_button.click(
             fn=run_batch_document_quality_ui,

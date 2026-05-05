@@ -38,8 +38,10 @@ from src.ui.viewmodels import (
     format_document_management_help_html,
     format_document_detail_html,
     format_document_quality_batch_summary_html,
+    format_document_quality_batch_export_markdown,
     format_document_quality_batch_summary_markdown,
     format_document_detail_markdown,
+    format_document_quality_export_markdown,
     format_evidence_detail_html,
     format_document_quality_config_markdown,
     format_document_quality_config_html,
@@ -58,6 +60,7 @@ from src.ui.viewmodels import (
     format_quality_evaluation_summary_html,
     format_quality_progress_html,
     format_review_candidates,
+    format_review_export_markdown,
     format_review_history,
     format_review_record_detail_markdown,
     format_settings_help_html,
@@ -214,7 +217,7 @@ def test_review_candidate_helpers_should_prioritize_claim_display() -> None:
 
     assert formatted["count"] == 1
     assert "claim_review_1" in formatted["claim_detail_map"]
-    assert rows == [["claim_review_1", "第一条待审核 Claim", "需复核", "中级", "待处理", "文档一", "模板一", "26-05-01 20-00"]]
+    assert rows == [["claim_review_1", "第一条待审核 Claim", "需复核", "中级", "待处理", "文档一", "模板一", "26-05-01 20:00"]]
 
 
 def test_parse_doc_uid_choice_should_return_doc_uid() -> None:
@@ -506,6 +509,112 @@ def test_document_quality_review_and_settings_markdown_helpers_should_render_exp
     assert "### 运行配置" in format_settings_runtime_markdown(runtime_config)
     assert "### 模板详情" in format_settings_template_detail_markdown(template)
     assert "### 审核记录详情" in format_review_record_detail_markdown(review_record)
+
+    document_export_markdown = format_document_quality_export_markdown(
+        report,
+        batch_result,
+        {"count": 2, "query_text": "阿胶", "table": [{"doc_title": "阿胶本草", "source_span": "section-1", "chunk_id": "chk_1", "retrieval_source": "hybrid", "score": 0.88, "rerank_score": 0.91, "matched_sources": "fts, vector", "content_preview": "阿胶相关内容"}]},
+        {"doc_title": "阿胶本草", "source_span": "section-1", "chunk_id": "chk_1", "retrieval_source": "hybrid", "score": 0.88, "rerank_score": 0.91, "matched_sources": "fts, vector", "content": "阿胶相关内容"},
+        query_text="阿胶",
+    )
+    batch_export_markdown = format_document_quality_batch_export_markdown(batch_result)
+    batch_export_with_rows_markdown = format_document_quality_batch_export_markdown(
+        {
+            "summary": {"document_count": 1, "success_count": 1, "warning_count": 0, "danger_count": 0},
+            "reports": [
+                {
+                    "document": {"doc_title": "阿胶本草", "doc_uid": "doc_1", "index_status": "indexed"},
+                    "metrics": {"section_count": 3, "chunk_count": 8, "fts_chunk_count": 8, "vector_chunk_count": 8},
+                    "summary": {"level": "success", "message": "结构正常"},
+                    "issues": [],
+                }
+            ],
+        }
+    )
+
+    assert "##### 结果 1" in document_export_markdown
+    assert "#### 原文内容" in document_export_markdown
+    assert "```text" not in document_export_markdown
+    assert "| 文档名称 |" not in batch_export_markdown
+    assert "- 暂无批量质检结果" in batch_export_markdown
+    assert "##### 文档 1" in batch_export_with_rows_markdown
+
+
+def test_review_export_markdown_should_include_all_evidence_details_and_review_record() -> None:
+    """人工审核导出应包含完整 Claim、全部证据详情和审核记录。"""
+
+    claim_detail = {
+        "summary": {
+            "claim_id": "claim_1",
+            "claim_text": "阿胶可以治疗所有贫血",
+            "verdict": "needs_review",
+            "risk_level": "high",
+            "confidence": 0.45,
+            "evidence_judgement": "contradict",
+            "review_status": "reviewed",
+            "source_doc": "阿胶本草",
+            "source_span": "section-2",
+            "evidence": "Claim 证据摘要",
+            "evidence_reason": "Claim 证据说明",
+        },
+        "evidence_count": 2,
+    }
+    evidence_items = [
+        {
+            "chunk_id": "chk_1",
+            "doc_uid": "doc_1",
+            "doc_title": "阿胶本草",
+            "source_span": "section-2",
+            "evidence_relation": "contradict",
+            "retrieval_source": "hybrid",
+            "matched_sources": ["vector"],
+            "matched_queries": ["logic_relaxed"],
+            "rerank_score": 0.82,
+            "relation_reason": "第一条说明",
+            "context_mode": "chunk_only",
+            "section_title": "辨伪",
+            "content_preview": "第一条证据内容",
+        },
+        {
+            "chunk_id": "chk_2",
+            "doc_uid": "doc_2",
+            "doc_title": "阿胶古籍",
+            "source_span": "section-5",
+            "evidence_relation": "support",
+            "retrieval_source": "vector",
+            "matched_sources": ["vector"],
+            "matched_queries": ["claim_literal"],
+            "rerank_score": 0.91,
+            "relation_reason": "第二条说明",
+            "context_mode": "section_context",
+            "section_title": "卷三",
+            "content_preview": "第二条证据内容",
+        },
+    ]
+    review_record = {
+        "review_id": "review_1",
+        "claim_id": "claim_1",
+        "check_id": "check_1",
+        "review_action": "reject",
+        "review_status": "reviewed",
+        "reviewer": "tester",
+        "created_at": "2026-05-01T12:00:00+00:00",
+        "template_name": "严格证据核验",
+        "claim_text": "阿胶可以治疗所有贫血",
+        "review_note": "证据不足",
+    }
+
+    markdown_text = format_review_export_markdown(claim_detail, evidence_items, review_record)
+
+    assert "### Claim 详情" in markdown_text
+    assert "#### 完整证据详情" in markdown_text
+    assert "##### 证据 1" in markdown_text
+    assert "##### 证据 2" in markdown_text
+    assert "第一条证据内容" in markdown_text
+    assert "第二条证据内容" in markdown_text
+    assert markdown_text.index("第一条证据内容") < markdown_text.index("第二条证据内容")
+    assert "### 审核记录详情" in markdown_text
+    assert "证据不足" in markdown_text
 
 
 def test_database_summary_html_should_generate_card_layout() -> None:
@@ -930,8 +1039,8 @@ def test_operation_and_history_display_helpers_should_generate_readable_content(
 
     assert "执行状态：成功" in operation_markdown
     assert "最后进度：100%" in operation_markdown
-    assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "26-04-30 20-00", "测试输入"]]
-    assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "26-04-30 20-30", "通过", "第一条结论"]]
+    assert quality_rows == [["", "check_1", "严格证据核验", "需复核", "2", "26-04-30 20:00", "测试输入"]]
+    assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "26-04-30 20:30", "通过", "第一条结论"]]
 
 
 def test_operation_result_html_should_generate_card_layout() -> None:
@@ -1289,8 +1398,12 @@ def test_search_and_quality_export_markdown_should_follow_claim_order_and_includ
 
     assert "### 检索结果" in search_markdown
     assert "#### 结果列表" in search_markdown
+    assert "##### 结果 1" in search_markdown
     assert "阿胶本草" in search_markdown
     assert "#### 原文详情" in search_markdown
+    assert "#### 原文内容" in search_markdown
+    assert "| 序号 |" not in search_markdown
+    assert "```text" not in search_markdown
     assert "### 质检结果" in quality_markdown
     assert "阿胶可以治疗所有贫血" in quality_markdown
     assert "东阿有阿胶的专利技术" in quality_markdown

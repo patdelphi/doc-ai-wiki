@@ -1178,6 +1178,52 @@ def format_document_quality_search_summary_markdown(formatted: dict | None, *, d
     )
 
 
+def format_document_quality_export_markdown(
+    report: dict | None,
+    batch_result: dict | None,
+    search_formatted: dict | None,
+    selected_search_item: dict | None,
+    *,
+    query_text: str = "",
+) -> str:
+    """将单文档入库质检导出为更适合预览阅读的 Markdown。"""
+
+    doc_title = _display_text((report or {}).get("document", {}).get("doc_title"))
+    return "\n".join(
+        [
+            format_document_quality_report_markdown(report),
+            "",
+            format_document_quality_checks_markdown(report),
+            "",
+            format_document_quality_batch_summary_markdown(batch_result),
+            "",
+            format_document_quality_search_summary_markdown(search_formatted, doc_title=doc_title),
+            "",
+            format_search_export_markdown(search_formatted, selected_search_item, query_text=query_text),
+            "",
+            format_document_quality_config_markdown(None),
+        ]
+    )
+
+
+def format_document_quality_batch_export_markdown(batch_result: dict | None) -> str:
+    """将批量入库质检结果导出为摘要加分块明细。"""
+
+    sections = [format_document_quality_batch_summary_markdown(batch_result), "", "#### 文档明细"]
+    rows = build_document_quality_batch_rows(batch_result)
+    if rows:
+        sections.append(
+            _build_markdown_named_blocks(
+                item_name="文档",
+                columns=["文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                rows=rows,
+            )
+        )
+    else:
+        sections.append("- 暂无批量质检结果")
+    return "\n".join(sections)
+
+
 def format_document_quality_batch_summary_html(batch_result: dict | None) -> str:
     """构建批量入库质检摘要。"""
 
@@ -1572,9 +1618,8 @@ def format_search_result_detail_markdown(item: dict | None, *, query_text: str =
             f'- 章节：{_display_text(resolved.get("section_title"))}',
             f'- 作者：{_display_text(resolved.get("author"))}',
             "",
-            "```text",
+            "#### 原文内容",
             _display_text(resolved.get("content") or resolved.get("expanded_content")),
-            "```",
         ]
     )
 
@@ -1586,9 +1631,10 @@ def format_search_export_markdown(formatted: dict | None, selected_item: dict | 
     sections = [format_search_summary_markdown(formatted), "", "#### 结果列表"]
     if rows:
         sections.append(
-            _build_markdown_table(
-                ["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
-                [
+            _build_markdown_named_blocks(
+                item_name="结果",
+                columns=["序号", "文档名称", "定位", "片段 ID", "检索来源", "相关度", "重排分", "匹配来源", "内容摘要"],
+                rows=[
                     [
                         index + 1,
                         item.get("doc_title") or item.get("source_name"),
@@ -2245,6 +2291,31 @@ def format_review_record_detail_markdown(record: dict | None) -> str:
             f'- 审核备注：{_display_text(resolved.get("review_note"))}',
         ]
     )
+
+
+def format_review_export_markdown(
+    claim_detail: dict | None,
+    evidence_items: list[dict] | None,
+    review_record: dict | None,
+) -> str:
+    """将人工审核当前查看内容转换为导出 Markdown。"""
+
+    sections = [format_claim_detail_markdown(claim_detail)]
+    resolved_evidence_items = list(evidence_items or (claim_detail or {}).get("evidence_table") or [])
+    if resolved_evidence_items:
+        sections.extend(["", "#### 完整证据详情"])
+        for index, evidence_item in enumerate(resolved_evidence_items, start=1):
+            sections.extend(
+                [
+                    "",
+                    f"##### 证据 {index}",
+                    format_evidence_detail_markdown(evidence_item),
+                ]
+            )
+    else:
+        sections.extend(["", "- 当前 Claim 暂无证据条目"])
+    sections.extend(["", format_review_record_detail_markdown(review_record)])
+    return "\n".join(sections)
 
 
 def build_claim_evidence_rows(detail: dict | None) -> list[list[str]]:
