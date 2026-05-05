@@ -91,3 +91,6 @@ def test_build_markdown_preview_html_should_render_heading_list_and_table() -> N
     assert "<table>" in preview_html
     assert "<th>列1</th>" in preview_html
     assert "<td>A</td>" in preview_html
+    assert "table-layout: fixed" in preview_html
+    assert "overflow-wrap: anywhere" in preview_html
+    assert "word-break: break-word" in preview_html

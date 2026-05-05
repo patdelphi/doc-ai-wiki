@@ -1440,21 +1440,41 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
     footer_html = None
     if resolved.get("download_url"):
         file_name = _display_text(resolved.get("download_file_name") or "点击下载")
+        download_url = str(resolved.get("download_url") or "")
         link_items = [
             (
-                f'<div style="margin:0 0 8px 0;">'
-                f'<a href="{escape(str(resolved.get("download_url")))}" '
-                f'target="_blank" rel="noopener noreferrer">下载文件：{escape(file_name)}</a>'
-                f"</div>"
+                '<div style="margin:0 0 12px 0;padding:12px 14px;'
+                'border:1px solid var(--border-color-primary);border-radius:12px;'
+                'background:var(--body-background-fill);">'
+                '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">下载文件</div>'
+                f'<div style="margin:0 0 6px 0;"><a href="{escape(download_url)}" '
+                'target="_blank" rel="noopener noreferrer" '
+                'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+                f"{escape(file_name)}</a></div>"
+                '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">下载地址</div>'
+                '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
+                'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+                f"{escape(download_url)}</div>"
+                "</div>"
             )
         ]
         if resolved.get("preview_url"):
             preview_name = _display_text(resolved.get("preview_file_name") or "查看渲染效果")
+            preview_url = str(resolved.get("preview_url") or "")
             link_items.append(
-                f'<div style="margin:0;">'
-                f'<a href="{escape(str(resolved.get("preview_url")))}" '
-                f'target="_blank" rel="noopener noreferrer">查看渲染效果：{escape(preview_name)}</a>'
-                f"</div>"
+                '<div style="margin:0;padding:12px 14px;'
+                'border:1px solid var(--border-color-primary);border-radius:12px;'
+                'background:var(--body-background-fill);">'
+                '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">查看渲染效果</div>'
+                f'<div style="margin:0 0 6px 0;"><a href="{escape(preview_url)}" '
+                'target="_blank" rel="noopener noreferrer" '
+                'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+                f"{escape(preview_name)}</a></div>"
+                '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">预览地址</div>'
+                '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
+                'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+                f"{escape(preview_url)}</div>"
+                "</div>"
             )
         footer_html = "".join(link_items)
 
@@ -1784,6 +1804,18 @@ def _build_markdown_table(headers: list[object], rows: list[list[object]]) -> st
     return "\n".join([header_row, separator_row, *body_rows])
 
 
+def _build_markdown_named_blocks(item_name: str, columns: list[object], rows: list[list[object]]) -> str:
+    """将宽表导出为命名块，降低预览页横向滚动风险。"""
+
+    sections: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        sections.append(f"##### {item_name} {index}")
+        for column_name, cell in zip(columns, row):
+            sections.append(f"- {_display_text(column_name)}：{_display_text(cell)}")
+        sections.append("")
+    return "\n".join(sections).rstrip()
+
+
 def _escape_markdown_table_cell(value: object) -> str:
     """转义 Markdown 表格单元格中的特殊字符。"""
 
@@ -1858,47 +1890,47 @@ def format_quality_export_markdown(
     formatted: dict | None,
     claim_detail: dict | None,
 ) -> str:
-    """汇总 AI 质检摘要、Claim 列表和当前 Claim 的完整详情，用于导出。"""
+    """按 Claim 顺序导出完整 AI 质检结果。"""
 
-    sections = [format_quality_result_markdown(formatted), "", "#### Claim 列表"]
-    claim_rows = build_quality_claim_rows(formatted)
-    if claim_rows:
-        sections.append(
-            _build_markdown_table(
-                ["Claim ID", "Claim 内容", "当前判定", "风险等级", "置信度", "证据关系", "来源文档", "来源位置"],
-                claim_rows,
-            )
+    resolved = formatted or {}
+    sections = [format_quality_result_markdown(resolved)]
+    claims = resolved.get("claims") or []
+    claim_detail_map = resolved.get("claim_detail_map") or build_claim_detail_map(claims)
+    if not claims:
+        sections.extend(["", "- 暂无 Claim"])
+        return "\n".join(sections)
+
+    for index, claim_item in enumerate(claims, start=1):
+        claim_id = _display_text(claim_item.get("claim_id"))
+        claim_detail_by_id = (
+            format_claim_detail_for_review(claim_id, claim_detail_map)
+            if claim_item.get("claim_id")
+            else {}
         )
-    else:
-        sections.append("- 暂无 Claim")
-    sections.extend(
-        [
-            "",
-            format_claim_detail_markdown(claim_detail),
-        ]
-    )
-    evidence_rows = build_claim_evidence_rows(claim_detail)
-    sections.extend(["", "#### 当前 Claim 证据列表"])
-    if evidence_rows:
-        sections.append(
-            _build_markdown_table(
-                ["片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                evidence_rows,
-            )
+        current_claim_detail = claim_detail_by_id
+        selected_summary = (claim_detail or {}).get("summary") or {}
+        if selected_summary.get("claim_id") == claim_item.get("claim_id"):
+            current_claim_detail = claim_detail or claim_detail_by_id
+        evidence_items = current_claim_detail.get("evidence_table") or []
+        sections.extend(
+            [
+                "",
+                f"## Claim {index}",
+                format_claim_detail_markdown(current_claim_detail),
+            ]
         )
-    else:
-        sections.append("- 当前 Claim 暂无证据条目")
-    evidence_items = (claim_detail or {}).get("evidence_table") or []
-    if evidence_items:
-        sections.extend(["", "#### 当前 Claim 完整证据详情"])
-        for index, evidence_item in enumerate(evidence_items, start=1):
-            sections.extend(
-                [
-                    "",
-                    f"##### 证据 {index}",
-                    format_evidence_detail_markdown(evidence_item),
-                ]
-            )
+        if evidence_items:
+            sections.extend(["", "#### 完整证据详情"])
+            for evidence_index, evidence_item in enumerate(evidence_items, start=1):
+                sections.extend(
+                    [
+                        "",
+                        f"##### 证据 {evidence_index}",
+                        format_evidence_detail_markdown(evidence_item),
+                    ]
+                )
+        else:
+            sections.extend(["", "- 当前 Claim 暂无证据条目"])
     return "\n".join(sections)
 
 
@@ -2246,9 +2278,9 @@ def format_evidence_detail_html(evidence: dict | None) -> str:
             tone="neutral",
         )
     relation_label = _format_evidence_relation_label(resolved.get("evidence_relation"))
-    return _build_panel_html(
+    metadata_html = _build_panel_html(
         title="证据详情",
-        description=_display_text(resolved.get("content_preview")),
+        description="当前已定位到所选证据条目。",
         cards=[
             ("片段 ID", _display_text(resolved.get("chunk_id"))),
             ("文档", _display_text(resolved.get("doc_title") or resolved.get("doc_uid"))),
@@ -2262,10 +2294,19 @@ def format_evidence_detail_html(evidence: dict | None) -> str:
             f'章节：{_display_text(resolved.get("section_title"))}',
             f'上下文模式：{_display_text(resolved.get("context_mode"))}',
             f'关系说明：{_display_text(resolved.get("relation_reason"))}',
-            f'证据摘要：{_display_text(resolved.get("content_preview"))}',
         ],
         tone=_get_evidence_relation_tone(resolved.get("evidence_relation")),
         badge_text=relation_label,
+    )
+    content_text = _display_text(resolved.get("content_preview"))
+    return (
+        f"{metadata_html}"
+        f"""
+        <div style="border:1px solid var(--border-color-primary);background:var(--body-background-fill);border-radius:16px;padding:16px 18px;margin:0 0 12px 0;max-width:100%;overflow:hidden;">
+            <div style="font-size:16px;font-weight:700;color:var(--body-text-color);margin:0 0 8px 0;">原文内容</div>
+            <div style="font-size:14px;line-height:1.8;color:var(--body-text-color);white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;max-width:100%;overflow:hidden;">{escape(content_text)}</div>
+        </div>
+        """
     )
 
 
@@ -2289,9 +2330,8 @@ def format_evidence_detail_markdown(evidence: dict | None) -> str:
             f'- 上下文模式：{_display_text(resolved.get("context_mode"))}',
             f'- 关系说明：{_display_text(resolved.get("relation_reason"))}',
             "",
-            "```text",
+            "#### 原文内容",
             _display_text(resolved.get("content_preview")),
-            "```",
         ]
     )
 

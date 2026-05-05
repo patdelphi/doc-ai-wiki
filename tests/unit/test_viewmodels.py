@@ -40,6 +40,7 @@ from src.ui.viewmodels import (
     format_document_quality_batch_summary_html,
     format_document_quality_batch_summary_markdown,
     format_document_detail_markdown,
+    format_evidence_detail_html,
     format_document_quality_config_markdown,
     format_document_quality_config_html,
     format_document_quality_checks_markdown,
@@ -985,8 +986,56 @@ def test_operation_result_html_should_render_download_link_when_present() -> Non
     assert "href=" in operation_html
     assert "result.txt" in operation_html
     assert "result.preview.html" in operation_html
-    assert "margin:0 0 8px 0" in operation_html
+    assert "下载地址" in operation_html
     assert "　|　" not in operation_html
+
+
+def test_operation_result_html_should_wrap_long_urls_and_show_detail_blocks() -> None:
+    """下载结果详情应展示可折行的 URL 明细块。"""
+
+    operation_html = format_operation_result_html(
+        {
+            "success": True,
+            "message": "已生成下载文件",
+            "download_url": "http://127.0.0.1:7860/gradio_api/file=C:/Users/demo/index/Docs/very_long_result_file_name_20260505_000001.txt",
+            "download_file_name": "very_long_result_file_name_20260505_000001.txt",
+            "preview_url": "http://127.0.0.1:7860/gradio_api/file=C:/Users/demo/index/Docs/very_long_result_file_name_20260505_000001.preview.html",
+            "preview_file_name": "very_long_result_file_name_20260505_000001.preview.html",
+        },
+        title="下载结果",
+    )
+
+    assert "下载地址" in operation_html
+    assert "预览地址" in operation_html
+    assert "overflow-wrap:anywhere" in operation_html.replace(" ", "")
+    assert "word-break:break-word" in operation_html.replace(" ", "")
+    assert "white-space:normal" in operation_html.replace(" ", "")
+
+
+def test_evidence_detail_html_should_render_plain_text_block_without_quote_style() -> None:
+    """证据详情应使用普通文本块展示内容，避免引用样式横向滚动。"""
+
+    detail_html = format_evidence_detail_html(
+        {
+            "chunk_id": "section-112:chunk-183",
+            "doc_title": "国际良种驴繁育中心",
+            "source_span": "section-112:chunk-183",
+            "evidence_relation": "support",
+            "retrieval_source": "vector",
+            "matched_sources": ["vector"],
+            "matched_queries": ["claim_literal"],
+            "rerank_score": 0.88,
+            "relation_reason": "直接支持。",
+            "content_preview": "[section-112:chunk-183] 国际良种驴繁育中心\n带动毛驴产业可持续发展。",
+        }
+    )
+
+    assert "原文内容" in detail_html
+    assert "white-space:pre-wrap" in detail_html.replace(" ", "")
+    assert "overflow-wrap:anywhere" in detail_html.replace(" ", "")
+    assert "word-break:break-word" in detail_html.replace(" ", "")
+    assert "<blockquote" not in detail_html.lower()
+    assert "<pre" not in detail_html.lower()
 
 
 def test_document_management_helpers_should_return_detail_and_button_states() -> None:
@@ -1114,8 +1163,8 @@ def test_quality_progress_panel_should_show_stage_and_model_status() -> None:
     assert "阿胶可以治疗所有贫血" in progress_html
 
 
-def test_search_and_quality_export_markdown_should_include_summary_table_and_detail() -> None:
-    """检索和 AI 质检导出内容应汇总摘要、表格和详情。"""
+def test_search_and_quality_export_markdown_should_follow_claim_order_and_include_full_details() -> None:
+    """AI 质检导出应按 Claim 顺序输出完整详情与证据。"""
 
     formatted_search = format_search_results(
         [
@@ -1174,7 +1223,36 @@ def test_search_and_quality_export_markdown_should_include_summary_table_and_det
                             "content_preview": "证据内容",
                         }
                     ],
-                }
+                },
+                {
+                    "claim_id": "claim_2",
+                    "claim_text": "东阿有阿胶的专利技术",
+                    "verdict": "passed",
+                    "risk_level": "low",
+                    "confidence": 0.95,
+                    "evidence_judgement": "support",
+                    "source_doc": "阿胶历史文化通典",
+                    "source_span": "section-112:chunk-184",
+                    "evidence": "第二条证据摘要",
+                    "evidence_reason": "检索结果与 Claim 一致",
+                    "evidence_details": [
+                        {
+                            "chunk_id": "chk_2",
+                            "doc_uid": "doc_2",
+                            "doc_title": "阿胶历史文化通典",
+                            "source_span": "section-112:chunk-184",
+                            "evidence_relation": "support",
+                            "retrieval_source": "vector",
+                            "matched_sources": ["vector"],
+                            "matched_queries": ["claim_literal"],
+                            "rerank_score": 0.91,
+                            "relation_reason": "检索结果与当前 Claim 主题相关。",
+                            "context_mode": "section_context",
+                            "section_title": "国际良种驴繁育中心",
+                            "content_preview": "第二条证据内容",
+                        }
+                    ],
+                },
             ],
             "rule_hits": [],
         }
@@ -1214,12 +1292,18 @@ def test_search_and_quality_export_markdown_should_include_summary_table_and_det
     assert "阿胶本草" in search_markdown
     assert "#### 原文详情" in search_markdown
     assert "### 质检结果" in quality_markdown
-    assert "#### Claim 列表" in quality_markdown
     assert "阿胶可以治疗所有贫血" in quality_markdown
-    assert "证据关系" in quality_markdown
-    assert "#### 当前 Claim 证据列表" in quality_markdown
-    assert "#### 当前 Claim 完整证据详情" in quality_markdown
+    assert "东阿有阿胶的专利技术" in quality_markdown
+    assert "## Claim 1" in quality_markdown
+    assert "## Claim 2" in quality_markdown
+    assert "#### 完整证据详情" in quality_markdown
     assert "##### 证据 1" in quality_markdown
+    assert quality_markdown.index("## Claim 1") < quality_markdown.index("## Claim 2")
+    assert quality_markdown.index("阿胶可以治疗所有贫血") < quality_markdown.index("东阿有阿胶的专利技术")
+    assert quality_markdown.index("第二条证据内容") > quality_markdown.index("## Claim 2")
+    assert "#### 证据列表" not in quality_markdown
+    assert "```text" not in quality_markdown
+    assert "#### 原文内容" in quality_markdown
     assert "### 效果评测" in evaluation_markdown
     assert "核心命中" in evaluation_markdown
     assert "宽松命中" in evaluation_markdown

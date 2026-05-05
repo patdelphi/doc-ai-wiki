@@ -167,7 +167,7 @@ def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_pat
     assert sliders[0].get("maximum") == 100
     assert dataframes
     assert dataframes[0].get("headers", [])[0] == "序号"
-    assert dataframes[0].get("column_count", [])[0] == 9
+    assert dataframes[0].get("column_count", [])[0] == 6
     assert "search-knowledge-base" in elem_ids
     assert "search-input-panel" in elem_ids
     assert "search-top-row" in elem_ids
@@ -229,12 +229,18 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-claim-row" in elem_ids
     assert "quality-evidence-row" in elem_ids
     assert "quality-history-row" in elem_ids
+    assert "quality-bottom-row" in elem_ids
+    assert "quality-evaluation-action-row" in elem_ids
+    assert "quality-evaluation-accordion" in elem_ids
     assert "quality-help-panel" in elem_ids
     assert "quality-template-panel" in elem_ids
-    assert "quality-main-workspace" in elem_ids
-    assert "quality-followup-workspace" in elem_ids
+    assert "quality-bottom-help" in elem_ids
     assert "quality-progress-panel" in elem_ids
     assert "quality-result-panel" in elem_ids
+    assert "quality-claim-list-panel" in elem_ids
+    assert "quality-evidence-list-panel" in elem_ids
+    assert "quality-action-panel" in elem_ids
+    assert "quality-evaluation-panel" in elem_ids
     assert "quality-knowledge-base" in elem_ids
     assert "quality-claims-table" in elem_ids
     assert "quality-recent-table" in elem_ids
@@ -248,8 +254,74 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert claim_selectors[0].get("label") == "Claim 列表"
     assert evidence_tables and evidence_tables[0].get("max_height") == 420
     assert recent_tables and recent_tables[0].get("max_height") == 420
-    assert elem_ids.index("quality-template-row") < elem_ids.index("quality-main-workspace")
-    assert elem_ids.index("quality-main-workspace") < elem_ids.index("quality-followup-workspace")
+    assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
+    assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-row")
+    assert elem_ids.index("quality-evidence-row") < elem_ids.index("quality-history-row")
+    assert elem_ids.index("quality-history-row") < elem_ids.index("quality-evaluation-accordion")
+    assert elem_ids.index("quality-evaluation-accordion") < elem_ids.index("quality-bottom-help")
+
+
+def test_create_ui_app_should_include_quality_dummy_workspace(tmp_path: Path) -> None:
+    """AI 质检优化 dummy 页应独立展示静态草图结构。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    html_values = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html"
+    ]
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    evidence_tables = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-dummy-evidence-table"
+    ]
+    history_tables = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-dummy-history-table"
+    ]
+
+    assert any("已完成 1 次模拟质检" in value for value in html_values)
+    assert any("详细功能说明" in value for value in html_values)
+    assert "quality-dummy-row-1" in elem_ids
+    assert "quality-dummy-row-2" in elem_ids
+    assert "quality-dummy-row-3" in elem_ids
+    assert "quality-dummy-row-4" in elem_ids
+    assert "quality-dummy-bottom-row" in elem_ids
+    assert "quality-dummy-intake-panel" in elem_ids
+    assert "quality-dummy-status-panel" in elem_ids
+    assert "quality-dummy-queue-panel" in elem_ids
+    assert "quality-dummy-focus-panel" in elem_ids
+    assert "quality-dummy-evidence-panel" in elem_ids
+    assert "quality-dummy-evidence-table" in elem_ids
+    assert "quality-dummy-evidence-detail" in elem_ids
+    assert "quality-dummy-history-panel" in elem_ids
+    assert "quality-dummy-history-table" in elem_ids
+    assert "quality-dummy-actions" in elem_ids
+    assert "quality-dummy-actions-result" in elem_ids
+    assert "quality-dummy-detail-help" in elem_ids
+    assert "待处理 Claim 队列" in labels
+    assert "证据列表" in labels
+    assert "历史质检记录" in labels
+    assert evidence_tables and evidence_tables[0].get("column_count", [])[0] == 6
+    assert history_tables and history_tables[0].get("max_height") == 260
+    assert elem_ids.index("quality-dummy-row-1") < elem_ids.index("quality-dummy-row-2")
+    assert elem_ids.index("quality-dummy-row-2") < elem_ids.index("quality-dummy-row-3")
+    assert elem_ids.index("quality-dummy-row-3") < elem_ids.index("quality-dummy-row-4")
+    assert elem_ids.index("quality-dummy-row-4") < elem_ids.index("quality-dummy-detail-help")
 
 
 def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None:
@@ -325,14 +397,22 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     ]
     elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
-    tab_labels = [
+    tab_components = [component for component in components if component.get("type") == "tabitem"]
+    visible_tab_labels = [
         str(component.get("props", {}).get("label", ""))
-        for component in components
-        if component.get("type") == "tabitem"
+        for component in tab_components
+        if component.get("props", {}).get("visible", True) is not False
+    ]
+    dummy_tabs = [
+        component
+        for component in tab_components
+        if str(component.get("props", {}).get("label", "")) == "AI 质检优化 Dummy"
     ]
 
     assert any("功能设置" in value for value in html_values)
-    assert tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
+    assert visible_tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
+    assert len(dummy_tabs) == 1
+    assert dummy_tabs[0].get("props", {}).get("visible") is False
     assert "settings-overview-panel" in elem_ids
     assert "settings-workspace-panel" in elem_ids
     assert "settings-knowledge-base-panel" in elem_ids
@@ -1842,6 +1922,9 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#quality-recent-table" in UI_CSS
     assert "#quality-evidence-table" in UI_CSS
     assert "#quality-evidence-detail" in UI_CSS
+    assert "#quality-export-row" in UI_CSS
+    assert "#quality-export-result" in UI_CSS
+    assert "#quality-export-result a" in UI_CSS
     assert "#quality-recent-table table td:nth-child(2)" in UI_CSS
     assert "#quality-recent-table tr:has(td:nth-child(2) button:not(:empty)) td" in UI_CSS
     assert "#quality-claims-table tr:has(td:focus-within) td" in UI_CSS
@@ -1862,7 +1945,9 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-processed-table table th" in UI_CSS
     assert "#review-history-table table th" in UI_CSS
     assert "#review-evidence-table table th" in UI_CSS
+    assert "#review-evidence-detail pre" not in UI_CSS
     assert "rgba(68, 68, 68, 0.22)" in UI_CSS
     assert "inset 6px 0 0 0" in UI_CSS
     assert "#review-claim-detail" in UI_CSS
     assert "font-weight:700" in UI_CSS.replace(" ", "")
+    assert "overflow-wrap:anywhere" in UI_CSS.replace(" ", "")

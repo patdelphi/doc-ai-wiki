@@ -203,6 +203,32 @@ python -m src.ui.app
 
 - `http://127.0.0.1:7860`
 
+也可以直接使用已固化场景参数的启动脚本：
+
+```powershell
+.\start_gradio_local_7860.ps1
+```
+
+```sh
+sh "./start_gradio_local_7860.sh"
+```
+
+服务器对外启动可使用以下脚本：
+
+```powershell
+.\start_gradio_server_80.ps1
+```
+
+```sh
+sh "./start_gradio_server_80.sh"
+```
+
+说明：
+
+- 本地脚本固定使用 `APP_HOST=127.0.0.1`、`GRADIO_PORT=7860`
+- 服务器脚本固定使用 `APP_HOST=0.0.0.0`、`GRADIO_PORT=80`
+- Linux 或 Windows 使用 `80` 端口时，通常需要管理员或 `root` 权限
+
 适用场景：
 
 - 本地知识库管理

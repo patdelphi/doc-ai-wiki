@@ -271,8 +271,11 @@ UI_CSS = """
 #quality-summary-row > .gradio-column,
 #quality-claim-row > .gradio-column,
 #quality-evidence-row > .gradio-column,
-#quality-history-row > .gradio-column {
+#quality-history-row > .gradio-column,
+#quality-evaluation-action-row > .gradio-column,
+#quality-bottom-row > .gradio-column {
   align-self: stretch !important;
+  min-width: 0 !important;
 }
 #quality-input-panel {
   min-height: 260px;
@@ -287,7 +290,9 @@ UI_CSS = """
 #quality-result-panel,
 #quality-claim-detail,
 #quality-evidence-detail,
-#quality-history-panel {
+#quality-history-panel,
+#quality-action-panel,
+#quality-evaluation-panel {
   height: 100%;
 }
 #quality-help-panel {
@@ -306,19 +311,37 @@ UI_CSS = """
 #quality-history-row {
   align-items: stretch !important;
 }
+#quality-evaluation-action-row {
+  align-items: stretch !important;
+}
 #quality-template-panel > div,
 #quality-help-panel > div,
 #quality-progress-panel > div,
 #quality-result-panel > div,
 #quality-claim-detail > div,
 #quality-evidence-detail > div,
-#quality-history-panel > div {
-  height: 100%;
+#quality-evidence-detail > div {
 }
 #quality-history-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+#quality-input-panel,
+#quality-history-panel > div {
+  height: auto !important;
+}
+#quality-input-panel,
+#quality-claim-list-panel,
+#quality-evidence-list-panel,
+#quality-history-panel,
+#quality-action-panel,
+#quality-evaluation-panel {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
 }
 #quality-history-note {
   font-size: 13px !important;
@@ -358,8 +381,16 @@ UI_CSS = """
 #quality-evidence-table table td {
   white-space: pre-wrap !important;
   word-break: break-word !important;
+  overflow-wrap: anywhere !important;
   line-height: 1.7 !important;
   vertical-align: top !important;
+}
+#quality-claims-table table,
+#quality-evidence-table table,
+#quality-recent-table table,
+#review-evidence-table table {
+  width: 100% !important;
+  table-layout: fixed !important;
 }
 #quality-recent-table table td:nth-child(2),
 #quality-recent-table table th:nth-child(2) {
@@ -420,6 +451,38 @@ UI_CSS = """
 #quality-recent-table tr:has(button:focus) td {
   font-weight: 600 !important;
 }
+#quality-evidence-detail,
+#review-evidence-detail,
+#quality-export-result {
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+#quality-evidence-detail *,
+#review-evidence-detail *,
+#quality-export-result * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+#quality-export-row {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+#quality-export-row > * {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+#quality-export-row button {
+  width: 100% !important;
+}
+#quality-export-result a {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
 #review-top-row {
   align-items: stretch !important;
 }
@@ -477,6 +540,7 @@ UI_CSS = """
   font-size: 14px !important;
   white-space: pre-wrap !important;
   word-break: break-word !important;
+  overflow-wrap: anywhere !important;
   line-height: 1.7 !important;
   vertical-align: top !important;
 }
@@ -625,7 +689,169 @@ UI_CSS = """
 #settings-result-panel > div {
   height: 100%;
 }
+#quality-dummy-row-1,
+#quality-dummy-row-2,
+#quality-dummy-row-3,
+#quality-dummy-row-4,
+#quality-dummy-bottom-row {
+  align-items: stretch !important;
+}
+#quality-dummy-row-1 > .gradio-column,
+#quality-dummy-row-2 > .gradio-column,
+#quality-dummy-row-3 > .gradio-column,
+#quality-dummy-row-4 > .gradio-column,
+#quality-dummy-bottom-row > .gradio-column {
+  align-self: stretch !important;
+}
+#quality-dummy-intake-panel,
+#quality-dummy-status-panel,
+#quality-dummy-queue-panel,
+#quality-dummy-focus-panel,
+#quality-dummy-evidence-panel,
+#quality-dummy-evidence-detail,
+#quality-dummy-history-panel,
+#quality-dummy-actions,
+#quality-dummy-detail-help {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
+}
+#quality-dummy-status-panel,
+#quality-dummy-focus-panel,
+#quality-dummy-evidence-detail,
+#quality-dummy-actions,
+#quality-dummy-detail-help,
+#quality-dummy-evidence-panel,
+#quality-dummy-history-panel {
+  height: 100%;
+}
 """
+
+
+def _build_quality_dummy_card_html(title: str, body: str, *, tone: str = "default") -> str:
+    """构建 AI 质检 dummy 页面使用的静态卡片。"""
+
+    tone_map = {
+        "default": ("rgba(148, 163, 184, 0.18)", "rgba(15, 23, 42, 0.04)"),
+        "primary": ("rgba(96, 165, 250, 0.36)", "rgba(59, 130, 246, 0.09)"),
+        "success": ("rgba(34, 197, 94, 0.30)", "rgba(34, 197, 94, 0.08)"),
+        "warning": ("rgba(245, 158, 11, 0.34)", "rgba(245, 158, 11, 0.08)"),
+    }
+    border_color, background_color = tone_map.get(tone, tone_map["default"])
+    return (
+        f"<div style='height:100%;padding:16px 18px;border:1px solid {border_color};"
+        f"border-radius:16px;background:{background_color};'>"
+        f"<div style='font-size:13px;font-weight:700;letter-spacing:0.04em;"
+        "text-transform:uppercase;color:var(--body-text-color-subdued);margin:0 0 10px 0;'>"
+        f"{title}</div>"
+        f"<div style='font-size:14px;line-height:1.8;color:var(--body-text-color);'>{body}</div>"
+        "</div>"
+    )
+
+
+def _build_quality_dummy_evidence_rows() -> list[list[str]]:
+    """返回 AI 质检 dummy 的静态证据行。"""
+
+    return [
+        ["SUP-001", "《本草纲目》", "卷一 / 药部", "支持", "原句检索", "阿胶主治与补血相关表述高度一致"],
+        ["CHK-014", "《神农本草经》", "上品 / 阿胶", "补充", "扩展检索", "补充说明阿胶长期入药背景，可解释来源脉络"],
+        ["CON-003", "《本草拾遗》", "卷三 / 校注", "矛盾", "扩展检索", "存在剂量语义差异，需要人工复核原句上下文"],
+    ]
+
+
+def _build_quality_dummy_history_rows() -> list[list[str]]:
+    """返回 AI 质检 dummy 的静态历史记录。"""
+
+    return [
+        ["当前", "chk_20260504_001", "高风险", "12 条", "3 条待确认", "阿胶能直接替代所有补血药"],
+        ["-", "chk_20260503_004", "中风险", "8 条", "1 条待确认", "《伤寒论》明确记载阿胶用于外伤止血"],
+        ["-", "chk_20260502_002", "低风险", "6 条", "0 条待确认", "阿胶在古籍中常与补血场景关联"],
+    ]
+
+
+def _build_quality_dummy_status_html() -> str:
+    """返回 AI 质检 dummy 的执行状态与总体结果。"""
+
+    return _build_quality_dummy_card_html(
+        "执行状态与总体结果",
+        """
+        <div style='font-size:18px;font-weight:700;margin:0 0 12px 0;'>已完成 1 次模拟质检</div>
+        <div style='margin:0 0 8px 0;'><strong>当前状态：</strong>待人工复核</div>
+        <div style='margin:0 0 8px 0;'><strong>总体结论：</strong>输入中包含绝对化结论与来源不稳的古籍引用，建议拆分后分别处理。</div>
+        <div style='margin:0 0 8px 0;'><strong>风险等级：</strong>高风险</div>
+        <div style='margin:0 0 8px 0;'><strong>Claim 数量：</strong>4 条，其中 2 条建议送审，1 条建议保留，1 条建议拆分重写。</div>
+        <div><strong>当前焦点：</strong>系统正在查看 `C1`，已关联 3 条证据，其中 1 条存在冲突。</div>
+        """,
+        tone="primary",
+    )
+
+
+def _build_quality_dummy_focus_html() -> str:
+    """返回 AI 质检 dummy 的当前 Claim 详情卡片。"""
+
+    return _build_quality_dummy_card_html(
+        "当前 Claim",
+        """
+        <div style='font-size:18px;font-weight:700;margin:0 0 10px 0;'>阿胶可以直接替代所有补血药</div>
+        <div style='margin:0 0 10px 0;'>
+          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(239,68,68,0.16);margin-right:8px;'>高风险</span>
+          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(245,158,11,0.16);margin-right:8px;'>待人工确认</span>
+          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(59,130,246,0.16);'>证据 3 条</span>
+        </div>
+        <div style='margin:0 0 10px 0;'><strong>系统判断：</strong>绝对化表述过强，现有证据只能支持“常用于补血相关场景”，不能推出“替代所有补血药”。</div>
+        <div><strong>建议动作：</strong>保留原始 Claim，拆出“补血相关用途”作为可保留子结论，其余部分进入人工审核。</div>
+        """,
+        tone="primary",
+    )
+
+
+def _build_quality_dummy_evidence_detail_html() -> str:
+    """返回 AI 质检 dummy 的证据详情卡片。"""
+
+    return _build_quality_dummy_card_html(
+        "证据详情",
+        """
+        <div style='margin:0 0 8px 0;'><strong>当前证据：</strong>SUP-001</div>
+        <div style='margin:0 0 8px 0;'><strong>原文摘录：</strong>阿胶，久服轻身益气，常见于补血相关配伍场景。</div>
+        <div style='margin:0 0 8px 0;'><strong>上下文说明：</strong>原文支持“补血相关用途”，但没有支持“替代所有补血药”的绝对化推断。</div>
+        <div style='margin:0 0 8px 0;'><strong>证据关系：</strong>部分支持</div>
+        <div><strong>处理建议：</strong>保留“补血相关”结论，删除“直接替代所有补血药”的扩张说法。</div>
+        """,
+    )
+
+
+def _build_quality_dummy_actions_html() -> str:
+    """返回 AI 质检 dummy 的后续动作结果区。"""
+
+    return _build_quality_dummy_card_html(
+        "后续动作结果区",
+        """
+        <div style='margin:0 0 8px 0;'><strong>当前选中记录：</strong>质检 ID `chk_20260504_001` / Claim `C1`</div>
+        <div style='margin:0 0 8px 0;'><strong>导出结果示例：</strong>`Docs/quality_dummy_preview_20260505_0930.MD` 已生成</div>
+        <div style='margin:0 0 8px 0;'><strong>提交人工审核示意：</strong>已加入待审核队列，审核优先级为“高”</div>
+        <div style='margin:0 0 8px 0;'><strong>复核任务示意：</strong>已创建 `review_task_001`，要求核对古籍原句与现代转述是否一致</div>
+        <div><strong>操作反馈示例：</strong>最近一次模拟操作成功，系统建议先送审再导出最终结果。</div>
+        """,
+        tone="success",
+    )
+
+
+def _build_quality_dummy_help_html() -> str:
+    """返回 AI 质检 dummy 的底部详细功能说明。"""
+
+    return _build_quality_dummy_card_html(
+        "详细功能说明",
+        """
+        <div style='margin:0 0 8px 0;'><strong>输入与执行：</strong>用于填写待质检文本、选择知识库与模板，并触发一次完整的质检流程。</div>
+        <div style='margin:0 0 8px 0;'><strong>执行状态与总体结果：</strong>集中展示当前任务状态、总体结论、风险等级和 Claim 数量，避免用户在多个区域拼接结果。</div>
+        <div style='margin:0 0 8px 0;'><strong>Claim 列表与当前 Claim：</strong>左侧看队列，右侧看当前焦点，保证“选什么、看什么”始终对应。</div>
+        <div style='margin:0 0 8px 0;'><strong>证据列表与证据详情：</strong>左侧看证据清单，右侧看原文与解释，专门承接支持、补充、矛盾三类证据。</div>
+        <div style='margin:0 0 8px 0;'><strong>历史质检记录：</strong>用于回看最近任务，帮助比较不同输入或不同模板下的质检结果。</div>
+        <div><strong>后续动作结果区：</strong>用于承接导出、送审、生成复核任务后的结果反馈，确保用户能直接看到动作结果，而不是只看到按钮。</div>
+        """,
+    )
 
 
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service, runtime_config: dict | None = None) -> gr.Blocks:
@@ -3503,17 +3729,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
                 result = event.get("result", {})
                 formatted = format_quality_result(result)
-                recent_results = [
-                    {
-                        "check_id": formatted["check"].get("check_id"),
-                        "template_name": formatted["check"].get("template_name"),
-                        "created_at": formatted["check"].get("created_at"),
-                        "overall_verdict": formatted["check"].get("overall_verdict"),
-                        "input_text": input_text,
-                        "claims": formatted["claims"],
-                    }
-                ]
-                navigation = build_recent_claim_navigation(recent_results)
+                current_recent_result = {
+                    "check_id": formatted["check"].get("check_id"),
+                    "template_name": formatted["check"].get("template_name"),
+                    "created_at": formatted["check"].get("created_at"),
+                    "overall_verdict": formatted["check"].get("overall_verdict"),
+                    "input_text": input_text,
+                    "claims": formatted["claims"],
+                }
+                recent_results = quality_service.list_recent_results(
+                    limit=RECENT_QUALITY_FETCH_LIMIT,
+                    knowledge_base_id=knowledge_base_id,
+                )
+                current_check_id = str(current_recent_result.get("check_id") or "").strip()
+                if not recent_results:
+                    recent_results = [current_recent_result]
+                elif current_check_id and not any(
+                    str(item.get("check_id") or "").strip() == current_check_id for item in recent_results
+                ):
+                    recent_results = [current_recent_result, *recent_results][:RECENT_QUALITY_FETCH_LIMIT]
+                navigation = build_recent_claim_navigation([current_recent_result])
                 claim_view, evidence_rows, review_view, evidence_items, evidence_detail_html = render_claim_views(navigation["selected_choice"], navigation["claim_detail_map"])
                 yield build_quality_outputs(
                     progress_html=format_quality_progress_html(event),
@@ -3528,7 +3763,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     evidence_items=evidence_items,
                     evidence_detail_html=evidence_detail_html,
                     recent_results=recent_results,
-                    recent_rows=build_recent_quality_rows(recent_results),
+                    recent_rows=build_recent_quality_rows(
+                        recent_results,
+                        active_check_id=current_recent_result.get("check_id"),
+                    ),
                 )
                 return
         except AppError as exc:
@@ -4591,6 +4829,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_quality_evaluation_rows,
         prepend_sequence=True,
     )
+    quality_dummy_claim_choices = [
+        "C1 | 高风险 | 阿胶可以直接替代所有补血药",
+        "C2 | 中风险 | 《神农本草经》明确记载阿胶用于延年不老",
+        "C3 | 低风险 | 阿胶在古籍中常与补血场景关联",
+        "C4 | 待拆分 | 阿胶既能安胎又能治疗所有出血症",
+    ]
+    quality_dummy_evidence_rows = _build_quality_dummy_evidence_rows()
+    quality_dummy_history_rows = _build_quality_dummy_history_rows()
     initial_review_pending_table_rows, initial_review_pending_page, initial_review_pending_page_info = reset_table_pagination(
         initial_review_pending_rows,
         prepend_sequence=True,
@@ -4627,13 +4873,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         with gr.Tabs():
             with gr.Tab("AI 质检"):
                 with gr.Row(elem_id="quality-top-row"):
-                    with gr.Column(scale=5):
-                        with gr.Group(elem_id="quality-input-panel"):
+                    with gr.Column(scale=1, elem_id="quality-input-panel"):
+                        gr.Markdown("### 1. 输入与执行")
+                        with gr.Row():
                             quality_input = gr.Textbox(
                                 label="待质检文本",
                                 lines=8,
                                 placeholder="建议一行或一句输入一个明确说法，系统会拆成多条 Claim 逐条质检。",
                             )
+                        with gr.Row():
                             quality_knowledge_base = gr.Dropdown(
                                 label="当前知识库",
                                 choices=knowledge_base_choices,
@@ -4647,9 +4895,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=default_template_choice,
                                 interactive=True,
                             )
+                        with gr.Row():
                             quality_button = gr.Button("开始质检")
                             recent_quality_button = gr.Button("加载最近质检结果")
-                    with gr.Column(scale=4):
+                    with gr.Column(scale=1):
                         quality_help = gr.HTML(value=format_quality_help_html(), elem_id="quality-help-panel")
                 with gr.Row(elem_id="quality-template-row"):
                     quality_template_detail = gr.HTML(
@@ -4661,114 +4910,117 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_evidence_page_state = gr.State(initial_claim_evidence_page)
                 recent_quality_page_state = gr.State(initial_recent_quality_page)
                 quality_evaluation_page_state = gr.State(initial_quality_evaluation_page)
-                with gr.Group(elem_id="quality-main-workspace"):
-                    with gr.Row(elem_id="quality-summary-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
-                        with gr.Column(scale=1):
-                            quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
-                    quality_relation_note = gr.HTML(
-                        value=(
-                            "<div style='padding:8px 2px 14px 2px;'>"
-                            "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
-                            "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
-                            "</div>"
-                        ),
-                        elem_id="quality-relation-note",
-                    )
-                    with gr.Row(elem_id="quality-claim-row", equal_height=True):
-                        with gr.Column(scale=5):
-                            quality_active_check = gr.HTML(
-                                value=initial_active_quality_check_html,
-                                elem_id="quality-active-check",
-                            )
-                            initial_claim_choices, initial_selected_claim_choice, _initial_claim_choice_page, _initial_claim_choice_page_info = build_quality_claim_selector_page_outputs(
-                                initial_formatted_quality_result,
-                                initial_selected_claim,
-                                initial_quality_claim_page,
-                            )
-                            quality_claims = gr.Radio(
-                                choices=initial_claim_choices,
-                                value=initial_selected_claim_choice,
-                                interactive=True,
-                                label="Claim 列表",
-                                elem_id="quality-claims-table",
-                            )
-                            with gr.Row(elem_id="quality-claim-pagination-row"):
-                                quality_claim_prev_button = gr.Button("上一页")
-                                quality_claim_next_button = gr.Button("下一页")
-                            quality_claim_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_quality_claim_page_info),
-                                elem_id="quality-claim-page-info",
-                            )
-                        with gr.Column(scale=4):
-                            selected_claim_state = gr.State(initial_selected_claim)
-                            claim_detail_state = gr.State(initial_claim_detail_map)
-                            recent_quality_state = gr.State(_initial_recent_results_state)
-                            evidence_items_state = gr.State(initial_evidence_items)
-                            claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
-                            quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
-                    with gr.Row(elem_id="quality-evidence-row", equal_height=True):
-                        with gr.Column(scale=5):
-                            claim_evidence_table = gr.Dataframe(
-                                headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=0,
-                                column_count=9,
-                                label="证据列表",
-                                elem_id="quality-evidence-table",
-                                value=initial_claim_evidence_table_rows,
-                                max_height=420,
-                            )
-                            with gr.Row(elem_id="quality-evidence-pagination-row"):
-                                quality_evidence_prev_button = gr.Button("上一页")
-                                quality_evidence_next_button = gr.Button("下一页")
-                            quality_evidence_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_claim_evidence_page_info),
-                                elem_id="quality-evidence-page-info",
-                            )
-                        with gr.Column(scale=4):
-                            claim_evidence_detail = gr.HTML(
-                                value=initial_evidence_detail_html,
-                                elem_id="quality-evidence-detail",
-                            )
-                    with gr.Row(elem_id="quality-export-row"):
-                        quality_export_button = gr.Button("下载结果")
-                        quality_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="quality-export-result",
+                with gr.Row(elem_id="quality-summary-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
+                    with gr.Column(scale=1):
+                        quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
+                quality_relation_note = gr.HTML(
+                    value=(
+                        "<div style='padding:8px 2px 14px 2px;'>"
+                        "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
+                        "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
+                        "</div>"
+                    ),
+                    elem_id="quality-relation-note",
+                )
+                with gr.Row(elem_id="quality-claim-row", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-claim-list-panel"):
+                        gr.Markdown("### 2. Claim 列表")
+                        quality_active_check = gr.HTML(
+                            value=initial_active_quality_check_html,
+                            elem_id="quality-active-check",
                         )
-                with gr.Group(elem_id="quality-followup-workspace"):
-                    with gr.Row(elem_id="quality-history-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            with gr.Group(elem_id="quality-history-panel"):
-                                recent_quality_note = gr.HTML(
-                                    value=(
-                                        "<div>最近质检记录用于回看历史质检任务。"
-                                        "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
-                                    ),
-                                    elem_id="quality-history-note",
-                                )
-                                recent_quality_checks = gr.Dataframe(
-                                    headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
-                                    datatype=["str"] * 8,
-                                    interactive=False,
-                                    row_count=TABLE_PAGE_SIZE,
-                                    column_count=8,
-                                    label="最近质检记录",
-                                    elem_id="quality-recent-table",
-                                    value=initial_recent_quality_table_rows,
-                                    max_height=420,
-                                )
-                                with gr.Row(elem_id="quality-recent-pagination-row"):
-                                    recent_quality_prev_button = gr.Button("上一页")
-                                    recent_quality_next_button = gr.Button("下一页")
-                                recent_quality_page_info = gr.HTML(
-                                    value=format_table_pagination_html(initial_recent_quality_page_info),
-                                    elem_id="quality-recent-page-info",
-                                )
-                    with gr.Group(elem_id="quality-evaluation-panel"):
+                        initial_claim_choices, initial_selected_claim_choice, _initial_claim_choice_page, _initial_claim_choice_page_info = build_quality_claim_selector_page_outputs(
+                            initial_formatted_quality_result,
+                            initial_selected_claim,
+                            initial_quality_claim_page,
+                        )
+                        quality_claims = gr.Radio(
+                            choices=initial_claim_choices,
+                            value=initial_selected_claim_choice,
+                            interactive=True,
+                            label="Claim 列表",
+                            elem_id="quality-claims-table",
+                        )
+                        with gr.Row(elem_id="quality-claim-pagination-row"):
+                            quality_claim_prev_button = gr.Button("上一页")
+                            quality_claim_next_button = gr.Button("下一页")
+                        quality_claim_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_quality_claim_page_info),
+                            elem_id="quality-claim-page-info",
+                        )
+                    with gr.Column(scale=1):
+                        selected_claim_state = gr.State(initial_selected_claim)
+                        claim_detail_state = gr.State(initial_claim_detail_map)
+                        recent_quality_state = gr.State(_initial_recent_results_state)
+                        evidence_items_state = gr.State(initial_evidence_items)
+                        claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
+                        quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
+                with gr.Row(elem_id="quality-evidence-row", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-evidence-list-panel"):
+                        gr.Markdown("### 3. 证据列表")
+                        claim_evidence_table = gr.Dataframe(
+                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                            datatype=["str"] * 9,
+                            interactive=False,
+                            row_count=0,
+                            column_count=9,
+                            label="证据列表",
+                            elem_id="quality-evidence-table",
+                            value=initial_claim_evidence_table_rows,
+                            max_height=420,
+                        )
+                        with gr.Row(elem_id="quality-evidence-pagination-row"):
+                            quality_evidence_prev_button = gr.Button("上一页")
+                            quality_evidence_next_button = gr.Button("下一页")
+                        quality_evidence_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_claim_evidence_page_info),
+                            elem_id="quality-evidence-page-info",
+                        )
+                    with gr.Column(scale=1):
+                        claim_evidence_detail = gr.HTML(
+                            value=initial_evidence_detail_html,
+                            elem_id="quality-evidence-detail",
+                        )
+                with gr.Row(elem_id="quality-history-row", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-history-panel"):
+                        gr.Markdown("### 4. 历史质检记录")
+                        recent_quality_note = gr.HTML(
+                            value=(
+                                "<div>最近质检记录用于回看历史质检任务。"
+                                "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
+                            ),
+                            elem_id="quality-history-note",
+                        )
+                        recent_quality_checks = gr.Dataframe(
+                            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
+                            datatype=["str"] * 8,
+                            interactive=False,
+                            row_count=TABLE_PAGE_SIZE,
+                            column_count=8,
+                            label="最近质检记录",
+                            elem_id="quality-recent-table",
+                            value=initial_recent_quality_table_rows,
+                            max_height=420,
+                        )
+                        with gr.Row(elem_id="quality-recent-pagination-row"):
+                            recent_quality_prev_button = gr.Button("上一页")
+                            recent_quality_next_button = gr.Button("下一页")
+                        recent_quality_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_recent_quality_page_info),
+                            elem_id="quality-recent-page-info",
+                        )
+                    with gr.Column(scale=1, elem_id="quality-action-panel"):
+                        gr.Markdown("### 5. 下载结果与动作")
+                        with gr.Row(elem_id="quality-export-row"):
+                            quality_export_button = gr.Button("下载结果")
+                            quality_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="下载结果"),
+                                elem_id="quality-export-result",
+                            )
+                with gr.Accordion("效果评测", open=False, elem_id="quality-evaluation-accordion"):
+                    with gr.Column(scale=1, elem_id="quality-evaluation-panel"):
                         quality_evaluation_help = gr.HTML(
                             value=format_quality_evaluation_help_html(),
                             elem_id="quality-evaluation-help",
@@ -4779,7 +5031,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_quality_evaluation_cases,
                             placeholder="输入 JSON 数组，每项至少包含 input_text，可选 expected_overall_verdict / expected_risk_level / expected_claim_count",
                         )
-                        quality_evaluation_button = gr.Button("执行效果评测")
+                        with gr.Row(elem_id="quality-evaluation-action-row", equal_height=True):
+                            with gr.Column(scale=1):
+                                quality_evaluation_button = gr.Button("执行效果评测")
+                            with gr.Column(scale=1):
+                                quality_evaluation_export_button = gr.Button("下载评测结果")
+                                quality_evaluation_export_result = gr.HTML(
+                                    value=format_operation_result_html(None, title="下载结果"),
+                                    elem_id="quality-evaluation-export-result",
+                                )
                         quality_evaluation_summary = gr.HTML(
                             value=initial_quality_evaluation_summary,
                             elem_id="quality-evaluation-summary",
@@ -4819,10 +5079,113 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=format_table_pagination_html(initial_quality_evaluation_page_info),
                             elem_id="quality-evaluation-page-info",
                         )
-                        quality_evaluation_export_button = gr.Button("下载评测结果")
-                        quality_evaluation_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="quality-evaluation-export-result",
+                with gr.Row(elem_id="quality-bottom-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        quality_bottom_help = gr.HTML(
+                            value=format_quality_help_html(),
+                            elem_id="quality-bottom-help",
+                        )
+
+            with gr.Tab("AI 质检优化 Dummy", visible=False):
+                with gr.Row(elem_id="quality-dummy-row-1", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-dummy-intake-panel"):
+                        gr.Markdown("### 1. 输入与执行")
+                        quality_dummy_input = gr.Textbox(
+                            label="待质检文本",
+                            value="阿胶可以直接替代所有补血药，并且《神农本草经》明确记载它可以延年不老。",
+                            lines=8,
+                        )
+                        with gr.Row():
+                            quality_dummy_kb = gr.Dropdown(
+                                label="目标知识库",
+                                choices=["default（默认）", "古籍专题库", "人工校审库"],
+                                value="古籍专题库",
+                                interactive=True,
+                                elem_id="quality-dummy-knowledge-base",
+                            )
+                            quality_dummy_template = gr.Dropdown(
+                                label="质检模板",
+                                choices=["general_fact_check", "classical_claim_review", "risk_first_screening"],
+                                value="classical_claim_review",
+                                interactive=True,
+                                elem_id="quality-dummy-template",
+                            )
+                        quality_dummy_mode = gr.Radio(
+                            label="工作模式",
+                            choices=["快速初筛", "证据优先", "人工复核优先"],
+                            value="证据优先",
+                            elem_id="quality-dummy-mode",
+                        )
+                        with gr.Row():
+                            quality_dummy_submit = gr.Button("开始模拟质检", variant="primary")
+                            quality_dummy_export = gr.Button("导出模拟结果")
+                    with gr.Column(scale=1):
+                        quality_dummy_status = gr.HTML(
+                            value=_build_quality_dummy_status_html(),
+                            elem_id="quality-dummy-status-panel",
+                        )
+                with gr.Row(elem_id="quality-dummy-row-2", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-dummy-queue-panel"):
+                        gr.Markdown("### 2. Claim 列表")
+                        quality_dummy_claims = gr.Radio(
+                            label="待处理 Claim 队列",
+                            choices=quality_dummy_claim_choices,
+                            value=quality_dummy_claim_choices[0],
+                            elem_id="quality-dummy-claims",
+                        )
+                    with gr.Column(scale=1):
+                        quality_dummy_focus = gr.HTML(
+                            value=_build_quality_dummy_focus_html(),
+                            elem_id="quality-dummy-focus-panel",
+                        )
+                with gr.Row(elem_id="quality-dummy-row-3", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-dummy-evidence-panel"):
+                        gr.Markdown("### 3. 证据列表")
+                        quality_dummy_evidence = gr.Dataframe(
+                            headers=["证据 ID", "来源文档", "定位", "关系", "检索路径", "证据摘要"],
+                            datatype=["str"] * 6,
+                            interactive=False,
+                            row_count=3,
+                            column_count=6,
+                            label="证据列表",
+                            elem_id="quality-dummy-evidence-table",
+                            value=quality_dummy_evidence_rows,
+                            max_height=320,
+                        )
+                    with gr.Column(scale=1):
+                        quality_dummy_evidence_detail = gr.HTML(
+                            value=_build_quality_dummy_evidence_detail_html(),
+                            elem_id="quality-dummy-evidence-detail",
+                        )
+                with gr.Row(elem_id="quality-dummy-row-4", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-dummy-history-panel"):
+                        gr.Markdown("### 4. 历史质检记录")
+                        quality_dummy_history = gr.Dataframe(
+                            headers=["当前", "质检 ID", "总体风险", "Claim 数", "待确认", "输入摘要"],
+                            datatype=["str"] * 6,
+                            interactive=False,
+                            row_count=3,
+                            column_count=6,
+                            label="历史质检记录",
+                            elem_id="quality-dummy-history-table",
+                            value=quality_dummy_history_rows,
+                            max_height=260,
+                        )
+                    with gr.Column(scale=1, elem_id="quality-dummy-actions"):
+                        gr.Markdown("### 5. 后续动作结果区")
+                        with gr.Row():
+                            quality_dummy_action_export = gr.Button("导出结果示意")
+                            quality_dummy_action_review = gr.Button("提交人工审核示意")
+                            quality_dummy_action_task = gr.Button("生成复核任务示意")
+                        quality_dummy_actions_result = gr.HTML(
+                            value=_build_quality_dummy_actions_html(),
+                            elem_id="quality-dummy-actions-result",
+                        )
+                with gr.Row(elem_id="quality-dummy-bottom-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        quality_dummy_detail_help = gr.HTML(
+                            value=_build_quality_dummy_help_html(),
+                            elem_id="quality-dummy-detail-help",
                         )
 
             with gr.Tab("人工审核"):
