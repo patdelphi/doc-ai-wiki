@@ -544,8 +544,8 @@ def test_quality_check_should_return_not_found_for_unknown_template(tmp_path: Pa
     assert payload["error_code"] == "NOT_FOUND"
 
 
-def test_initialize_database_should_add_missing_quality_claim_risk_level_column(tmp_path: Path) -> None:
-    """旧版 quality_claims 表初始化后应自动补齐 risk_level 列。"""
+def test_initialize_database_should_add_missing_quality_claim_columns(tmp_path: Path) -> None:
+    """旧版 quality_claims 表初始化后应自动补齐新增字段。"""
 
     database_path = tmp_path / "legacy_quality.db"
     connection = sqlite3.connect(database_path)
@@ -590,6 +590,7 @@ def test_initialize_database_should_add_missing_quality_claim_risk_level_column(
     }
     connection.close()
     assert "risk_level" in columns
+    assert "evidence_details_json" in columns
 
 
 def test_initialize_database_should_add_missing_quality_check_template_columns(tmp_path: Path) -> None:

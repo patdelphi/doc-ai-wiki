@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS quality_claims (
     risk_level TEXT NOT NULL DEFAULT 'medium',
     confidence REAL NOT NULL,
     evidence TEXT NOT NULL,
+    evidence_details_json TEXT NOT NULL DEFAULT '[]',
     source_doc TEXT,
     source_span TEXT,
     review_status TEXT NOT NULL,

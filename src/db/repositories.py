@@ -500,6 +500,31 @@ class QualityRepository:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
 
+    @staticmethod
+    def _serialize_evidence_details(claim: dict[str, Any]) -> str:
+        """将 Claim 的证据明细序列化为 JSON 文本。"""
+
+        return json.dumps(claim.get("evidence_details") or [], ensure_ascii=False)
+
+    @staticmethod
+    def _deserialize_evidence_details(raw_value: Any) -> list[dict[str, Any]]:
+        """将数据库中的证据明细 JSON 恢复为列表。"""
+
+        if raw_value in (None, ""):
+            return []
+        try:
+            parsed = json.loads(str(raw_value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    def _normalize_quality_claim_row(self, row: Any) -> dict[str, Any]:
+        """将质检 Claim 行转换为统一结构。"""
+
+        item = dict(row)
+        item["evidence_details"] = self._deserialize_evidence_details(item.get("evidence_details_json"))
+        return item
+
     def create_quality_result(
         self,
         *,
@@ -533,8 +558,8 @@ class QualityRepository:
                 """
                 INSERT INTO quality_claims (
                     claim_id, check_id, claim_text, verdict, risk_level, confidence, evidence,
-                    source_doc, source_span, review_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    evidence_details_json, source_doc, source_span, review_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -545,6 +570,7 @@ class QualityRepository:
                         claim.get("risk_level", "medium"),
                         claim["confidence"],
                         claim["evidence"],
+                        self._serialize_evidence_details(claim),
                         claim.get("source_doc"),
                         claim.get("source_span"),
                         claim["review_status"],
@@ -608,7 +634,7 @@ class QualityRepository:
 
         return {
             "check": dict(check_row),
-            "claims": [dict(row) for row in claim_rows],
+            "claims": [self._normalize_quality_claim_row(row) for row in claim_rows],
             "rule_hits": [dict(row) for row in rule_hit_rows],
         }
 
@@ -655,7 +681,7 @@ class QualityRepository:
                         "overall_verdict": check_row["overall_verdict"],
                         "risk_level": check_row["risk_level"],
                         "created_at": check_row["created_at"],
-                        "claims": [dict(row) for row in claim_rows],
+                        "claims": [self._normalize_quality_claim_row(row) for row in claim_rows],
                     }
                 )
 
@@ -682,6 +708,7 @@ class QualityRepository:
                     qc.risk_level,
                     qc.confidence,
                     qc.evidence,
+                    qc.evidence_details_json,
                     qc.source_doc,
                     qc.source_span,
                     qc.review_status,
@@ -703,7 +730,7 @@ class QualityRepository:
                 """,
                 params,
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._normalize_quality_claim_row(row) for row in rows]
 
     def insert_review_record(self, payload: dict[str, Any]) -> None:
         """保存审核记录并同步 claim 审核状态。"""

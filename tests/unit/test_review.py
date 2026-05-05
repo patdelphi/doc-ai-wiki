@@ -34,6 +34,23 @@ def _create_review_target_claim(repository: QualityRepository, *, check_id: str,
                 "risk_level": "medium",
                 "confidence": 0.8,
                 "evidence": "测试证据",
+                "evidence_details": [
+                    {
+                        "chunk_id": "chunk_review_1",
+                        "doc_uid": "doc_review_1",
+                        "doc_title": "测试文档",
+                        "source_span": "section-1",
+                        "retrieval_source": "vector",
+                        "matched_sources": ["vector"],
+                        "matched_queries": ["claim_literal"],
+                        "rerank_score": 0.91,
+                        "context_mode": "section_context",
+                        "section_title": "测试章节",
+                        "evidence_relation": "support",
+                        "relation_reason": "直接支持测试 Claim。",
+                        "content_preview": "测试证据详情",
+                    }
+                ],
                 "source_doc": "测试文档",
                 "source_span": "section-1",
                 "review_status": "pending",
@@ -120,6 +137,25 @@ def test_delete_review_should_reset_claim_status_to_pending(tmp_path: Path) -> N
     assert review_items == []
     assert result is not None
     assert result["claims"][0]["review_status"] == "pending"
+
+
+def test_quality_result_and_recent_results_should_preserve_evidence_details(tmp_path: Path) -> None:
+    """质检结果与最近质检记录回读时应保留完整证据明细。"""
+
+    database_path = tmp_path / "app.db"
+    initialize_database(database_path)
+    repository = QualityRepository(database_path)
+    _create_review_target_claim(repository, check_id="check_evidence", claim_id="claim_evidence")
+
+    quality_result = repository.get_quality_result("check_evidence")
+    recent_results = repository.list_recent_quality_results(limit=10)
+    review_candidates = repository.list_review_candidates(limit=10)
+
+    assert quality_result is not None
+    assert quality_result["claims"][0]["evidence_details"][0]["chunk_id"] == "chunk_review_1"
+    assert quality_result["claims"][0]["evidence_details"][0]["content_preview"] == "测试证据详情"
+    assert recent_results[0]["claims"][0]["evidence_details"][0]["chunk_id"] == "chunk_review_1"
+    assert review_candidates[0]["evidence_details"][0]["retrieval_source"] == "vector"
 
 
 def test_delete_review_should_raise_not_found_for_missing_record(tmp_path: Path) -> None:

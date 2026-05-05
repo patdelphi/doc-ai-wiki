@@ -17,6 +17,7 @@ DOCUMENT_METADATA_COLUMNS = {
 
 QUALITY_CLAIM_COLUMNS = {
     "risk_level": "TEXT NOT NULL DEFAULT 'medium'",
+    "evidence_details_json": "TEXT NOT NULL DEFAULT '[]'",
 }
 
 QUALITY_CHECK_COLUMNS = {
