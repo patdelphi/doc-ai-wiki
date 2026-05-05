@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
@@ -2677,7 +2677,7 @@ def _format_display_datetime(value: object) -> str:
     except ValueError:
         return text
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     localized = parsed.astimezone(CN_TIMEZONE)
     return localized.strftime("%y-%m-%d %H:%M")
 
