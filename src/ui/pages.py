@@ -534,6 +534,7 @@ UI_CSS = """
 }
 #quality-top-row {
   align-items: stretch !important;
+  gap: 14px !important;
 }
 #quality-top-row > .gradio-column,
 #quality-template-row > .gradio-column,
@@ -546,12 +547,44 @@ UI_CSS = """
   align-self: stretch !important;
   min-width: 0 !important;
 }
+#quality-template-row,
+#quality-summary-row,
+#quality-claim-row,
+#quality-evidence-row,
+#quality-history-row,
+#quality-bottom-row {
+  align-items: stretch !important;
+  gap: 14px !important;
+  margin-top: 8px !important;
+}
 #quality-input-panel {
   min-height: 260px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
+}
+#quality-input-panel,
+#quality-help-panel,
+#quality-template-panel,
+#quality-progress-panel,
+#quality-result-panel,
+#quality-claim-list-panel,
+#quality-claim-detail,
+#quality-evidence-list-panel,
+#quality-evidence-detail,
+#quality-history-panel,
+#quality-action-panel,
+#quality-evaluation-panel,
+#quality-bottom-help {
+  margin-top: 0;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.06), transparent 28%),
+    var(--block-background-fill);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 #quality-help-panel,
 #quality-template-panel,
@@ -567,15 +600,13 @@ UI_CSS = """
 #quality-help-panel {
   min-height: 260px;
 }
-#quality-template-row {
-  align-items: stretch !important;
-}
 #quality-template-panel {
   width: 100%;
 }
 #quality-evidence-row,
 #quality-history-row {
   align-items: flex-start !important;
+  gap: 14px !important;
 }
 #quality-evidence-row > .gradio-column,
 #quality-history-row > .gradio-column {
@@ -583,60 +614,100 @@ UI_CSS = """
 }
 #quality-evaluation-action-row {
   align-items: stretch !important;
+  gap: 10px !important;
 }
 #quality-template-panel > div,
 #quality-help-panel > div,
 #quality-progress-panel > div,
 #quality-result-panel > div,
 #quality-claim-detail > div,
-#quality-evidence-detail > div {
+#quality-evidence-detail > div,
+#quality-bottom-help > div {
+  height: 100%;
 }
 #quality-history-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 #quality-input-panel,
 #quality-history-panel > div {
   height: auto !important;
-}
-#quality-input-panel,
-#quality-claim-list-panel,
-#quality-evidence-list-panel,
-#quality-history-panel,
-#quality-action-panel,
-#quality-evaluation-panel {
-  margin-top: 12px;
-  padding: 16px;
-  border: 1px solid rgba(96, 165, 250, 0.24);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
-}
-#quality-evidence-list-panel,
-#quality-history-panel,
-#quality-action-panel {
-  margin-top: 8px;
-  padding: 12px;
 }
 #quality-history-note {
   font-size: 13px !important;
   line-height: 1.7 !important;
   color: var(--body-text-color-subdued) !important;
   margin: 0 !important;
+  padding: 12px 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.04);
 }
 #quality-input-panel button {
   margin-top: 8px;
+}
+#quality-input-panel textarea,
+#quality-evaluation-panel textarea {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.05) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+#quality-input-panel textarea:focus,
+#quality-evaluation-panel textarea:focus {
+  border-color: rgba(59, 130, 246, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.10) !important;
+}
+#quality-input-panel .gradio-dropdown,
+#quality-history-scope,
+#quality-evaluation-panel .gradio-dropdown {
+  border-radius: 16px !important;
+}
+#quality-input-panel .gradio-dropdown > div,
+#quality-history-scope > div,
+#quality-evaluation-panel .gradio-dropdown > div {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.04) !important;
+}
+#quality-input-panel label,
+#quality-evaluation-panel label,
+#quality-history-panel label {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
 }
 #quality-active-check {
   margin-bottom: 10px;
 }
 #quality-active-check > div {
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04));
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 18px;
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 #quality-claims-table {
   min-height: 220px;
+}
+#quality-claims-table label {
+  display: block;
+  margin-bottom: 8px !important;
+  padding: 12px 14px !important;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  border-radius: 16px;
+  background: rgba(148, 163, 184, 0.04);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+#quality-claims-table label:hover {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.06);
+  transform: translateY(-1px);
+}
+#quality-claims-table label:has(input:checked) {
+  border-color: rgba(59, 130, 246, 0.42);
+  background: rgba(59, 130, 246, 0.10);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
 }
 #quality-evidence-table,
 #quality-recent-table {
@@ -656,6 +727,7 @@ UI_CSS = """
 #quality-claims-table table td,
 #quality-recent-table table td,
 #quality-evidence-table table td {
+  font-size: 14px !important;
   white-space: pre-wrap !important;
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
@@ -678,6 +750,31 @@ UI_CSS = """
 #quality-recent-table table td:nth-child(2) {
   font-weight: 700 !important;
   color: #b45309 !important;
+}
+#quality-claims-table,
+#quality-evidence-table,
+#quality-recent-table,
+#quality-evaluation-table {
+  margin-top: 6px !important;
+}
+#quality-claims-table table th,
+#quality-evidence-table table th,
+#quality-recent-table table th,
+#quality-evaluation-table table th {
+  font-size: 12px !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.06) !important;
+}
+#quality-evidence-table table td,
+#quality-recent-table table td,
+#quality-evaluation-table table td {
+  background: transparent !important;
+}
+#quality-evidence-table table tbody tr:hover td,
+#quality-recent-table table tbody tr:hover td,
+#quality-evaluation-table table tbody tr:hover td {
+  background: rgba(148, 163, 184, 0.06) !important;
 }
 #quality-recent-table tr:has(td:nth-child(2) button:not(:empty)) td,
 #quality-recent-table tr:has(td:nth-child(2):not(:empty)) td {
@@ -735,8 +832,97 @@ UI_CSS = """
   overflow: hidden !important;
 }
 #quality-evidence-detail,
-#quality-action-panel {
+#quality-action-panel,
+#quality-bottom-help {
   min-height: 136px;
+}
+#quality-relation-note {
+  margin-top: 4px !important;
+}
+#quality-relation-note > div {
+  padding: 12px 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--body-text-color-subdued);
+  background: rgba(148, 163, 184, 0.04);
+}
+#quality-action-panel {
+  gap: 12px !important;
+}
+#quality-help-panel > div,
+#quality-template-panel > div,
+#quality-progress-panel > div,
+#quality-result-panel > div,
+#quality-claim-detail > div,
+#quality-evidence-detail > div,
+#quality-evaluation-help > div,
+#quality-evaluation-summary > div,
+#quality-bottom-help > div,
+#quality-export-result > div,
+#quality-evaluation-export-result > div {
+  border-left: 4px solid rgba(59, 130, 246, 0.58);
+  padding-left: 14px;
+}
+#quality-progress-panel > div {
+  border-left-color: rgba(34, 197, 94, 0.62);
+}
+#quality-result-panel > div,
+#quality-active-check > div {
+  border-left-color: rgba(245, 158, 11, 0.62);
+}
+#quality-evidence-detail > div {
+  border-left-color: rgba(96, 165, 250, 0.62);
+}
+#quality-export-result > div,
+#quality-evaluation-export-result > div {
+  border-left-color: rgba(34, 197, 94, 0.62);
+}
+#quality-export-row,
+#quality-claim-pagination-row,
+#quality-evidence-pagination-row,
+#quality-recent-pagination-row,
+#quality-evaluation-pagination-row {
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin-top: 6px !important;
+}
+#quality-export-row > *,
+#quality-claim-pagination-row > *,
+#quality-evidence-pagination-row > *,
+#quality-recent-pagination-row > *,
+#quality-evaluation-pagination-row > * {
+  flex: 1 1 160px !important;
+  min-width: 0 !important;
+}
+#quality-evaluation-action-row > .gradio-column:first-child {
+  flex: 0 0 220px !important;
+  max-width: 220px !important;
+}
+#quality-evaluation-action-row > .gradio-column:last-child {
+  flex: 1 1 320px !important;
+}
+#quality-input-panel .gradio-row,
+#quality-action-panel .gradio-row {
+  gap: 10px !important;
+}
+#quality-input-panel .gradio-button,
+#quality-action-panel .gradio-button,
+#quality-evaluation-panel .gradio-button {
+  min-height: 42px !important;
+}
+#quality-evaluation-action-row .gradio-button {
+  width: auto !important;
+}
+#quality-evaluation-action-row .gradio-column:first-child .gradio-button {
+  min-height: 38px !important;
+  padding: 0 16px !important;
+}
+#quality-input-panel .gradio-button,
+#quality-action-panel .gradio-button,
+#quality-evaluation-panel .gradio-button {
+  letter-spacing: 0.02em;
 }
 #quality-evidence-detail *,
 #review-evidence-detail *,
@@ -753,8 +939,33 @@ UI_CSS = """
 }
 #quality-claim-page-info,
 #quality-evidence-page-info,
-#quality-recent-page-info {
+#quality-recent-page-info,
+#quality-evaluation-page-info {
   margin-top: 2px !important;
+}
+#quality-claim-page-info > div,
+#quality-evidence-page-info > div,
+#quality-recent-page-info > div,
+#quality-evaluation-page-info > div {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.04);
+  color: var(--body-text-color-subdued);
+}
+#quality-evaluation-accordion {
+  margin-top: 10px !important;
+}
+#quality-evaluation-accordion > div {
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  border-radius: 22px !important;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 30%),
+    var(--block-background-fill) !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+#quality-evaluation-accordion summary {
+  padding: 14px 18px !important;
+  font-weight: 700 !important;
 }
 #review-top-row {
   align-items: stretch !important;
@@ -1124,6 +1335,8 @@ UI_CSS = """
 #quality-dummy-row-4,
 #quality-dummy-bottom-row {
   align-items: stretch !important;
+  gap: 14px !important;
+  margin-top: 8px !important;
 }
 #quality-dummy-row-1 > .gradio-column,
 #quality-dummy-row-2 > .gradio-column,
@@ -1131,30 +1344,186 @@ UI_CSS = """
 #quality-dummy-row-4 > .gradio-column,
 #quality-dummy-bottom-row > .gradio-column {
   align-self: stretch !important;
+  min-width: 0 !important;
 }
 #quality-dummy-intake-panel,
+#quality-dummy-help-panel,
+#quality-dummy-template-panel,
+#quality-dummy-progress-panel,
+#quality-dummy-result-panel,
 #quality-dummy-status-panel,
-#quality-dummy-queue-panel,
+#quality-dummy-claim-list-panel,
 #quality-dummy-focus-panel,
 #quality-dummy-evidence-panel,
 #quality-dummy-evidence-detail,
 #quality-dummy-history-panel,
-#quality-dummy-actions,
+#quality-dummy-action-panel,
+#quality-dummy-evaluation-panel,
 #quality-dummy-detail-help {
-  margin-top: 12px;
-  padding: 16px;
-  border: 1px solid rgba(96, 165, 250, 0.24);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
+  margin-top: 0;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  background: var(--block-background-fill);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
+#quality-dummy-template-panel,
+#quality-dummy-relation-note,
 #quality-dummy-status-panel,
 #quality-dummy-focus-panel,
 #quality-dummy-evidence-detail,
-#quality-dummy-actions,
+#quality-dummy-action-panel,
 #quality-dummy-detail-help,
 #quality-dummy-evidence-panel,
-#quality-dummy-history-panel {
+#quality-dummy-history-panel,
+#quality-dummy-help-panel,
+#quality-dummy-progress-panel,
+#quality-dummy-result-panel,
+#quality-dummy-evaluation-panel {
   height: 100%;
+}
+.quality-dummy-note {
+  margin: 6px 0 0 0;
+  padding: 12px 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.26);
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--body-text-color-subdued);
+  background: rgba(148, 163, 184, 0.04);
+}
+.quality-dummy-shell {
+  height: 100%;
+  padding: 4px 2px;
+}
+.quality-dummy-shell--primary {
+  border-left: 4px solid rgba(59, 130, 246, 0.78);
+  padding-left: 14px;
+}
+.quality-dummy-shell--success {
+  border-left: 4px solid rgba(34, 197, 94, 0.78);
+  padding-left: 14px;
+}
+.quality-dummy-shell--warning {
+  border-left: 4px solid rgba(245, 158, 11, 0.78);
+  padding-left: 14px;
+}
+.quality-dummy-shell--default {
+  border-left: 4px solid rgba(148, 163, 184, 0.42);
+  padding-left: 14px;
+}
+.quality-dummy-kicker {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--body-text-color-subdued);
+}
+.quality-dummy-title {
+  margin: 0 0 14px 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--body-text-color);
+}
+.quality-dummy-subtitle {
+  margin: 0 0 14px 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--body-text-color-subdued);
+}
+.quality-dummy-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px 0;
+}
+.quality-dummy-stat {
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  background: rgba(148, 163, 184, 0.06);
+}
+.quality-dummy-stat-label {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  color: var(--body-text-color-subdued);
+}
+.quality-dummy-stat-value {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--body-text-color);
+}
+.quality-dummy-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px 0;
+}
+.quality-dummy-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.quality-dummy-chip--danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+.quality-dummy-chip--warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+.quality-dummy-chip--primary {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+.quality-dummy-section {
+  margin: 0 0 14px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(148, 163, 184, 0.05);
+}
+.quality-dummy-section-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--body-text-color);
+}
+.quality-dummy-section-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--body-text-color-subdued);
+}
+.quality-dummy-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--body-text-color-subdued);
+}
+.quality-dummy-highlight {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.14);
+}
+.quality-dummy-highlight strong {
+  color: var(--body-text-color);
+}
+#quality-dummy-action-panel .gradio-button,
+#quality-dummy-intake-panel .gradio-button {
+  min-height: 42px !important;
+}
+#quality-dummy-action-panel .gradio-row,
+#quality-dummy-intake-panel .gradio-row {
+  gap: 10px !important;
 }
 """
 
@@ -1162,21 +1531,12 @@ UI_CSS = """
 def _build_quality_dummy_card_html(title: str, body: str, *, tone: str = "default") -> str:
     """构建 AI 质检 dummy 页面使用的静态卡片。"""
 
-    tone_map = {
-        "default": ("rgba(148, 163, 184, 0.18)", "rgba(15, 23, 42, 0.04)"),
-        "primary": ("rgba(96, 165, 250, 0.36)", "rgba(59, 130, 246, 0.09)"),
-        "success": ("rgba(34, 197, 94, 0.30)", "rgba(34, 197, 94, 0.08)"),
-        "warning": ("rgba(245, 158, 11, 0.34)", "rgba(245, 158, 11, 0.08)"),
-    }
-    border_color, background_color = tone_map.get(tone, tone_map["default"])
     return (
-        f"<div style='height:100%;padding:16px 18px;border:1px solid {border_color};"
-        f"border-radius:16px;background:{background_color};'>"
-        f"<div style='font-size:13px;font-weight:700;letter-spacing:0.04em;"
-        "text-transform:uppercase;color:var(--body-text-color-subdued);margin:0 0 10px 0;'>"
+        f"<section class='quality-dummy-shell quality-dummy-shell--{tone}'>"
+        "<div class='quality-dummy-kicker'>"
         f"{title}</div>"
-        f"<div style='font-size:14px;line-height:1.8;color:var(--body-text-color);'>{body}</div>"
-        "</div>"
+        f"{body}"
+        "</section>"
     )
 
 
@@ -1194,10 +1554,174 @@ def _build_quality_dummy_history_rows() -> list[list[str]]:
     """返回 AI 质检 dummy 的静态历史记录。"""
 
     return [
-        ["当前", "chk_20260504_001", "高风险", "12 条", "3 条待确认", "阿胶能直接替代所有补血药"],
-        ["-", "chk_20260503_004", "中风险", "8 条", "1 条待确认", "《伤寒论》明确记载阿胶用于外伤止血"],
-        ["-", "chk_20260502_002", "低风险", "6 条", "0 条待确认", "阿胶在古籍中常与补血场景关联"],
+        ["当前", "chk_20260504_001", "classical_claim_review", "需复核", "4 条", "2 条", "2026-05-08 15:58", "阿胶可以直接替代所有补血药"],
+        ["-", "chk_20260503_004", "general_fact_check", "部分通过", "6 条", "1 条", "2026-05-07 18:20", "《神农本草经》明确记载阿胶用于延年不老"],
+        ["-", "chk_20260502_002", "risk_first_screening", "低风险", "5 条", "0 条", "2026-05-06 09:12", "阿胶在古籍中常与补血场景关联"],
     ]
+
+
+def _build_quality_dummy_evaluation_rows() -> list[list[str]]:
+    """返回 AI 质检 dummy 的静态评测明细。"""
+
+    return [
+        [
+            "case-001",
+            "需复核",
+            "需复核",
+            "是",
+            "高风险",
+            "高风险",
+            "是",
+            "4",
+            "4",
+            "是",
+            "是",
+            "是",
+            "Claim 拆分和风险判断符合预期",
+            "无需额外排查",
+            "阿胶可以直接替代所有补血药，并且《神农本草经》明确记载它可以延年不老。",
+        ],
+        [
+            "case-002",
+            "部分通过",
+            "部分通过",
+            "是",
+            "中风险",
+            "中风险",
+            "是",
+            "3",
+            "3",
+            "是",
+            "是",
+            "是",
+            "模板对古文引用的风险识别符合预期",
+            "继续检查古籍原句上下文",
+            "阿胶在古籍中常与补血场景关联，但个别现代转述带有扩大解释。",
+        ],
+    ]
+
+
+def _build_quality_dummy_top_help_html() -> str:
+    """返回 AI 质检 dummy 的顶部帮助卡。"""
+
+    return _build_quality_dummy_card_html(
+        "使用说明",
+        """
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>当前页用途</div>
+          <p class='quality-dummy-section-text'>这个 dummy 只做 UI 样式验证，不接正式业务事件；但模块编排、功能分区、阅读顺序按正式 `AI 质检` 页完整保留。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>阅读方式</div>
+          <p class='quality-dummy-section-text'>建议按“输入与执行 → 模板内容 → 执行进度/质检结果 → Claim/证据 → 历史记录/下载结果 → 效果评测”的顺序查看。</p>
+        </div>
+        """,
+    )
+
+
+def _build_quality_dummy_template_html() -> str:
+    """返回 AI 质检 dummy 的模板内容卡。"""
+
+    return _build_quality_dummy_card_html(
+        "模板内容",
+        """
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>当前模板</div>
+          <p class='quality-dummy-section-text'><strong>classical_claim_review</strong> · 面向古文、古籍转述、医学相关表述的证据优先核检。</p>
+        </div>
+        <div class='quality-dummy-stat-grid'>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>全文召回</div>
+            <div class='quality-dummy-stat-value'>8</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>向量召回</div>
+            <div class='quality-dummy-stat-value'>8</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>最终返回</div>
+            <div class='quality-dummy-stat-value'>6</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>工作模式</div>
+            <div class='quality-dummy-stat-value'>证据优先</div>
+          </div>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>模板说明：</strong>优先保守处理绝对化结论、夸张疗效、古籍出处不稳的现代转述。
+        </div>
+        """,
+        tone="primary",
+    )
+
+
+def _build_quality_dummy_progress_html() -> str:
+    """返回 AI 质检 dummy 的执行进度卡。"""
+
+    return _build_quality_dummy_card_html(
+        "执行进度",
+        """
+        <div class='quality-dummy-stat-grid'>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>当前阶段</div>
+            <div class='quality-dummy-stat-value'>已完成</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>耗时</div>
+            <div class='quality-dummy-stat-value'>18s</div>
+          </div>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>阶段拆解</div>
+          <ul class='quality-dummy-list'>
+            <li>已完成 Claim 拆分</li>
+            <li>已完成检索与证据关系标注</li>
+            <li>已完成总体结论生成</li>
+            <li>当前等待人工复核决策</li>
+          </ul>
+        </div>
+        """,
+    )
+
+
+def _build_quality_dummy_result_html() -> str:
+    """返回 AI 质检 dummy 的结果卡。"""
+
+    return _build_quality_dummy_card_html(
+        "质检结果",
+        """
+        <div class='quality-dummy-title'>总体结论：需复核</div>
+        <div class='quality-dummy-chip-row'>
+          <span class='quality-dummy-chip quality-dummy-chip--danger'>高风险</span>
+          <span class='quality-dummy-chip quality-dummy-chip--warning'>2 条待送审</span>
+          <span class='quality-dummy-chip quality-dummy-chip--primary'>4 条 Claim</span>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>结果摘要</div>
+          <p class='quality-dummy-section-text'>输入中同时存在绝对化结论、古籍出处不稳的现代转述、以及可保留的弱结论，不能直接整体通过。</p>
+        </div>
+        """,
+        tone="warning",
+    )
+
+
+def _build_quality_dummy_active_check_html() -> str:
+    """返回 AI 质检 dummy 的当前任务概览。"""
+
+    return _build_quality_dummy_card_html(
+        "当前任务",
+        """
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>质检 ID</div>
+          <p class='quality-dummy-section-text'>chk_20260504_001</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>当前焦点</div>
+          <p class='quality-dummy-section-text'>C1 · 阿胶可以直接替代所有补血药</p>
+        </div>
+        """,
+        tone="primary",
+    )
 
 
 def _build_quality_dummy_status_html() -> str:
@@ -1206,12 +1730,29 @@ def _build_quality_dummy_status_html() -> str:
     return _build_quality_dummy_card_html(
         "执行状态与总体结果",
         """
-        <div style='font-size:18px;font-weight:700;margin:0 0 12px 0;'>已完成 1 次模拟质检</div>
-        <div style='margin:0 0 8px 0;'><strong>当前状态：</strong>待人工复核</div>
-        <div style='margin:0 0 8px 0;'><strong>总体结论：</strong>输入中包含绝对化结论与来源不稳的古籍引用，建议拆分后分别处理。</div>
-        <div style='margin:0 0 8px 0;'><strong>风险等级：</strong>高风险</div>
-        <div style='margin:0 0 8px 0;'><strong>Claim 数量：</strong>4 条，其中 2 条建议送审，1 条建议保留，1 条建议拆分重写。</div>
-        <div><strong>当前焦点：</strong>系统正在查看 `C1`，已关联 3 条证据，其中 1 条存在冲突。</div>
+        <div class='quality-dummy-title'>已完成 1 次模拟质检</div>
+        <div class='quality-dummy-subtitle'>这里仍然只负责展示执行状态、总体结论、风险等级和当前焦点，不改动原有功能含义。</div>
+        <div class='quality-dummy-stat-grid'>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>当前状态</div>
+            <div class='quality-dummy-stat-value'>待人工复核</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>总体风险</div>
+            <div class='quality-dummy-stat-value'>高风险</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>Claim 数量</div>
+            <div class='quality-dummy-stat-value'>4 条</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>待处理动作</div>
+            <div class='quality-dummy-stat-value'>2 项</div>
+          </div>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>总体结论：</strong>输入中包含绝对化结论与来源不稳的古籍引用，建议拆分后分别处理。
+        </div>
         """,
         tone="primary",
     )
@@ -1223,14 +1764,24 @@ def _build_quality_dummy_focus_html() -> str:
     return _build_quality_dummy_card_html(
         "当前 Claim",
         """
-        <div style='font-size:18px;font-weight:700;margin:0 0 10px 0;'>阿胶可以直接替代所有补血药</div>
-        <div style='margin:0 0 10px 0;'>
-          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(239,68,68,0.16);margin-right:8px;'>高风险</span>
-          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(245,158,11,0.16);margin-right:8px;'>待人工确认</span>
-          <span style='display:inline-block;padding:2px 10px;border-radius:999px;background:rgba(59,130,246,0.16);'>证据 3 条</span>
+        <div class='quality-dummy-title'>阿胶可以直接替代所有补血药</div>
+        <div class='quality-dummy-chip-row'>
+          <span class='quality-dummy-chip quality-dummy-chip--danger'>高风险</span>
+          <span class='quality-dummy-chip quality-dummy-chip--warning'>待人工确认</span>
+          <span class='quality-dummy-chip quality-dummy-chip--primary'>证据 3 条</span>
         </div>
-        <div style='margin:0 0 10px 0;'><strong>系统判断：</strong>绝对化表述过强，现有证据只能支持“常用于补血相关场景”，不能推出“替代所有补血药”。</div>
-        <div><strong>建议动作：</strong>保留原始 Claim，拆出“补血相关用途”作为可保留子结论，其余部分进入人工审核。</div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>系统判断</div>
+          <p class='quality-dummy-section-text'>绝对化表述过强，现有证据只能支持“常用于补血相关场景”，不能推出“替代所有补血药”。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>建议动作</div>
+          <ul class='quality-dummy-list'>
+            <li>保留原始 Claim</li>
+            <li>拆出“补血相关用途”作为可保留子结论</li>
+            <li>其余部分进入人工审核</li>
+          </ul>
+        </div>
         """,
         tone="primary",
     )
@@ -1242,11 +1793,21 @@ def _build_quality_dummy_evidence_detail_html() -> str:
     return _build_quality_dummy_card_html(
         "证据详情",
         """
-        <div style='margin:0 0 8px 0;'><strong>当前证据：</strong>SUP-001</div>
-        <div style='margin:0 0 8px 0;'><strong>原文摘录：</strong>阿胶，久服轻身益气，常见于补血相关配伍场景。</div>
-        <div style='margin:0 0 8px 0;'><strong>上下文说明：</strong>原文支持“补血相关用途”，但没有支持“替代所有补血药”的绝对化推断。</div>
-        <div style='margin:0 0 8px 0;'><strong>证据关系：</strong>部分支持</div>
-        <div><strong>处理建议：</strong>保留“补血相关”结论，删除“直接替代所有补血药”的扩张说法。</div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>当前证据</div>
+          <p class='quality-dummy-section-text'><strong>SUP-001</strong> · 《本草纲目》 · 卷一 / 药部</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>原文摘录</div>
+          <p class='quality-dummy-section-text'>阿胶，久服轻身益气，常见于补血相关配伍场景。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>上下文说明</div>
+          <p class='quality-dummy-section-text'>原文支持“补血相关用途”，但没有支持“替代所有补血药”的绝对化推断。</p>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>处理建议：</strong>保留“补血相关”结论，删除“直接替代所有补血药”的扩张说法。
+        </div>
         """,
     )
 
@@ -1257,13 +1818,79 @@ def _build_quality_dummy_actions_html() -> str:
     return _build_quality_dummy_card_html(
         "后续动作结果区",
         """
-        <div style='margin:0 0 8px 0;'><strong>当前选中记录：</strong>质检 ID `chk_20260504_001` / Claim `C1`</div>
-        <div style='margin:0 0 8px 0;'><strong>导出结果示例：</strong>`Docs/quality_dummy_preview_20260505_0930.MD` 已生成</div>
-        <div style='margin:0 0 8px 0;'><strong>提交人工审核示意：</strong>已加入待审核队列，审核优先级为“高”</div>
-        <div style='margin:0 0 8px 0;'><strong>复核任务示意：</strong>已创建 `review_task_001`，要求核对古籍原句与现代转述是否一致</div>
-        <div><strong>操作反馈示例：</strong>最近一次模拟操作成功，系统建议先送审再导出最终结果。</div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>当前选中对象</div>
+          <p class='quality-dummy-section-text'>质检 ID `chk_20260504_001` / Claim `C1`</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>最近动作反馈</div>
+          <ul class='quality-dummy-list'>
+            <li>导出结果示例：`Docs/quality_dummy_preview_20260508_1600.MD` 已生成</li>
+            <li>提交人工审核示意：已加入待审核队列，审核优先级为“高”</li>
+            <li>复核任务示意：已创建 `review_task_001`，要求核对古籍原句与现代转述是否一致</li>
+          </ul>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>操作反馈示例：</strong>最近一次模拟操作成功，系统建议先送审再导出最终结果。
+        </div>
         """,
         tone="success",
+    )
+
+
+def _build_quality_dummy_export_result_html() -> str:
+    """返回 AI 质检 dummy 的下载结果区。"""
+
+    return _build_quality_dummy_card_html(
+        "下载结果",
+        """
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>最近导出</div>
+          <p class='quality-dummy-section-text'>`Docs/quality_dummy_preview_20260508_1615.MD` 已生成，可用于预览本次静态版质检结果。</p>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>说明：</strong>这里保留正式页“下载结果与动作”的位置，只做静态反馈展示，不绑定真实导出逻辑。
+        </div>
+        """,
+        tone="success",
+    )
+
+
+def _build_quality_dummy_evaluation_help_html() -> str:
+    """返回 AI 质检 dummy 的评测帮助区。"""
+
+    return _build_quality_dummy_card_html(
+        "效果评测说明",
+        """
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>用途</div>
+          <p class='quality-dummy-section-text'>用于比对模板在多条样例上的结论、风险等级、Claim 数量是否符合预期。</p>
+        </div>
+        """,
+    )
+
+
+def _build_quality_dummy_evaluation_summary_html() -> str:
+    """返回 AI 质检 dummy 的评测摘要。"""
+
+    return _build_quality_dummy_card_html(
+        "评测摘要",
+        """
+        <div class='quality-dummy-stat-grid'>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>样例数量</div>
+            <div class='quality-dummy-stat-value'>2</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>完全命中</div>
+            <div class='quality-dummy-stat-value'>2</div>
+          </div>
+        </div>
+        <div class='quality-dummy-highlight'>
+          <strong>当前结果：</strong>模拟样例的结论、风险等级、Claim 数量均与预期一致。
+        </div>
+        """,
+        tone="primary",
     )
 
 
@@ -1273,13 +1900,43 @@ def _build_quality_dummy_help_html() -> str:
     return _build_quality_dummy_card_html(
         "详细功能说明",
         """
-        <div style='margin:0 0 8px 0;'><strong>输入与执行：</strong>用于填写待质检文本、选择知识库与模板，并触发一次完整的质检流程。</div>
-        <div style='margin:0 0 8px 0;'><strong>执行状态与总体结果：</strong>集中展示当前任务状态、总体结论、风险等级和 Claim 数量，避免用户在多个区域拼接结果。</div>
-        <div style='margin:0 0 8px 0;'><strong>Claim 列表与当前 Claim：</strong>左侧看队列，右侧看当前焦点，保证“选什么、看什么”始终对应。</div>
-        <div style='margin:0 0 8px 0;'><strong>证据列表与证据详情：</strong>左侧看证据清单，右侧看原文与解释，专门承接支持、补充、矛盾三类证据。</div>
-        <div style='margin:0 0 8px 0;'><strong>历史质检记录：</strong>用于回看最近任务，帮助比较不同输入或不同模板下的质检结果。</div>
-        <div><strong>后续动作结果区：</strong>用于承接导出、送审、生成复核任务后的结果反馈，确保用户能直接看到动作结果，而不是只看到按钮。</div>
+        <div class='quality-dummy-title'>详细功能说明</div>
+        <div class='quality-dummy-stat-grid'>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>布局原则</div>
+            <div class='quality-dummy-stat-value'>始终两列以内</div>
+          </div>
+          <div class='quality-dummy-stat'>
+            <div class='quality-dummy-stat-label'>阅读顺序</div>
+            <div class='quality-dummy-stat-value'>结果 → Claim → 证据</div>
+          </div>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>输入与执行</div>
+          <p class='quality-dummy-section-text'>用于填写待质检文本、选择知识库与模板，并触发一次完整的质检流程。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>执行状态与总体结果</div>
+          <p class='quality-dummy-section-text'>集中展示当前任务状态、总体结论、风险等级和 Claim 数量，避免用户在多个区域拼接结果。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>Claim 列表与当前 Claim</div>
+          <p class='quality-dummy-section-text'>左侧看队列，右侧看当前焦点，保证“选什么、看什么”始终对应。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>证据列表与证据详情</div>
+          <p class='quality-dummy-section-text'>左侧看证据清单，右侧看原文与解释，专门承接支持、补充、矛盾三类证据。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>历史质检记录</div>
+          <p class='quality-dummy-section-text'>用于回看最近任务，帮助比较不同输入或不同模板下的质检结果。</p>
+        </div>
+        <div class='quality-dummy-section'>
+          <div class='quality-dummy-section-title'>后续动作结果区</div>
+          <p class='quality-dummy-section-text'>用于承接导出、送审、生成复核任务后的结果反馈，确保用户能直接看到动作结果，而不是只看到按钮。</p>
+        </div>
         """,
+        tone="warning",
     )
 
 
@@ -5371,7 +6028,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
                 quality_relation_note = gr.HTML(
                     value=(
-                        "<div style='padding:8px 2px 14px 2px;'>"
+                        "<div>"
                         "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
                         "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
                         "</div>"
@@ -5547,7 +6204,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="quality-bottom-help",
                         )
 
-            with gr.Tab("AI 质检优化 Dummy", visible=False):
+            with gr.Tab("AI 质检优化 Dummy", visible=True):
                 with gr.Row(elem_id="quality-dummy-row-1", equal_height=True):
                     with gr.Column(scale=1, elem_id="quality-dummy-intake-panel"):
                         gr.Markdown("### 1. 输入与执行")
@@ -5580,19 +6237,55 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row():
                             quality_dummy_submit = gr.Button("开始模拟质检", variant="primary")
                             quality_dummy_export = gr.Button("导出模拟结果")
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, elem_id="quality-dummy-help-panel"):
+                        quality_dummy_help_panel = gr.HTML(
+                            value=_build_quality_dummy_top_help_html(),
+                            elem_id="quality-dummy-help-card",
+                        )
+                with gr.Row(elem_id="quality-dummy-template-row"):
+                    quality_dummy_template_detail = gr.HTML(
+                        value=_build_quality_dummy_template_html(),
+                        elem_id="quality-dummy-template-panel",
+                    )
+                with gr.Row(elem_id="quality-dummy-summary-row", equal_height=True):
+                    with gr.Column(scale=1, elem_id="quality-dummy-progress-panel"):
+                        quality_dummy_progress = gr.HTML(
+                            value=_build_quality_dummy_progress_html(),
+                            elem_id="quality-dummy-progress-card",
+                        )
+                    with gr.Column(scale=1, elem_id="quality-dummy-result-panel"):
                         quality_dummy_status = gr.HTML(
-                            value=_build_quality_dummy_status_html(),
+                            value=_build_quality_dummy_result_html(),
                             elem_id="quality-dummy-status-panel",
                         )
+                quality_dummy_relation_note = gr.HTML(
+                    value=(
+                        "<div class='quality-dummy-note'>"
+                        "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
+                        "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
+                        "</div>"
+                    ),
+                    elem_id="quality-dummy-relation-note",
+                )
                 with gr.Row(elem_id="quality-dummy-row-2", equal_height=True):
-                    with gr.Column(scale=1, elem_id="quality-dummy-queue-panel"):
+                    with gr.Column(scale=1, elem_id="quality-dummy-claim-list-panel"):
                         gr.Markdown("### 2. Claim 列表")
+                        quality_dummy_active_check = gr.HTML(
+                            value=_build_quality_dummy_active_check_html(),
+                            elem_id="quality-dummy-active-check",
+                        )
                         quality_dummy_claims = gr.Radio(
-                            label="待处理 Claim 队列",
+                            label="Claim 列表",
                             choices=quality_dummy_claim_choices,
                             value=quality_dummy_claim_choices[0],
                             elem_id="quality-dummy-claims",
+                        )
+                        with gr.Row(elem_id="quality-dummy-claim-pagination-row"):
+                            quality_dummy_claim_prev = gr.Button("上一页")
+                            quality_dummy_claim_next = gr.Button("下一页")
+                        quality_dummy_claim_page_info = gr.HTML(
+                            value="<div class='quality-dummy-note'>第 1 / 1 页，共 4 条 Claim</div>",
+                            elem_id="quality-dummy-claim-page-info",
                         )
                     with gr.Column(scale=1):
                         quality_dummy_focus = gr.HTML(
@@ -5603,15 +6296,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Column(scale=1, elem_id="quality-dummy-evidence-panel"):
                         gr.Markdown("### 3. 证据列表")
                         quality_dummy_evidence = gr.Dataframe(
-                            headers=["证据 ID", "来源文档", "定位", "关系", "检索路径", "证据摘要"],
-                            datatype=["str"] * 6,
+                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                            datatype=["str"] * 9,
                             interactive=False,
                             row_count=3,
-                            column_count=6,
+                            column_count=9,
                             label="证据列表",
                             elem_id="quality-dummy-evidence-table",
-                            value=quality_dummy_evidence_rows,
-                            max_height=320,
+                            value=[
+                                ["1", "SUP-001", "《本草纲目》", "卷一 / 药部", "支持", "全文", "原句检索", "-", "阿胶主治与补血相关表述高度一致"],
+                                ["2", "CHK-014", "《神农本草经》", "上品 / 阿胶", "补充", "向量", "扩展检索", "-", "补充说明阿胶长期入药背景，可解释来源脉络"],
+                                ["3", "CON-003", "《本草拾遗》", "卷三 / 校注", "矛盾", "向量", "扩展检索", "-", "存在剂量语义差异，需要人工复核原句上下文"],
+                            ],
+                            max_height=420,
+                        )
+                        with gr.Row(elem_id="quality-dummy-evidence-pagination-row"):
+                            quality_dummy_evidence_prev = gr.Button("上一页")
+                            quality_dummy_evidence_next = gr.Button("下一页")
+                        quality_dummy_evidence_page_info = gr.HTML(
+                            value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条证据</div>",
+                            elem_id="quality-dummy-evidence-page-info",
                         )
                     with gr.Column(scale=1):
                         quality_dummy_evidence_detail = gr.HTML(
@@ -5621,26 +6325,102 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 with gr.Row(elem_id="quality-dummy-row-4", equal_height=True):
                     with gr.Column(scale=1, elem_id="quality-dummy-history-panel"):
                         gr.Markdown("### 4. 历史质检记录")
+                        quality_dummy_history_note = gr.HTML(
+                            value=(
+                                "<div class='quality-dummy-note'>"
+                                "最近质检记录用于回看历史质检任务。切换历史记录后，可重新查看当次的 Claim 与证据。"
+                                "</div>"
+                            ),
+                            elem_id="quality-dummy-history-note",
+                        )
+                        quality_dummy_history_scope = gr.Dropdown(
+                            label="历史任务范围",
+                            choices=["全部历史任务", "仅当前知识库", "仅高风险任务"],
+                            value="全部历史任务",
+                            interactive=True,
+                            elem_id="quality-dummy-history-scope",
+                        )
                         quality_dummy_history = gr.Dataframe(
-                            headers=["当前", "质检 ID", "总体风险", "Claim 数", "待确认", "输入摘要"],
-                            datatype=["str"] * 6,
+                            headers=["当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+                            datatype=["str"] * 8,
                             interactive=False,
                             row_count=3,
-                            column_count=6,
-                            label="历史质检记录",
+                            column_count=8,
+                            label="最近质检记录",
                             elem_id="quality-dummy-history-table",
                             value=quality_dummy_history_rows,
-                            max_height=260,
+                            max_height=420,
                         )
-                    with gr.Column(scale=1, elem_id="quality-dummy-actions"):
-                        gr.Markdown("### 5. 后续动作结果区")
-                        with gr.Row():
-                            quality_dummy_action_export = gr.Button("导出结果示意")
-                            quality_dummy_action_review = gr.Button("提交人工审核示意")
-                            quality_dummy_action_task = gr.Button("生成复核任务示意")
+                        with gr.Row(elem_id="quality-dummy-history-pagination-row"):
+                            quality_dummy_history_prev = gr.Button("上一页")
+                            quality_dummy_history_next = gr.Button("下一页")
+                        quality_dummy_history_page_info = gr.HTML(
+                            value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条记录</div>",
+                            elem_id="quality-dummy-history-page-info",
+                        )
+                    with gr.Column(scale=1, elem_id="quality-dummy-action-panel"):
+                        gr.Markdown("### 5. 下载结果与动作")
+                        with gr.Row(elem_id="quality-dummy-export-row"):
+                            quality_dummy_action_export = gr.Button("下载结果")
                         quality_dummy_actions_result = gr.HTML(
+                            value=_build_quality_dummy_export_result_html(),
+                            elem_id="quality-dummy-export-result",
+                        )
+                        quality_dummy_followup = gr.HTML(
                             value=_build_quality_dummy_actions_html(),
                             elem_id="quality-dummy-actions-result",
+                        )
+                with gr.Accordion("效果评测", open=False, elem_id="quality-dummy-evaluation-accordion"):
+                    with gr.Column(scale=1, elem_id="quality-dummy-evaluation-panel"):
+                        quality_dummy_evaluation_help = gr.HTML(
+                            value=_build_quality_dummy_evaluation_help_html(),
+                            elem_id="quality-dummy-evaluation-help",
+                        )
+                        quality_dummy_evaluation_cases = gr.Textbox(
+                            label="效果评测样例 JSON",
+                            lines=8,
+                            value='[{"sample_id":"case-001","input_text":"阿胶可以直接替代所有补血药"}]',
+                            interactive=False,
+                            elem_id="quality-dummy-evaluation-cases",
+                        )
+                        with gr.Row(elem_id="quality-dummy-evaluation-action-row", equal_height=True):
+                            with gr.Column(scale=1):
+                                quality_dummy_evaluation_button = gr.Button("执行效果评测")
+                            with gr.Column(scale=1):
+                                quality_dummy_evaluation_export_button = gr.Button("下载评测结果")
+                                quality_dummy_evaluation_export_result = gr.HTML(
+                                    value=_build_quality_dummy_export_result_html(),
+                                    elem_id="quality-dummy-evaluation-export-result",
+                                )
+                        quality_dummy_evaluation_summary = gr.HTML(
+                            value=_build_quality_dummy_evaluation_summary_html(),
+                            elem_id="quality-dummy-evaluation-summary",
+                        )
+                        quality_dummy_evaluation_table = gr.Dataframe(
+                            headers=[
+                                "样例 ID",
+                                "预期结论",
+                                "实际结论",
+                                "结论命中",
+                                "预期风险",
+                                "实际风险",
+                                "风险命中",
+                                "预期 Claim 数",
+                                "实际 Claim 数",
+                                "Claim 数命中",
+                                "宽松命中",
+                                "完全命中",
+                                "差异说明",
+                                "建议排查方向",
+                                "输入摘要",
+                            ],
+                            datatype=["str"] * 15,
+                            interactive=False,
+                            row_count=2,
+                            column_count=15,
+                            label="效果评测明细",
+                            elem_id="quality-dummy-evaluation-table",
+                            value=_build_quality_dummy_evaluation_rows(),
                         )
                 with gr.Row(elem_id="quality-dummy-bottom-row", equal_height=True):
                     with gr.Column(scale=1):
