@@ -101,12 +101,44 @@ RECENT_QUALITY_FETCH_LIMIT = 200
 UI_CSS = """
 #search-top-row {
   align-items: stretch !important;
+  gap: 10px !important;
 }
+#search-top-row > .gradio-column,
+#search-result-row > .gradio-column {
+  align-self: stretch !important;
+  min-width: 0 !important;
+}
+#document-management-top-row,
+#document-management-summary-row,
 #document-management-focus-row {
   align-items: stretch !important;
+  gap: 10px !important;
 }
+#document-management-top-row > .gradio-column,
+#document-management-summary-row > .gradio-column,
 #document-management-focus-row > .gradio-column {
   align-self: stretch !important;
+  min-width: 0 !important;
+}
+#document-management-help-panel,
+#document-management-selector-panel,
+#document-summary-panel,
+#database-summary-panel {
+  height: 100%;
+}
+#document-management-help-panel,
+#document-management-selector-panel {
+  min-height: 220px;
+}
+#document-summary-panel,
+#database-summary-panel {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.08);
+}
+#document-summary-panel > div,
+#database-summary-panel > div {
+  height: 100%;
 }
 #document-current-panel,
 #document-quality-panel {
@@ -201,59 +233,168 @@ UI_CSS = """
   text-align: center !important;
 }
 #document-quality-accordion {
-  margin-top: 12px;
+  margin-top: 10px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
-  padding-top: 12px;
-}
-#document-quality-panel {
   padding-top: 10px;
 }
-#document-quality-top-actions,
-#document-quality-batch-action-row,
-#document-quality-config-action-row,
-#search-export-row,
-#quality-export-row,
-#settings-export-row {
-  align-items: center !important;
-  gap: 10px;
+#document-quality-panel {
+  padding-top: 6px;
+}
+#document-relationship-row,
+#database-pagination-row,
+#document-pagination-row,
+#document-management-actions-row,
+#document-management-result-row,
+#document-quality-sections-pagination-row,
+#document-quality-chunks-pagination-row,
+#document-quality-search-pagination-row,
+#document-quality-batch-pagination-row {
+  gap: 10px !important;
+  margin-top: 6px !important;
+}
+#document-pagination-row {
+  margin-top: 4px !important;
+}
+#document-pagination-row button,
+#document-management-actions-row button {
+  min-height: 42px !important;
+}
+#document-page-info {
+  margin-top: 2px !important;
+}
+#document-management-actions-row,
+#document-management-result-row,
+#document-quality-summary-row,
+#document-quality-sample-row,
+#document-quality-search-row,
+#document-quality-result-row,
+#document-quality-batch-row,
+#document-quality-config-row {
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+#document-management-actions-row > .gradio-column,
+#document-management-result-row > .gradio-column,
+#document-quality-summary-row > .gradio-column,
+#document-quality-sample-row > .gradio-column,
+#document-quality-search-row > .gradio-column,
+#document-quality-result-row > .gradio-column,
+#document-quality-batch-row > .gradio-column,
+#document-quality-config-row > .gradio-column {
+  align-self: stretch !important;
+  min-width: 0 !important;
+}
+#document-management-actions-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  margin-top: 8px !important;
+}
+#document-management-actions-row > * {
+  flex: 1 1 220px !important;
+  min-width: 0 !important;
+}
+#document-management-result-row {
+  margin-top: 8px !important;
+}
+#document-management-result-row > * {
+  flex: 1 1 320px !important;
+}
+#document-register-result,
+#document-rebuild-result {
+  min-height: 96px;
+  height: 100%;
+}
+#document-quality-report,
+#document-quality-checks {
+  min-height: 152px;
+}
+#document-quality-search-summary {
+  min-height: 136px;
+}
+#document-quality-search-detail,
+#document-quality-config-panel,
+#document-quality-config-result {
+  min-height: 132px;
+}
+#document-quality-report,
+#document-quality-checks,
+#document-quality-search-summary,
+#document-quality-search-detail,
+#document-quality-config-panel,
+#document-quality-config-result {
+  height: 100%;
 }
 #document-quality-top-actions,
 #document-quality-batch-action-row,
 #document-quality-config-action-row {
+  align-items: center !important;
+  gap: 10px;
+}
+#document-quality-top-actions,
+#document-quality-search-action-row,
+#document-quality-batch-action-row,
+#document-quality-config-action-row {
   display: flex !important;
-  flex-direction: column !important;
+  flex-wrap: wrap !important;
   align-items: stretch !important;
-  gap: 12px !important;
+  gap: 10px !important;
 }
 #document-quality-top-actions > *,
+#document-quality-search-action-row > *,
 #document-quality-batch-action-row > *,
 #document-quality-config-action-row > * {
-  width: 100% !important;
+  flex: 1 1 180px !important;
+  width: auto !important;
   min-width: 0 !important;
 }
 #document-quality-top-actions button,
+#document-quality-search-action-row button,
 #document-quality-batch-action-row button,
 #document-quality-config-action-row button {
   width: 100% !important;
+  min-height: 42px !important;
 }
-#settings-export-row {
+#settings-export-row,
+#quality-export-row,
+#search-export-row {
   display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
   gap: 12px !important;
 }
-#settings-export-row > * {
-  width: 100% !important;
+#settings-export-row {
+  margin-top: 10px !important;
+}
+#settings-export-row > *,
+#quality-export-row > *,
+#search-export-row > * {
   min-width: 0 !important;
 }
-#settings-export-row button {
+#settings-export-row button,
+#quality-export-row button,
+#search-export-row button {
+  width: auto !important;
+  min-width: 180px !important;
+  min-height: 42px !important;
+  flex: 0 0 auto !important;
+}
+#settings-export-result,
+#quality-export-result,
+#search-export-result {
+  flex: 1 0 100% !important;
   width: 100% !important;
 }
 #document-quality-export-result,
 #document-quality-search-export-result,
 #document-quality-csv-export-result,
 #document-quality-batch-export-result,
-#document-quality-config-export-result,
+#document-quality-config-export-result {
+  min-height: 72px;
+}
+#document-quality-export-result,
+#document-quality-search-export-result,
+#document-quality-csv-export-result,
+#document-quality-batch-export-result,
 #document-quality-export-result *,
 #document-quality-search-export-result *,
 #document-quality-csv-export-result *,
@@ -263,6 +404,61 @@ UI_CSS = """
   box-sizing: border-box !important;
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
+}
+#document-quality-search-export-result,
+#document-quality-csv-export-result,
+#document-quality-batch-export-result,
+#document-quality-config-export-result {
+  margin-top: 4px !important;
+}
+#document-quality-result-row,
+#document-quality-batch-row,
+#document-quality-config-row {
+  margin-top: 6px !important;
+}
+#document-quality-batch-summary {
+  min-height: 104px;
+}
+#document-quality-sections-page-info,
+#document-quality-chunks-page-info,
+#document-quality-search-page-info,
+#document-quality-batch-page-info {
+  margin-top: 2px !important;
+}
+#document-quality-config-form {
+  padding: 12px !important;
+}
+#document-quality-config-form > .gradio-markdown {
+  margin-bottom: 4px !important;
+}
+#document-quality-config-form .gr-block.gr-box {
+  border: none !important;
+  box-shadow: none !important;
+}
+#document-quality-config-form-row-1,
+#document-quality-config-form-row-2,
+#document-quality-config-form-row-3,
+#document-quality-config-form-row-4 {
+  gap: 8px !important;
+  margin-top: 6px !important;
+}
+#document-quality-config-form-row-1 > *,
+#document-quality-config-form-row-2 > *,
+#document-quality-config-form-row-3 > *,
+#document-quality-config-form-row-4 > * {
+  flex: 1 1 240px !important;
+  min-width: 0 !important;
+}
+#document-quality-config-form-row-4 > * {
+  flex-basis: 100% !important;
+}
+#document-quality-batch-row,
+#document-quality-search-row {
+  gap: 10px !important;
+}
+#document-quality-batch-row > .gradio-column,
+#document-quality-search-row > .gradio-column {
+  min-width: 0 !important;
 }
 #settings-export-result,
 #settings-export-result * {
@@ -297,7 +493,7 @@ UI_CSS = """
 #search-input-panel,
 #search-help-panel {
   height: 100%;
-  min-height: 260px;
+  min-height: 220px;
   align-self: stretch !important;
 }
 #search-input-panel {
@@ -305,11 +501,12 @@ UI_CSS = """
   background: transparent;
   border-radius: 0;
   padding: 0;
-  min-height: 260px;
+  min-height: 220px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
+  gap: 10px;
 }
 #search-input-panel > div,
 #search-help-panel > div {
@@ -320,7 +517,20 @@ UI_CSS = """
   background: transparent !important;
 }
 #search-input-panel button {
-  margin-top: auto;
+  margin-top: 0;
+}
+#search-result-workspace {
+  margin-top: 10px;
+  padding: 12px 14px;
+}
+#search-pagination-row {
+  margin-top: 4px !important;
+}
+#search-page-info {
+  margin-top: 2px !important;
+}
+#search-export-row {
+  margin-top: 8px !important;
 }
 #quality-top-row {
   align-items: stretch !important;
@@ -363,12 +573,13 @@ UI_CSS = """
 #quality-template-panel {
   width: 100%;
 }
-#quality-claim-row,
-#quality-evidence-row {
-  align-items: stretch !important;
-}
+#quality-evidence-row,
 #quality-history-row {
-  align-items: stretch !important;
+  align-items: flex-start !important;
+}
+#quality-evidence-row > .gradio-column,
+#quality-history-row > .gradio-column {
+  align-self: flex-start !important;
 }
 #quality-evaluation-action-row {
   align-items: stretch !important;
@@ -378,7 +589,6 @@ UI_CSS = """
 #quality-progress-panel > div,
 #quality-result-panel > div,
 #quality-claim-detail > div,
-#quality-evidence-detail > div,
 #quality-evidence-detail > div {
 }
 #quality-history-panel {
@@ -402,6 +612,12 @@ UI_CSS = """
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
 }
+#quality-evidence-list-panel,
+#quality-history-panel,
+#quality-action-panel {
+  margin-top: 8px;
+  padding: 12px;
+}
 #quality-history-note {
   font-size: 13px !important;
   line-height: 1.7 !important;
@@ -419,10 +635,12 @@ UI_CSS = """
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04));
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
 }
-#quality-claims-table,
+#quality-claims-table {
+  min-height: 220px;
+}
 #quality-evidence-table,
 #quality-recent-table {
-  min-height: 260px;
+  min-height: 148px;
 }
 #quality-claims-table > div,
 #quality-claims-table > div > div,
@@ -433,7 +651,7 @@ UI_CSS = """
 #quality-recent-table > div,
 #quality-recent-table > div > div,
 #quality-recent-table > div > div > div {
-  min-height: 220px !important;
+  min-height: 132px !important;
 }
 #quality-claims-table table td,
 #quality-recent-table table td,
@@ -516,6 +734,10 @@ UI_CSS = """
   max-width: 100% !important;
   overflow: hidden !important;
 }
+#quality-evidence-detail,
+#quality-action-panel {
+  min-height: 136px;
+}
 #quality-evidence-detail *,
 #review-evidence-detail *,
 #quality-export-result * {
@@ -524,26 +746,29 @@ UI_CSS = """
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
 }
-#quality-export-row {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  gap: 12px !important;
-}
-#quality-export-row > * {
-  width: 100% !important;
-  min-width: 0 !important;
-}
-#quality-export-row button {
-  width: 100% !important;
-}
 #quality-export-result a {
   white-space: normal !important;
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
 }
+#quality-claim-page-info,
+#quality-evidence-page-info,
+#quality-recent-page-info {
+  margin-top: 2px !important;
+}
 #review-top-row {
   align-items: stretch !important;
+  gap: 10px !important;
+}
+#review-filter-row {
+  align-items: stretch !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin-bottom: 8px !important;
+}
+#review-filter-row > * {
+  flex: 1 1 200px !important;
+  min-width: 0 !important;
 }
 #review-top-row > .gradio-column,
 #review-summary-row > .gradio-column,
@@ -551,51 +776,72 @@ UI_CSS = """
 #review-record-row > .gradio-column,
 #review-evidence-row > .gradio-column {
   align-self: stretch !important;
+  min-width: 0 !important;
 }
 #review-summary-row,
 #review-action-row,
 #review-record-row,
 #review-evidence-row {
   align-items: stretch !important;
+  gap: 10px !important;
 }
 #review-action-panel {
-  min-height: 260px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
+  gap: 12px;
+  min-height: 0;
+}
+#review-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#review-action-feedback-row {
+  display: flex;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+#review-action-feedback-row > .gradio-column {
+  align-self: stretch !important;
+}
+#review-action-feedback-row .gradio-html {
+  height: 100%;
 }
 #review-help-panel,
-#review-result-panel,
-#review-export-result,
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail {
   height: 100%;
 }
 #review-help-panel > div,
-#review-result-panel > div,
-#review-export-result > div,
 #review-claim-detail > div,
 #review-record-detail > div,
 #review-evidence-detail > div {
   height: 100%;
 }
 #review-help-panel {
-  min-height: 260px;
+  min-height: 220px;
 }
 #review-result-panel {
-  min-height: 260px;
+  min-height: 96px;
 }
 #review-export-result {
-  min-height: 260px;
+  min-height: 96px;
+}
+#review-pending-pagination-row,
+#review-processed-pagination-row,
+#review-evidence-pagination-row,
+#review-history-pagination-row {
+  margin-top: 4px !important;
 }
 #review-action-buttons {
   display: flex !important;
   align-items: stretch !important;
   gap: 12px !important;
   flex-wrap: wrap !important;
-  margin: 8px 0 12px 0 !important;
+  margin: 0 !important;
 }
 #review-action-buttons > * {
   flex: 1 1 180px !important;
@@ -744,18 +990,11 @@ UI_CSS = """
 #search-result-summary {
   font-size: 14px !important;
 }
-#search-export-row {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  gap: 12px !important;
+#search-results-table {
+  min-height: 320px;
 }
-#search-export-row > * {
-  width: 100% !important;
-  min-width: 0 !important;
-}
-#search-export-row button {
-  width: 100% !important;
+#search-result-detail {
+  min-height: 220px;
 }
 #search-export-result,
 #search-export-result * {
@@ -766,21 +1005,118 @@ UI_CSS = """
 }
 #settings-top-row,
 #settings-main-row,
-#settings-bottom-row {
+#settings-bottom-row,
+#settings-knowledge-base-row {
   align-items: stretch !important;
+  gap: 10px !important;
 }
 #settings-top-row > .gradio-column,
 #settings-main-row > .gradio-column,
-#settings-bottom-row > .gradio-column {
+#settings-bottom-row > .gradio-column,
+#settings-knowledge-base-row > .gradio-column {
   align-self: stretch !important;
+  min-width: 0 !important;
 }
+#settings-main-row,
+#settings-knowledge-base-row {
+  align-items: flex-start !important;
+}
+#settings-main-row > .gradio-column,
+#settings-knowledge-base-row > .gradio-column {
+  align-self: flex-start !important;
+}
+#settings-knowledge-base-panel {
+  margin-top: 10px;
+}
+#settings-footer-panel {
+  margin-top: 10px;
+}
+#settings-workspace-panel,
+#settings-knowledge-base-panel {
+  padding: 2px 0 0 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+#settings-template-list-panel,
+#settings-knowledge-base-list-panel {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
+}
+#settings-help-panel,
 #settings-runtime-panel,
-#settings-result-panel {
+#settings-template-list-panel,
+#settings-template-detail,
+#settings-template-form,
+#settings-knowledge-base-list-panel,
+#settings-knowledge-base-detail,
+#settings-knowledge-base-form,
+#settings-result-panel,
+#settings-export-result,
+#settings-knowledge-base-result {
   height: 100%;
 }
+#settings-help-panel > div,
 #settings-runtime-panel > div,
-#settings-result-panel > div {
+#settings-template-list-panel > div,
+#settings-template-detail > div,
+#settings-template-form > div,
+#settings-knowledge-base-list-panel > div,
+#settings-knowledge-base-detail > div,
+#settings-knowledge-base-form > div,
+#settings-result-panel > div,
+#settings-export-result > div,
+#settings-knowledge-base-result > div {
   height: 100%;
+}
+#settings-help-panel,
+#settings-runtime-panel {
+  min-height: 220px;
+}
+#settings-template-detail,
+#settings-knowledge-base-detail {
+  min-height: 176px;
+}
+#settings-template-table {
+  min-height: 136px;
+}
+#settings-template-table > div,
+#settings-template-table > div > div,
+#settings-template-table > div > div > div {
+  min-height: 120px !important;
+}
+#settings-knowledge-base-table {
+  gap: 6px !important;
+  min-height: 72px;
+}
+#settings-result-panel,
+#settings-export-result,
+#settings-knowledge-base-result {
+  min-height: 84px;
+}
+#settings-template-page-info,
+#settings-knowledge-base-page-info {
+  margin-top: 2px !important;
+}
+#settings-pagination-row,
+#settings-list-actions,
+#settings-form-actions,
+#settings-knowledge-base-pagination-row,
+#settings-knowledge-base-list-actions,
+#settings-knowledge-base-actions {
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin-top: 6px !important;
+}
+#settings-list-actions > *,
+#settings-form-actions > *,
+#settings-knowledge-base-list-actions > *,
+#settings-knowledge-base-actions > * {
+  flex: 1 1 160px !important;
+  min-width: 0 !important;
 }
 #quality-dummy-row-1,
 #quality-dummy-row-2,
@@ -2347,6 +2683,31 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         return page_rows, resolved_page, format_table_pagination_html(page_info)
 
+    def normalize_recent_quality_scope_value(scope_value: str | None) -> str:
+        """规范历史质检记录筛选值。"""
+
+        value = str(scope_value or "").strip()
+        return value if value in recent_quality_scope_choices else recent_quality_scope_choices[0]
+
+    def filter_recent_quality_results(
+        recent_results: list[dict] | None,
+        scope_value: str | None,
+    ) -> list[dict]:
+        """按待处理 Claim 情况过滤历史质检任务。"""
+
+        normalized_scope = normalize_recent_quality_scope_value(scope_value)
+        results = list(recent_results or [])
+        if normalized_scope != "仅看含待处理 Claim":
+            return results
+        return [
+            item
+            for item in results
+            if any(
+                str(claim.get("review_status") or "pending").lower() == "pending"
+                for claim in (item.get("claims") or [])
+            )
+        ]
+
     def build_quality_evaluation_table_page_outputs(
         evaluation_result: dict | None,
         page: int | float | None = 1,
@@ -3209,10 +3570,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         *,
         selected_index: int = 0,
         preferred_claim_id: str | None = None,
+        history_scope_value: str | None = None,
     ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         """根据最近质检记录构建当前页面展示状态。"""
 
-        results = recent_results or []
+        results = filter_recent_quality_results(recent_results, history_scope_value)
         if not results:
             return build_quality_outputs(
                 progress_html=format_quality_progress_html(None),
@@ -3267,24 +3629,49 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             recent_rows=recent_rows,
         )
 
-    def list_recent_quality_results_ui(knowledge_base_choice: str | None = None) -> tuple:
+    def list_recent_quality_results_ui(
+        knowledge_base_choice: str | None = None,
+        history_scope_value: str | None = None,
+    ) -> tuple:
         """加载最近质检记录，并输出分页后的界面状态。"""
 
-        return build_quality_ui_outputs(list_recent_quality_results(knowledge_base_choice))
+        return build_quality_ui_outputs(
+            list_recent_quality_results(
+                knowledge_base_choice,
+                history_scope_value,
+            )
+        )
+
+    def load_recent_quality_runtime_results(
+        knowledge_base_choice: str | None = None,
+    ) -> list[dict]:
+        """按当前知识库读取最新历史质检结果，避免依赖服务启动快照。"""
+
+        knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
+        try:
+            return quality_service.list_recent_results(
+                limit=RECENT_QUALITY_FETCH_LIMIT,
+                knowledge_base_id=knowledge_base_id,
+            )
+        except AppError:
+            return []
 
     def select_recent_quality_result_ui(
         current_page_rows: list[list[object]],
         recent_results: list[dict],
         current_recent_page: int | float,
+        knowledge_base_choice: str | None,
+        history_scope_value: str | None,
         evt: gr.SelectData,
     ) -> tuple:
         """点击最近质检记录后，输出分页后的 AI 质检界面状态。"""
 
-        results = recent_results or []
-        if not results:
-            return build_quality_ui_outputs(build_recent_quality_view_outputs([]))
+        results = load_recent_quality_runtime_results(knowledge_base_choice) or (recent_results or [])
+        filtered_results = filter_recent_quality_results(results, history_scope_value)
+        if not filtered_results:
+            return build_quality_ui_outputs(build_recent_quality_view_outputs([], history_scope_value=history_scope_value))
         fresh_page_rows, resolved_recent_page, _recent_page_info = build_recent_quality_table_page_outputs(
-            results,
+            filtered_results,
             current_recent_page,
         )
         fallback_page_rows = normalize_table_rows(current_page_rows)
@@ -3292,7 +3679,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         evt_value = getattr(evt, "value", None)
         if evt_value not in (None, ""):
             candidate_check_id = str(evt_value).strip()
-            if any(str(item.get("check_id") or "") == candidate_check_id for item in results):
+            if any(str(item.get("check_id") or "") == candidate_check_id for item in filtered_results):
                 selected_check_id = candidate_check_id
         if not selected_check_id:
             selected_row = get_row_from_paged_table(
@@ -3302,7 +3689,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             selected_check_id = str(selected_row[2] if len(selected_row) > 2 else "")
         selected_index = next(
-            (index for index, item in enumerate(results) if str(item.get("check_id") or "") == selected_check_id),
+            (index for index, item in enumerate(filtered_results) if str(item.get("check_id") or "") == selected_check_id),
             -1,
         )
         if selected_index < 0:
@@ -3311,10 +3698,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 row_offset = int(row_index)
             except (TypeError, ValueError):
                 row_offset = 0
-            selected_index = max(0, min(len(results) - 1, (resolved_recent_page - 1) * TABLE_PAGE_SIZE + row_offset))
+            selected_index = max(0, min(len(filtered_results) - 1, (resolved_recent_page - 1) * TABLE_PAGE_SIZE + row_offset))
         outputs = list(
             build_quality_ui_outputs(
-                build_recent_quality_view_outputs(results, selected_index=selected_index),
+                build_recent_quality_view_outputs(results, selected_index=selected_index, history_scope_value=history_scope_value),
                 recent_page=current_recent_page,
             )
         )
@@ -3338,7 +3725,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         outputs[13] = gr.update(value=outputs[13])
         outputs[15] = gr.update(value=outputs[15])
         outputs[17] = rebuild_readonly_dataframe(
-            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
+            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
             rows=outputs[17],
             label="最近质检记录",
             elem_id="quality-recent-table",
@@ -3448,13 +3835,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return page_rows, new_page, format_table_pagination_html(page_info)
 
     def change_recent_quality_page(
-        recent_results: list[dict] | None,
         current_page: int | float,
         action: str,
+        knowledge_base_choice: str | None = None,
+        history_scope_value: str | None = None,
+        recent_results: list[dict] | None = None,
     ) -> tuple[list[list[object]], int, str]:
         """切换最近质检记录分页。"""
 
-        recent_payload = format_recent_quality_checks(recent_results or [])
+        results = load_recent_quality_runtime_results(knowledge_base_choice) or (recent_results or [])
+        recent_payload = format_recent_quality_checks(
+            filter_recent_quality_results(results, history_scope_value)
+        )
         full_rows = build_recent_quality_rows(recent_payload)
         page_rows, new_page, page_info = change_table_page(
             full_rows,
@@ -3833,6 +4225,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return
 
     review_action_choices = ["通过", "不通过", "更新结论"]
+    recent_quality_scope_choices = ["全部历史任务", "仅看含待处理 Claim"]
     review_scope_choices = ["全部记录", "仅待处理", "仅已处理"]
     review_risk_choices = ["全部风险", "仅高风险", "仅中风险", "仅低风险"]
     review_candidate_fetch_limit = 200
@@ -3959,12 +4352,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def change_quality_knowledge_base_ui(
         knowledge_base_choice: str | None = None,
+        recent_quality_scope_value: str | None = None,
     ) -> tuple:
         """切换 AI 质检页知识库时，同步其它页面顶部下拉。"""
 
         return (
             *sync_knowledge_base_selector_outputs(knowledge_base_choice),
-            *list_recent_quality_results_ui(knowledge_base_choice),
+            *list_recent_quality_results_ui(knowledge_base_choice, recent_quality_scope_value),
         )
 
     def change_review_knowledge_base_ui(
@@ -4679,6 +5073,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def list_recent_quality_results(
         knowledge_base_choice: str | None = None,
+        history_scope_value: str | None = None,
     ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         try:
@@ -4693,7 +5088,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 recent_results=[],
                 recent_rows=[],
             )
-        return build_recent_quality_view_outputs(results, selected_index=0)
+        return build_recent_quality_view_outputs(
+            results,
+            selected_index=0,
+            history_scope_value=history_scope_value,
+        )
 
     def select_recent_quality_result(
         current_page_rows: list[list[object]],
@@ -4708,7 +5107,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             empty_outputs = build_recent_quality_view_outputs([])
             return (*empty_outputs[:11], empty_outputs[13])
         selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
-        selected_check_id = str(selected_row[1] if len(selected_row) > 6 else (selected_row[0] if selected_row else ""))
+        selected_check_id = str(selected_row[2] if len(selected_row) > 7 else (selected_row[0] if selected_row else ""))
         selected_index = next(
             (index for index, item in enumerate(results) if str(item.get("check_id") or "") == selected_check_id),
             0,
@@ -4746,6 +5145,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_document_quality_config_result,
     ) = build_document_quality_config_outputs()
     initial_quality_evaluation_summary = format_quality_evaluation_summary_html(None)
+    initial_recent_quality_scope_value = recent_quality_scope_choices[0]
     initial_quality_evaluation_rows: list[list[str]] = []
     initial_quality_evaluation_result: dict = {}
     try:
@@ -4770,7 +5170,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         _initial_recent_results_state,
         initial_recent_rows,
         initial_quality_evaluation_cases,
-    ) = build_recent_quality_view_outputs(initial_recent_results, selected_index=0)
+    ) = build_recent_quality_view_outputs(
+        initial_recent_results,
+        selected_index=0,
+        history_scope_value=initial_recent_quality_scope_value,
+    )
     initial_active_quality_check_html = format_active_quality_check_html(initial_formatted_quality_result)
     try:
         initial_review_candidates = review_service.list_review_candidates(
@@ -5007,7 +5411,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         evidence_items_state = gr.State(initial_evidence_items)
                         claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
                         quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
-                with gr.Row(elem_id="quality-evidence-row", equal_height=True):
+                with gr.Row(elem_id="quality-evidence-row"):
                     with gr.Column(scale=1, elem_id="quality-evidence-list-panel"):
                         gr.Markdown("### 3. 证据列表")
                         claim_evidence_table = gr.Dataframe(
@@ -5033,7 +5437,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_evidence_detail_html,
                             elem_id="quality-evidence-detail",
                         )
-                with gr.Row(elem_id="quality-history-row", equal_height=True):
+                with gr.Row(elem_id="quality-history-row"):
                     with gr.Column(scale=1, elem_id="quality-history-panel"):
                         gr.Markdown("### 4. 历史质检记录")
                         recent_quality_note = gr.HTML(
@@ -5043,12 +5447,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             ),
                             elem_id="quality-history-note",
                         )
+                        recent_quality_scope_filter = gr.Dropdown(
+                            label="历史任务范围",
+                            choices=recent_quality_scope_choices,
+                            value=initial_recent_quality_scope_value,
+                            interactive=True,
+                            elem_id="quality-history-scope",
+                        )
                         recent_quality_checks = gr.Dataframe(
-                            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "时间", "输入摘要"],
-                            datatype=["str"] * 8,
+                            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+                            datatype=["str"] * 9,
                             interactive=False,
                             row_count=TABLE_PAGE_SIZE,
-                            column_count=8,
+                            column_count=9,
                             label="最近质检记录",
                             elem_id="quality-recent-table",
                             value=initial_recent_quality_table_rows,
@@ -5252,7 +5663,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 with gr.Group(elem_id="review-focus-panel"):
                     with gr.Row(elem_id="review-top-row", equal_height=True):
                         with gr.Column(scale=5):
-                            with gr.Row():
+                            with gr.Row(elem_id="review-filter-row"):
                                 review_knowledge_base = gr.Dropdown(
                                     label="当前知识库",
                                     choices=knowledge_base_choices,
@@ -5337,25 +5748,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
                     with gr.Column(scale=4):
                         with gr.Group(elem_id="review-action-panel"):
-                            review_action_input = gr.Dropdown(
-                                choices=review_action_choices,
-                                value=initial_review_action_value,
-                                label="审核动作",
-                                interactive=True,
-                            )
-                            review_note_input = gr.Textbox(label="审核备注", lines=4, value=initial_review_note_value)
+                            with gr.Group(elem_id="review-action-form"):
+                                review_action_input = gr.Dropdown(
+                                    choices=review_action_choices,
+                                    value=initial_review_action_value,
+                                    label="审核动作",
+                                    interactive=True,
+                                )
+                                review_note_input = gr.Textbox(
+                                    label="审核备注",
+                                    lines=4,
+                                    value=initial_review_note_value,
+                                )
                             with gr.Row(elem_id="review-action-buttons"):
                                 review_button = gr.Button("提交审核")
                                 review_history_button = gr.Button("刷新审核列表")
                                 review_export_button = gr.Button("下载当前审核结果")
-                            review_result = gr.HTML(
-                                value=format_operation_result_html(None, title="审核结果"),
-                                elem_id="review-result-panel",
-                            )
-                            review_export_result = gr.HTML(
-                                value=format_operation_result_html(None, title="下载结果"),
-                                elem_id="review-export-result",
-                            )
+                            with gr.Row(elem_id="review-action-feedback-row", equal_height=True):
+                                with gr.Column(scale=1):
+                                    review_result = gr.HTML(
+                                        value=format_operation_result_html(None, title="审核结果"),
+                                        elem_id="review-result-panel",
+                                    )
+                                with gr.Column(scale=1):
+                                    review_export_result = gr.HTML(
+                                        value=format_operation_result_html(None, title="下载结果"),
+                                        elem_id="review-export-result",
+                                    )
                 with gr.Row(elem_id="review-record-row", equal_height=True):
                     with gr.Column(scale=5):
                         review_history = gr.Dataframe(
@@ -5404,11 +5823,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="document-knowledge-base",
                             )
                             scan_button = gr.Button("刷新文档列表")
-                with gr.Row():
+                with gr.Row(elem_id="document-management-summary-row", equal_height=True):
                     with gr.Column(scale=1):
-                        document_summary = gr.HTML(value=initial_document_summary)
+                        with gr.Group(elem_id="document-summary-panel"):
+                            document_summary = gr.HTML(value=initial_document_summary)
                     with gr.Column(scale=1):
-                        database_summary = gr.HTML(value=initial_database_summary)
+                        with gr.Group(elem_id="database-summary-panel"):
+                            database_summary = gr.HTML(value=initial_database_summary)
                 with gr.Row(elem_id="document-management-focus-row"):
                     with gr.Column(scale=6):
                         with gr.Group(elem_id="document-current-panel"):
@@ -5466,18 +5887,22 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     value=format_table_pagination_html(initial_document_page_info),
                     elem_id="document-page-info",
                 )
-                with gr.Row():
+                with gr.Row(elem_id="document-management-actions-row", equal_height=True):
+                    register_button = gr.Button("注册当前文档", interactive=initial_document_state["register_interactive"])
+                    register_all_button = gr.Button("注册全部待处理文档")
+                    rebuild_button = gr.Button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
+                    status_button = gr.Button("刷新状态")
+                with gr.Row(elem_id="document-management-result-row", equal_height=True):
                     with gr.Column(scale=1):
-                        register_button = gr.Button("注册当前文档", interactive=initial_document_state["register_interactive"])
-                        register_all_button = gr.Button("注册全部待处理文档")
+                        register_result = gr.HTML(
+                            value=format_operation_result_html(None, title="注册结果"),
+                            elem_id="document-register-result",
+                        )
                     with gr.Column(scale=1):
-                        rebuild_button = gr.Button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
-                        status_button = gr.Button("刷新状态")
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        register_result = gr.HTML(value=format_operation_result_html(None, title="注册结果"))
-                    with gr.Column(scale=1):
-                        rebuild_result = gr.HTML(value=format_operation_result_html(None, title="重建结果"))
+                        rebuild_result = gr.HTML(
+                            value=format_operation_result_html(None, title="重建结果"),
+                            elem_id="document-rebuild-result",
+                        )
                 with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
                     with gr.Group(elem_id="document-quality-panel"):
                         with gr.Row(elem_id="document-quality-top-actions"):
@@ -5535,15 +5960,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=format_table_pagination_html(initial_document_quality_chunks_page_info),
                                     elem_id="document-quality-chunks-page-info",
                                 )
-                        with gr.Row(elem_id="document-quality-search-row", equal_height=True):
+                        with gr.Row(elem_id="document-quality-search-row"):
                             with gr.Column(scale=5):
                                 document_quality_search_query = gr.Textbox(
                                     label="文档内检索验证",
                                     lines=2,
                                     placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
                                 )
-                                document_quality_search_button = gr.Button("验证当前文档检索")
-                                document_quality_search_export_button = gr.Button("下载检索结果")
+                                with gr.Row(elem_id="document-quality-search-action-row"):
+                                    document_quality_search_button = gr.Button("验证当前文档检索")
+                                    document_quality_search_export_button = gr.Button("下载检索结果")
                             with gr.Column(scale=4):
                                 document_quality_search_summary = gr.HTML(
                                     value=initial_document_quality_search_summary,
@@ -5555,7 +5981,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
                         document_quality_search_state = gr.State(initial_document_quality_search_state)
                         document_quality_search_query_state = gr.State("")
-                        with gr.Row(elem_id="document-quality-result-row", equal_height=True):
+                        with gr.Row(elem_id="document-quality-result-row"):
                             with gr.Column(scale=5):
                                 document_quality_search_results = gr.Dataframe(
                                     headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
@@ -5583,7 +6009,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             document_quality_batch_button = gr.Button("执行全部文档质检")
                             document_quality_csv_export_button = gr.Button("导出质检 CSV")
                             document_quality_batch_export_button = gr.Button("下载批量结果")
-                        with gr.Row(elem_id="document-quality-batch-row", equal_height=True):
+                        with gr.Row(elem_id="document-quality-batch-row"):
                             with gr.Column(scale=4):
                                 document_quality_batch_summary = gr.HTML(
                                     value=initial_document_quality_batch_summary,
@@ -5615,7 +6041,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=format_table_pagination_html(initial_document_quality_batch_page_info),
                                     elem_id="document-quality-batch-page-info",
                                 )
-                        with gr.Row(elem_id="document-quality-config-row", equal_height=True):
+                        with gr.Row(elem_id="document-quality-config-row"):
                             with gr.Column(scale=4):
                                 document_quality_config_panel = gr.HTML(
                                     value=initial_document_quality_config_html,
@@ -5628,21 +6054,47 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             with gr.Column(scale=5):
                                 with gr.Group(elem_id="document-quality-config-form"):
                                     gr.Markdown("### 质检阈值配置")
-                                    with gr.Row():
-                                        document_quality_sample_limit = gr.Number(label="抽样数量", value=initial_quality_sample_limit, precision=0)
-                                        document_quality_long_document_char_threshold = gr.Number(label="长文字数阈值", value=initial_quality_long_document_char_threshold, precision=0)
-                                        document_quality_min_sections_for_long_doc = gr.Number(label="长文最少章节", value=initial_quality_min_sections_for_long_doc, precision=0)
-                                    with gr.Row():
-                                        document_quality_max_avg_chunks_per_section = gr.Number(label="每章分块上限", value=initial_quality_max_avg_chunks_per_section, precision=0)
-                                        document_quality_max_chunk_chars = gr.Number(label="超长分块阈值", value=initial_quality_max_chunk_chars, precision=0)
-                                        document_quality_short_chunk_chars = gr.Number(label="过短分块阈值", value=initial_quality_short_chunk_chars, precision=0)
-                                    document_quality_short_chunk_warn_min_chunk_count = gr.Number(
-                                        label="过短分块告警起点",
-                                        value=initial_quality_short_chunk_warn_min_chunk_count,
-                                        precision=0,
-                                    )
-                                    document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
+                                    with gr.Row(elem_id="document-quality-config-form-row-1"):
+                                        document_quality_sample_limit = gr.Number(
+                                            label="抽样数量",
+                                            value=initial_quality_sample_limit,
+                                            precision=0,
+                                        )
+                                        document_quality_long_document_char_threshold = gr.Number(
+                                            label="长文字数阈值",
+                                            value=initial_quality_long_document_char_threshold,
+                                            precision=0,
+                                        )
+                                    with gr.Row(elem_id="document-quality-config-form-row-2"):
+                                        document_quality_min_sections_for_long_doc = gr.Number(
+                                            label="长文最少章节",
+                                            value=initial_quality_min_sections_for_long_doc,
+                                            precision=0,
+                                        )
+                                        document_quality_max_avg_chunks_per_section = gr.Number(
+                                            label="每章分块上限",
+                                            value=initial_quality_max_avg_chunks_per_section,
+                                            precision=0,
+                                        )
+                                    with gr.Row(elem_id="document-quality-config-form-row-3"):
+                                        document_quality_max_chunk_chars = gr.Number(
+                                            label="超长分块阈值",
+                                            value=initial_quality_max_chunk_chars,
+                                            precision=0,
+                                        )
+                                        document_quality_short_chunk_chars = gr.Number(
+                                            label="过短分块阈值",
+                                            value=initial_quality_short_chunk_chars,
+                                            precision=0,
+                                        )
+                                    with gr.Row(elem_id="document-quality-config-form-row-4"):
+                                        document_quality_short_chunk_warn_min_chunk_count = gr.Number(
+                                            label="过短分块告警起点",
+                                            value=initial_quality_short_chunk_warn_min_chunk_count,
+                                            precision=0,
+                                        )
                                     with gr.Row(elem_id="document-quality-config-action-row"):
+                                        document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
                                         document_quality_config_export_button = gr.Button("下载当前配置")
                                     document_quality_config_export_result = gr.HTML(
                                         value=format_operation_result_html(None, title="下载结果"),
@@ -5675,7 +6127,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     search_query_state = gr.State("")
                     search_selected_row_state = gr.State({})
                     search_page_state = gr.State(initial_search_page)
-                    with gr.Row(elem_id="search-result-row", equal_height=True):
+                    with gr.Row(elem_id="search-result-row"):
                         with gr.Column(scale=5):
                             search_result = gr.Dataframe(
                                 headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
@@ -5717,8 +6169,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Column(scale=4):
                             settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
                 with gr.Group(elem_id="settings-workspace-panel"):
-                    with gr.Row(elem_id="settings-main-row", equal_height=True):
-                        with gr.Column(scale=4):
+                    with gr.Row(elem_id="settings-main-row"):
+                        with gr.Column(scale=4, elem_id="settings-template-list-panel"):
                             settings_template_table = gr.Dataframe(
                                 headers=["序号", "模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
                                 datatype=["str"] * 7,
@@ -5780,8 +6232,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     settings_save_button = gr.Button("保存模板", variant="primary")
                                     settings_delete_button = gr.Button("删除模板", variant="stop")
                 with gr.Group(elem_id="settings-knowledge-base-panel"):
-                    with gr.Row(elem_id="settings-knowledge-base-row", equal_height=True):
-                        with gr.Column(scale=4):
+                    with gr.Row(elem_id="settings-knowledge-base-row"):
+                        with gr.Column(scale=4, elem_id="settings-knowledge-base-list-panel"):
                             settings_knowledge_base_table = gr.Radio(
                                 label="知识库列表",
                                 elem_id="settings-knowledge-base-table",
@@ -6461,7 +6913,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         recent_quality_button.click(
             fn=list_recent_quality_results_ui,
-            inputs=[quality_knowledge_base],
+            inputs=[quality_knowledge_base, recent_quality_scope_filter],
             outputs=[
                 quality_progress,
                 quality_result,
@@ -6488,7 +6940,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         quality_knowledge_base.change(
             fn=change_quality_knowledge_base_ui,
-            inputs=[quality_knowledge_base],
+            inputs=[quality_knowledge_base, recent_quality_scope_filter],
             outputs=[
                 document_knowledge_base,
                 search_knowledge_base,
@@ -6517,9 +6969,37 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 quality_evaluation_cases,
             ],
         )
+        recent_quality_scope_filter.change(
+            fn=list_recent_quality_results_ui,
+            inputs=[quality_knowledge_base, recent_quality_scope_filter],
+            outputs=[
+                quality_progress,
+                quality_result,
+                quality_active_check,
+                formatted_quality_result_state,
+                quality_claims,
+                quality_claim_page_state,
+                quality_claim_page_info,
+                selected_claim_state,
+                claim_detail_state,
+                claim_detail_view,
+                claim_evidence_table,
+                quality_evidence_page_state,
+                quality_evidence_page_info,
+                quality_review_claim_detail,
+                evidence_items_state,
+                claim_evidence_detail,
+                recent_quality_state,
+                recent_quality_checks,
+                recent_quality_page_state,
+                recent_quality_page_info,
+                quality_evaluation_cases,
+            ],
+            queue=False,
+        )
         recent_quality_checks.select(
             fn=select_recent_quality_result_ui,
-            inputs=[recent_quality_checks, recent_quality_state, recent_quality_page_state],
+            inputs=[recent_quality_checks, recent_quality_state, recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter],
             outputs=[
                 quality_progress,
                 quality_result,
@@ -6618,14 +7098,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             queue=False,
         )
         recent_quality_prev_button.click(
-            fn=lambda results, page: change_recent_quality_page(results, page, "prev"),
-            inputs=[recent_quality_state, recent_quality_page_state],
+            fn=lambda page, knowledge_base, scope, results: change_recent_quality_page(page, "prev", knowledge_base, scope, results),
+            inputs=[recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter, recent_quality_state],
             outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
             queue=False,
         )
         recent_quality_next_button.click(
-            fn=lambda results, page: change_recent_quality_page(results, page, "next"),
-            inputs=[recent_quality_state, recent_quality_page_state],
+            fn=lambda page, knowledge_base, scope, results: change_recent_quality_page(page, "next", knowledge_base, scope, results),
+            inputs=[recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter, recent_quality_state],
             outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
             queue=False,
         )

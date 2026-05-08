@@ -36,7 +36,7 @@ def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
 
 
 def test_create_ui_app_should_not_register_startup_load_event(tmp_path: Path) -> None:
-    """UI 首屏应直接渲染默认数据，避免依赖启动 load 队列。"""
+    """UI 首屏应直接渲染默认数据，避免依赖启动 load 事件队列。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -97,6 +97,8 @@ def test_create_ui_app_should_include_database_status_module(tmp_path: Path) -> 
 
     assert any("数据库状态" in value for value in html_values)
     assert "document-management-help-panel" in elem_ids
+    assert "document-management-actions-row" in elem_ids
+    assert "document-management-result-row" in elem_ids
     assert any("知识库管理用于查看输入文档、执行入库与重建" in value for value in html_values)
 
 
@@ -247,14 +249,18 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-recent-table" in elem_ids
     assert "quality-history-panel" in elem_ids
     assert "quality-history-note" in elem_ids
+    assert "quality-history-scope" in elem_ids
     assert "quality-evidence-table" in elem_ids
+    assert "quality-evidence-page-info" in elem_ids
     assert "quality-evidence-detail" in elem_ids
+    assert "quality-recent-page-info" in elem_ids
     assert "quality-export-result" in elem_ids
     assert "quality-evaluation-export-result" in elem_ids
     assert claim_selectors
     assert claim_selectors[0].get("label") == "Claim 列表"
     assert evidence_tables and evidence_tables[0].get("max_height") == 420
     assert recent_tables and recent_tables[0].get("max_height") == 420
+    assert recent_tables[0].get("column_count", [])[0] == 9
     assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
     assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-row")
     assert elem_ids.index("quality-evidence-row") < elem_ids.index("quality-history-row")
@@ -356,6 +362,9 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "review-knowledge-base" in elem_ids
     assert "review-focus-panel" in elem_ids
     assert "review-action-panel" in elem_ids
+    assert "review-filter-row" in elem_ids
+    assert "review-action-form" in elem_ids
+    assert "review-action-feedback-row" in elem_ids
     assert "review-action-buttons" in elem_ids
     assert "review-help-panel" in elem_ids
     assert "review-result-panel" in elem_ids
@@ -429,12 +438,18 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-prompt-group" in elem_ids
     assert "settings-help-panel" in elem_ids
     assert "settings-runtime-panel" in elem_ids
+    assert "settings-template-list-panel" in elem_ids
     assert "settings-template-table" in elem_ids
     assert "settings-template-detail" in elem_ids
     assert "settings-template-form" in elem_ids
+    assert "settings-list-actions" in elem_ids
+    assert "settings-form-actions" in elem_ids
+    assert "settings-knowledge-base-list-panel" in elem_ids
     assert "settings-knowledge-base-table" in elem_ids
     assert "settings-knowledge-base-detail" in elem_ids
     assert "settings-knowledge-base-form" in elem_ids
+    assert "settings-knowledge-base-list-actions" in elem_ids
+    assert "settings-knowledge-base-actions" in elem_ids
     assert "settings-knowledge-base-result" in elem_ids
     assert "settings-knowledge-base-actions" in elem_ids
     assert "settings-export-row" in elem_ids
@@ -493,6 +508,11 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
         for component in components
         if component.get("type") == "dataframe"
     }
+    layout_components = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("props", {})
+        for component in components
+        if component.get("props", {}).get("elem_id")
+    }
 
     assert "document-current-panel" in elem_ids
     assert "document-knowledge-base" in elem_ids
@@ -508,6 +528,7 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-quality-sections-table" in elem_ids
     assert "document-quality-chunks-table" in elem_ids
     assert "document-quality-search-summary" in elem_ids
+    assert "document-quality-search-action-row" in elem_ids
     assert "document-quality-search-results" in elem_ids
     assert "document-quality-search-detail" in elem_ids
     assert "document-quality-search-export-result" in elem_ids
@@ -517,16 +538,25 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-quality-config-result" in elem_ids
     assert "document-quality-config-action-row" in elem_ids
     assert "document-quality-config-form" in elem_ids
+    assert "document-quality-config-form-row-1" in elem_ids
+    assert "document-quality-config-form-row-2" in elem_ids
+    assert "document-quality-config-form-row-3" in elem_ids
+    assert "document-quality-config-form-row-4" in elem_ids
     assert "document-quality-export-result" in elem_ids
     assert "document-quality-csv-export-result" in elem_ids
     assert "document-quality-batch-export-result" in elem_ids
     assert "document-quality-config-export-result" in elem_ids
     assert "database-page-info" in elem_ids
     assert "document-page-info" in elem_ids
+    assert "document-register-result" in elem_ids
+    assert "document-rebuild-result" in elem_ids
     assert "document-quality-sections-page-info" in elem_ids
     assert "document-quality-chunks-page-info" in elem_ids
     assert "document-quality-search-page-info" in elem_ids
     assert "document-quality-batch-page-info" in elem_ids
+    assert "search-page-info" in elem_ids
+    assert "settings-template-page-info" in elem_ids
+    assert "settings-knowledge-base-page-info" in elem_ids
     assert "章节抽样" in labels
     assert "分块抽样" in labels
     assert "文档内检索验证" in labels
@@ -543,7 +573,17 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert dataframes["document-quality-sections-table"]["headers"][0] == "序号"
     assert dataframes["document-quality-chunks-table"]["headers"][0] == "序号"
     assert dataframes["document-quality-batch-table"]["headers"][0] == "序号"
+    assert layout_components["document-quality-search-row"].get("equal_height") in (None, False)
+    assert layout_components["document-quality-result-row"].get("equal_height") in (None, False)
+    assert layout_components["document-quality-batch-row"].get("equal_height") in (None, False)
+    assert layout_components["document-quality-config-row"].get("equal_height") in (None, False)
+    assert layout_components["quality-evidence-row"].get("equal_height") in (None, False)
+    assert layout_components["quality-history-row"].get("equal_height") in (None, False)
+    assert layout_components["search-result-row"].get("equal_height") in (None, False)
+    assert layout_components["settings-main-row"].get("equal_height") in (None, False)
+    assert layout_components["settings-knowledge-base-row"].get("equal_height") in (None, False)
     assert elem_ids.index("document-quality-search-row") < elem_ids.index("document-quality-search-export-result")
+    assert elem_ids.index("document-quality-config-action-row") < elem_ids.index("document-quality-config-export-result")
 
 
 def test_create_ui_app_should_include_quality_evaluation_workspace(tmp_path: Path) -> None:
@@ -1261,7 +1301,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     )
     event = gr.SelectData(None, {"index": [1, 0], "value": "chkres_b"})
 
-    current_page_rows = [["11", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20:00", "第一条输入"], ["12", "", "chkres_a", "模板一", "通过", "1", "26-05-01 20:00", "第一条输入"]]
+    current_page_rows = [["11", "", "chkres_a", "模板一", "通过", "1", "0", "26-05-01 20:00", "第一条输入"], ["12", "", "chkres_a", "模板一", "通过", "1", "0", "26-05-01 20:00", "第一条输入"]]
     (
         progress_html,
         result_html,
@@ -1284,7 +1324,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
         recent_page,
         recent_page_info,
         evaluation_cases,
-    ) = select_handler(current_page_rows, recent_results, 2, event)
+    ) = select_handler(current_page_rows, recent_results, 2, None, "全部历史任务", event)
 
     assert claim_rows.get("__type__") == "update"
     assert claim_page == 1
@@ -1299,6 +1339,7 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     assert recent_rows.get("value", [])[0][2] == "chkres_a"
     assert recent_rows.get("value", [])[1][1] == "当前"
     assert recent_rows.get("value", [])[1][2] == "chkres_b"
+    assert recent_rows.get("value", [])[1][6] == "4"
     assert "已加载历史质检记录" in progress_html["value"]
     assert "模板二" in result_html["value"]
     assert "当前激活质检" in active_check_html["value"]
@@ -1320,6 +1361,97 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     assert "claim_b1" in evaluation_cases["value"]
     assert "claim_b1" in evaluation_cases["value"]
     assert "第二条证据内容 1" in evidence_detail_html["value"]
+
+
+def test_list_recent_quality_results_ui_should_support_pending_history_filter(tmp_path: Path) -> None:
+    """历史质检记录应支持只看含待处理 Claim 的任务。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    repository = QualityRepository(settings.sqlite_db_path)
+    repository.create_quality_result(
+        quality_check={
+            "check_id": "chkres_pending_only",
+            "input_text": "待处理任务",
+            "template_id": "t1",
+            "template_name": "模板一",
+            "overall_verdict": "needs_review",
+            "risk_level": "medium",
+            "summary": "存在待处理 Claim",
+            "created_at": "2026-05-01T12:00:00+00:00",
+            "updated_at": "2026-05-01T12:00:00+00:00",
+        },
+        claims=[
+            {
+                "claim_id": "claim_pending_only",
+                "check_id": "chkres_pending_only",
+                "claim_text": "仍待人工审核",
+                "verdict": "needs_review",
+                "risk_level": "medium",
+                "confidence": 0.80,
+                "evidence": "待处理证据",
+                "source_doc": "文档一",
+                "source_span": "section-1",
+                "review_status": "pending",
+                "created_at": "2026-05-01T12:00:00+00:00",
+                "updated_at": "2026-05-01T12:00:00+00:00",
+            }
+        ],
+        rule_hits=[],
+    )
+    repository.create_quality_result(
+        quality_check={
+            "check_id": "chkres_all_reviewed",
+            "input_text": "已审核任务",
+            "template_id": "t2",
+            "template_name": "模板二",
+            "overall_verdict": "supported",
+            "risk_level": "low",
+            "summary": "全部已审核",
+            "created_at": "2026-05-01T13:00:00+00:00",
+            "updated_at": "2026-05-01T13:00:00+00:00",
+        },
+        claims=[
+            {
+                "claim_id": "claim_reviewed_only",
+                "check_id": "chkres_all_reviewed",
+                "claim_text": "已经审核完成",
+                "verdict": "supported",
+                "risk_level": "low",
+                "confidence": 0.95,
+                "evidence": "已审核证据",
+                "source_doc": "文档二",
+                "source_span": "section-2",
+                "review_status": "approved",
+                "created_at": "2026-05-01T13:00:00+00:00",
+                "updated_at": "2026-05-01T13:00:00+00:00",
+            }
+        ],
+        rule_hits=[],
+    )
+
+    demo = create_ui_app(settings)
+    list_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "list_recent_quality_results_ui"
+    )
+
+    outputs = list_handler(None, "仅看含待处理 Claim")
+    recent_state = outputs[16]
+    recent_rows = outputs[17]
+
+    assert len(recent_state) == 1
+    assert recent_state[0]["check_id"] == "chkres_pending_only"
+    assert recent_rows == [["1", "当前", "chkres_pending_only", "模板一", "需复核", "1", "1", "26-05-01 20:00", "待处理任务"]]
+
 
 
 def test_quality_interactions_should_disable_queue_for_table_refresh(tmp_path: Path) -> None:
@@ -1935,6 +2067,10 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#quality-recent-table" in UI_CSS
     assert "#quality-evidence-table" in UI_CSS
     assert "#quality-evidence-detail" in UI_CSS
+    assert "#quality-evidence-page-info" in UI_CSS
+    assert "#quality-recent-page-info" in UI_CSS
+    assert "#quality-evidence-row > .gradio-column" in UI_CSS
+    assert "#quality-history-row > .gradio-column" in UI_CSS
     assert "#quality-export-row" in UI_CSS
     assert "#quality-export-result" in UI_CSS
     assert "#quality-export-result a" in UI_CSS
@@ -1948,10 +2084,45 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-summary-row" in UI_CSS
     assert "#review-record-row" in UI_CSS
     assert "#review-evidence-row" in UI_CSS
+    assert "#review-filter-row" in UI_CSS
+    assert "#review-action-form" in UI_CSS
+    assert "#review-action-feedback-row" in UI_CSS
     assert "#review-result-panel" in UI_CSS
     assert "#review-export-result" in UI_CSS
     assert "#review-action-buttons" in UI_CSS
     assert "#review-help-panel > div" in UI_CSS
+    assert "#document-management-summary-row" in UI_CSS
+    assert "#document-summary-panel" in UI_CSS
+    assert "#database-summary-panel" in UI_CSS
+    assert "#document-management-actions-row" in UI_CSS
+    assert "#document-management-result-row" in UI_CSS
+    assert "#document-pagination-row" in UI_CSS
+    assert "#document-page-info" in UI_CSS
+    assert "#document-register-result" in UI_CSS
+    assert "#document-rebuild-result" in UI_CSS
+    assert "#document-quality-summary-row" in UI_CSS
+    assert "#document-quality-sample-row" in UI_CSS
+    assert "#document-quality-search-row" in UI_CSS
+    assert "#document-quality-search-action-row" in UI_CSS
+    assert "#document-quality-result-row" in UI_CSS
+    assert "#document-quality-config-row" in UI_CSS
+    assert "#document-quality-batch-row" in UI_CSS
+    assert "#document-quality-batch-summary" in UI_CSS
+    assert "#document-quality-search-page-info" in UI_CSS
+    assert "#document-quality-batch-page-info" in UI_CSS
+    assert "#document-quality-config-form" in UI_CSS
+    assert "#document-quality-config-form-row-1" in UI_CSS
+    assert "#document-quality-config-form-row-4" in UI_CSS
+    assert "#search-page-info" in UI_CSS
+    assert "#search-results-table" in UI_CSS
+    assert "#settings-template-page-info" in UI_CSS
+    assert "#settings-knowledge-base-page-info" in UI_CSS
+    assert "#settings-template-list-panel" in UI_CSS
+    assert "#settings-template-table" in UI_CSS
+    assert "#settings-knowledge-base-list-panel" in UI_CSS
+    assert "#settings-knowledge-base-table" in UI_CSS
+    assert "#settings-main-row > .gradio-column" in UI_CSS
+    assert "#settings-knowledge-base-row > .gradio-column" in UI_CSS
     assert "#review-pending-table" in UI_CSS
     assert "#review-processed-table" in UI_CSS
     assert "#review-history-table" in UI_CSS
@@ -1961,6 +2132,13 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-history-table table th" in UI_CSS
     assert "#review-evidence-table table th" in UI_CSS
     assert "#review-evidence-detail pre" not in UI_CSS
+    assert "#settings-knowledge-base-row" in UI_CSS
+    assert "#settings-list-actions" in UI_CSS
+    assert "#settings-form-actions" in UI_CSS
+    assert "#settings-knowledge-base-list-actions" in UI_CSS
+    assert "#settings-knowledge-base-actions" in UI_CSS
+    assert "#settings-template-detail" in UI_CSS
+    assert "#settings-knowledge-base-detail" in UI_CSS
     assert "rgba(68, 68, 68, 0.22)" in UI_CSS
     assert "inset 6px 0 0 0" in UI_CSS
     assert "#review-claim-detail" in UI_CSS

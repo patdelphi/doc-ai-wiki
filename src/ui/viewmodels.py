@@ -1998,7 +1998,10 @@ def format_quality_result_html(formatted: dict | None) -> str:
             ("Claim 数量", str(len(claims))),
             ("质检 ID", _display_text(check.get("check_id"))),
         ],
-        notes=["下方展示 Claim 列表、最近质检记录与证据详情"],
+        notes=[
+            "下方展示 Claim 列表、最近质检记录与证据详情",
+            "本次结果已完成写库校验，刷新后仍可在历史记录中查看" if check.get("persist_verified") else "历史记录与人工审核列表均以数据库已落库结果为准",
+        ],
         tone=tone,
     )
 
@@ -2429,6 +2432,11 @@ def format_recent_quality_checks(quality_results: list[dict]) -> list[dict]:
     formatted: list[dict] = []
     for item in quality_results:
         claims = item.get("claims", [])
+        pending_claim_count = sum(
+            1
+            for claim in claims
+            if str(claim.get("review_status") or "pending").lower() == "pending"
+        )
         formatted.append(
             {
                 "check_id": item.get("check_id"),
@@ -2436,6 +2444,7 @@ def format_recent_quality_checks(quality_results: list[dict]) -> list[dict]:
                 "template_name": item.get("template_name"),
                 "input_text": item.get("input_text"),
                 "created_at": item.get("created_at"),
+                "pending_claim_count": pending_claim_count,
                 "claim_choices": [
                     build_claim_choice(
                         {
@@ -2475,6 +2484,7 @@ def build_recent_quality_rows(quality_results: list[dict] | None, *, active_chec
             _display_text(item.get("template_name")),
             _format_verdict_label(item.get("overall_verdict")),
             str(len(item.get("claims") or [])),
+            str(item.get("pending_claim_count", 0)),
             _format_display_datetime(item.get("created_at")),
             _truncate_text(item.get("input_text")),
         ]

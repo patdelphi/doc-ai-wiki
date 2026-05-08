@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from src.ai.llm import BaseLLMClient
 from src.ai.rerank import BaseReranker
-from src.common.errors import ExternalServiceAppError, ValidationAppError
+from src.common.errors import DatabaseAppError, ExternalServiceAppError, ValidationAppError
 from src.common.utils import utc_now_iso
 from src.db.repositories import QualityRepository
 from src.quality.templates import QualityTemplateService
@@ -336,20 +336,68 @@ class QualityService:
             "claims": claim_items,
             "rule_hits": rule_hits,
         }
+        persisted_result = self._persist_and_verify_result(result)
+        yield {
+            "type": "result",
+            "status": "success",
+            "stage": "persist",
+            "result": persisted_result,
+            "message": "质检已完成，并已写入历史记录。",
+            "claim_total": total_claims,
+            "template_name": selected_template.get("template_name"),
+            "model_status": "模型已参与判定" if llm_enabled else "本次未调用模型",
+        }
+
+    def _persist_and_verify_result(self, result: dict) -> dict:
+        """写入质检结果后立即回读校验，避免 UI 误判为已成功持久化。"""
+
         self.repository.create_quality_result(
             quality_check=result["check"],
             claims=result["claims"],
             rule_hits=result["rule_hits"],
         )
-        yield {
-            "type": "result",
-            "status": "success",
-            "stage": "persist",
-            "result": result,
-            "message": "质检已完成。",
-            "claim_total": total_claims,
-            "template_name": selected_template.get("template_name"),
-            "model_status": "模型已参与判定" if llm_enabled else "本次未调用模型",
+        check_id = str(result.get("check", {}).get("check_id") or "").strip()
+        persisted_result = self.repository.get_quality_result(check_id) if check_id else None
+        if not persisted_result:
+            raise DatabaseAppError("质检结果写入后校验失败，历史记录中未找到对应质检。")
+
+        original_claims = result.get("claims") or []
+        persisted_claims = persisted_result.get("claims") or []
+        if len(persisted_claims) != len(original_claims):
+            raise DatabaseAppError(
+                "质检结果写入后校验失败，Claim 数量与写入前不一致。",
+                details={
+                    "check_id": check_id,
+                    "expected_claim_count": len(original_claims),
+                    "actual_claim_count": len(persisted_claims),
+                },
+            )
+
+        original_claim_map = {
+            str(item.get("claim_id") or "").strip(): item
+            for item in original_claims
+            if str(item.get("claim_id") or "").strip()
+        }
+        merged_claims: list[dict] = []
+        for persisted_claim in persisted_claims:
+            claim_id = str(persisted_claim.get("claim_id") or "").strip()
+            original_claim = original_claim_map.get(claim_id, {})
+            merged_claims.append(
+                {
+                    **original_claim,
+                    **persisted_claim,
+                    "evidence_details": persisted_claim.get("evidence_details", original_claim.get("evidence_details", [])),
+                }
+            )
+
+        return {
+            "check": {
+                **(result.get("check") or {}),
+                **(persisted_result.get("check") or {}),
+                "persist_verified": True,
+            },
+            "claims": merged_claims,
+            "rule_hits": persisted_result.get("rule_hits") or result.get("rule_hits") or [],
         }
 
     def _evaluate_claim_with_fallback(

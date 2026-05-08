@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from src.common.errors import DatabaseAppError
 from src.db.connection import initialize_database
 from src.quality.service import QualityService
 
@@ -217,6 +220,33 @@ def test_quality_service_stream_should_report_model_stage(tmp_path: Path) -> Non
     assert "model" in progress_stages
     assert result_events
     assert result_events[0]["result"]["claims"][0]["evidence_reason"].startswith("llm:general_fact_check:")
+    assert result_events[0]["result"]["check"]["persist_verified"] is True
+
+
+def test_quality_service_stream_should_verify_persisted_result_before_reporting_success(tmp_path: Path) -> None:
+    """成功事件必须以数据库回读校验通过为前提。"""
+
+    db_path = tmp_path / "app.db"
+    initialize_database(db_path)
+    service = QualityService(db_path)
+    service.retrieval_service.hybrid_search = lambda query, top_k=3, doc_uid=None, **kwargs: [  # type: ignore[method-assign]
+        {"chunk_id": "chk_1", "doc_uid": "doc_1", "source_span": "section-1:chunk-0", "content": "证据内容"}
+    ]
+    service.retrieval_service.expand_evidence_context = lambda items, **kwargs: items  # type: ignore[method-assign]
+
+    original_get_quality_result = service.repository.get_quality_result
+    state = {"called": False}
+
+    def fake_get_quality_result(check_id: str):  # noqa: ANN001
+        if not state["called"]:
+            state["called"] = True
+            return None
+        return original_get_quality_result(check_id)
+
+    service.repository.get_quality_result = fake_get_quality_result  # type: ignore[method-assign]
+
+    with pytest.raises(DatabaseAppError, match="写入后校验失败"):
+        list(service.run_check_stream("需要验证写库。", template_id="general_fact_check"))
 
 
 def test_quality_service_should_run_evaluation_suite_and_aggregate_metrics(tmp_path: Path) -> None:
@@ -409,6 +439,7 @@ def test_quality_service_should_keep_broader_candidate_pool_before_final_judgeme
     results = service._retrieve_evidence_candidates(
         claim_text="阿胶只有东阿一家有",
         doc_uid=None,
+            knowledge_base_id=None,
         retrieval_policy={
             "fulltext_top_k": 4,
             "vector_top_k": 4,
