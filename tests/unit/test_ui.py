@@ -442,6 +442,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     ]
     elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
+    button_components = [component for component in components if component.get("type") == "button"]
     tab_components = [component for component in components if component.get("type") == "tabitem"]
     visible_tab_labels = [
         str(component.get("props", {}).get("label", ""))
@@ -462,9 +463,9 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-workspace-panel" in elem_ids
     assert "settings-knowledge-base-panel" in elem_ids
     assert "settings-footer-panel" in elem_ids
+    assert "settings-footer-module" in elem_ids
     assert "settings-top-row" in elem_ids
     assert "settings-main-row" in elem_ids
-    assert "settings-bottom-row" in elem_ids
     assert "settings-list-actions" in elem_ids
     assert "settings-form-actions" in elem_ids
     assert "settings-basic-group" in elem_ids
@@ -482,9 +483,12 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-knowledge-base-table" in elem_ids
     assert "settings-knowledge-base-detail" in elem_ids
     assert "settings-knowledge-base-form" in elem_ids
+    assert "settings-knowledge-base-basic-group" in elem_ids
+    assert "settings-knowledge-base-status-group" in elem_ids
     assert "settings-knowledge-base-list-actions" in elem_ids
     assert "settings-knowledge-base-actions" in elem_ids
     assert "settings-knowledge-base-result" in elem_ids
+    assert "settings-export-panel" in elem_ids
     assert "settings-knowledge-base-actions" in elem_ids
     assert "settings-export-row" in elem_ids
     assert "settings-export-result" in elem_ids
@@ -501,14 +505,37 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert elem_ids.index("settings-overview-panel") < elem_ids.index("settings-workspace-panel")
     assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-knowledge-base-panel")
     assert elem_ids.index("settings-knowledge-base-panel") < elem_ids.index("settings-footer-panel")
+    assert elem_ids.index("settings-footer-panel") < elem_ids.index("settings-footer-module")
     assert elem_ids.index("settings-top-row") < elem_ids.index("settings-main-row")
-    assert elem_ids.index("settings-main-row") < elem_ids.index("settings-bottom-row")
+    assert elem_ids.index("settings-main-row") < elem_ids.index("settings-footer-module")
     assert elem_ids.index("settings-help-panel") < elem_ids.index("settings-runtime-panel")
     assert elem_ids.index("settings-template-table") < elem_ids.index("settings-template-detail")
     assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
     assert elem_ids.index("settings-basic-group") < elem_ids.index("settings-policy-group")
     assert elem_ids.index("settings-policy-group") < elem_ids.index("settings-prompt-group")
+    assert elem_ids.index("settings-knowledge-base-basic-group") < elem_ids.index("settings-knowledge-base-status-group")
+    assert elem_ids.index("settings-export-panel") < elem_ids.index("settings-export-result")
     assert elem_ids.index("settings-export-row") < elem_ids.index("settings-export-result")
+    assert any(
+        component.get("props", {}).get("value") == "保存模板"
+        and "ui-button--primary" in (component.get("props", {}).get("elem_classes") or [])
+        for component in button_components
+    )
+    assert any(
+        component.get("props", {}).get("value") == "删除模板"
+        and "ui-button--danger" in (component.get("props", {}).get("elem_classes") or [])
+        for component in button_components
+    )
+    assert any(
+        component.get("props", {}).get("value") == "下载当前配置"
+        and "ui-button--secondary" in (component.get("props", {}).get("elem_classes") or [])
+        for component in button_components
+    )
+    assert any(
+        component.get("props", {}).get("value") == "上一页"
+        and "ui-button--pagination" in (component.get("props", {}).get("elem_classes") or [])
+        for component in button_components
+    )
 
 
 def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
@@ -2171,6 +2198,13 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#settings-form-actions" in UI_CSS
     assert "#settings-knowledge-base-list-actions" in UI_CSS
     assert "#settings-knowledge-base-actions" in UI_CSS
+    assert ".ui-button button" in UI_CSS
+    assert ".ui-button--primary button" in UI_CSS
+    assert ".ui-button--danger button" in UI_CSS
+    assert ".ui-button--pagination button" in UI_CSS
+    assert "border-radius:14px" in UI_CSS.replace(" ", "")
+    assert "transform:translateY(-1px)" in UI_CSS.replace(" ", "")
+    assert "transform:scale(0.98)" in UI_CSS.replace(" ", "")
     assert "#settings-template-detail" in UI_CSS
     assert "#settings-knowledge-base-detail" in UI_CSS
     assert "rgba(68, 68, 68, 0.22)" in UI_CSS

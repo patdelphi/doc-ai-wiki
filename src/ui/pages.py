@@ -101,7 +101,7 @@ RECENT_QUALITY_FETCH_LIMIT = 200
 UI_CSS = """
 #search-top-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 12px !important;
 }
 #search-top-row > .gradio-column,
 #search-result-row > .gradio-column {
@@ -167,7 +167,7 @@ UI_CSS = """
 }
 #document-management-help-panel,
 #document-management-selector-panel {
-  min-height: 220px;
+  min-height: 188px;
 }
 #document-summary-panel > div,
 #database-summary-panel > div {
@@ -178,35 +178,27 @@ UI_CSS = """
   width: 100%;
 }
 #document-current-panel {
-  border: 1px solid rgba(96, 165, 250, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 28%),
     var(--block-background-fill);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  position: relative;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
   overflow: hidden;
-  padding-left: 6px;
-}
-#document-current-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 6px;
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 0.55));
+  padding-left: 0;
 }
 #document-current-panel > div,
 #document-quality-panel > div {
   height: 100%;
 }
 #document-current-title {
-  margin: 0 0 6px 0 !important;
+  margin: 0 0 4px 0 !important;
   text-align: left !important;
   font-size: 20px !important;
   font-weight: 700 !important;
   letter-spacing: 0.02em;
 }
 #document-current-note {
-  margin: 0 0 12px 0 !important;
+  margin: 0 0 8px 0 !important;
   font-size: 13px !important;
   line-height: 1.7 !important;
   color: var(--body-text-color-subdued) !important;
@@ -222,7 +214,7 @@ UI_CSS = """
   border-color: rgba(96, 165, 250, 0.38) !important;
 }
 #document-current-detail {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 #document-current-detail > div {
   border: none !important;
@@ -293,11 +285,6 @@ UI_CSS = """
 #document-pagination-row {
   margin-top: 4px !important;
 }
-#document-pagination-row button,
-#document-current-actions-row button,
-#document-management-actions-row button {
-  min-height: 42px !important;
-}
 #document-page-info {
   margin-top: 2px !important;
 }
@@ -327,19 +314,34 @@ UI_CSS = """
   display: flex !important;
   flex-wrap: wrap !important;
   margin-top: 8px !important;
+  justify-content: flex-start !important;
 }
 #document-current-actions-row {
   display: flex !important;
   flex-wrap: wrap !important;
   margin-top: 8px !important;
+  justify-content: flex-start !important;
 }
 #document-current-actions-row > * {
-  flex: 1 1 180px !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
 }
 #document-management-actions-row > * {
-  flex: 1 1 220px !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
+}
+#document-relationship-row {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+#document-relationship-row > *:first-child {
+  flex: 1 1 280px !important;
+  min-width: 0 !important;
+}
+#document-relationship-row > *:last-child {
+  flex: 0 0 auto !important;
 }
 #document-management-result-row {
   margin-top: 8px !important;
@@ -386,21 +388,50 @@ UI_CSS = """
   flex-wrap: wrap !important;
   align-items: stretch !important;
   gap: 10px !important;
+  justify-content: flex-start !important;
 }
 #document-quality-top-actions > *,
 #document-quality-search-action-row > *,
 #document-quality-batch-action-row > *,
 #document-quality-config-action-row > * {
-  flex: 1 1 180px !important;
+  flex: 0 0 auto !important;
   width: auto !important;
   min-width: 0 !important;
 }
-#document-quality-top-actions button,
-#document-quality-search-action-row button,
-#document-quality-batch-action-row button,
-#document-quality-config-action-row button {
-  width: 100% !important;
-  min-height: 42px !important;
+#database-pagination-row,
+#document-pagination-row,
+#document-quality-sections-pagination-row,
+#document-quality-chunks-pagination-row,
+#document-quality-search-pagination-row,
+#document-quality-batch-pagination-row,
+#search-pagination-row,
+#quality-claim-pagination-row,
+#quality-evidence-pagination-row,
+#quality-recent-pagination-row,
+#quality-evaluation-pagination-row,
+#review-pending-pagination-row,
+#review-processed-pagination-row,
+#review-evidence-pagination-row,
+#review-history-pagination-row,
+#settings-pagination-row,
+#settings-knowledge-base-pagination-row {
+  justify-content: flex-start !important;
+}
+#database-pagination-row > *,
+#document-pagination-row > *,
+#document-quality-sections-pagination-row > *,
+#document-quality-chunks-pagination-row > *,
+#document-quality-search-pagination-row > *,
+#document-quality-batch-pagination-row > *,
+#search-pagination-row > *,
+#review-pending-pagination-row > *,
+#review-processed-pagination-row > *,
+#review-evidence-pagination-row > *,
+#review-history-pagination-row > *,
+#settings-pagination-row > *,
+#settings-knowledge-base-pagination-row > * {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
 }
 #document-management-help-panel > div,
 #document-summary-panel > div,
@@ -427,7 +458,9 @@ UI_CSS = """
   gap: 12px !important;
 }
 #settings-export-row {
-  margin-top: 10px !important;
+  margin-top: 0 !important;
+  justify-content: flex-end !important;
+  padding: 0 !important;
 }
 #settings-export-row > *,
 #quality-export-row > *,
@@ -439,7 +472,6 @@ UI_CSS = """
 #search-export-row button {
   width: auto !important;
   min-width: 180px !important;
-  min-height: 42px !important;
   flex: 0 0 auto !important;
 }
 #settings-export-result,
@@ -454,6 +486,100 @@ UI_CSS = """
 #document-quality-batch-export-result,
 #document-quality-config-export-result {
   min-height: 72px;
+}
+/* 按钮规范：统一由语义类驱动，避免各页面继续堆叠局部补丁。 */
+.ui-button {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  width: fit-content !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  align-self: flex-start !important;
+}
+.ui-button button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: fit-content !important;
+  min-width: 132px !important;
+  max-width: 100% !important;
+  min-height: 42px !important;
+  padding: 0 18px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.26), rgba(51, 65, 85, 0.18)) !important;
+  color: var(--body-text-color) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease !important;
+}
+.ui-button button:hover {
+  transform: translateY(-1px) !important;
+  border-color: rgba(96, 165, 250, 0.34) !important;
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.34), rgba(51, 65, 85, 0.24)) !important;
+  box-shadow:
+    0 10px 22px rgba(15, 23, 42, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+.ui-button button:active {
+  transform: scale(0.98) !important;
+}
+.ui-button button:focus-visible {
+  outline: none !important;
+  border-color: rgba(96, 165, 250, 0.42) !important;
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.12),
+    0 10px 22px rgba(15, 23, 42, 0.14) !important;
+}
+.ui-button button:disabled {
+  opacity: 0.6 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.ui-button--secondary button {
+  border-color: rgba(148, 163, 184, 0.24) !important;
+  background:
+    linear-gradient(180deg, rgba(71, 85, 105, 0.26), rgba(51, 65, 85, 0.18)) !important;
+  color: var(--body-text-color) !important;
+}
+.ui-button--primary button {
+  border-color: rgba(96, 165, 250, 0.38) !important;
+  background:
+    linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.82)) !important;
+  color: #eff6ff !important;
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+}
+.ui-button--danger button {
+  border-color: rgba(248, 113, 113, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(127, 29, 29, 0.88), rgba(153, 27, 27, 0.78)) !important;
+  color: #fee2e2 !important;
+  box-shadow:
+    0 10px 22px rgba(127, 29, 29, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+.ui-button--pagination button {
+  min-width: 96px !important;
+  min-height: 38px !important;
+  padding: 0 14px !important;
+  border-radius: 12px !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  background: rgba(51, 65, 85, 0.12) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 4px 12px rgba(15, 23, 42, 0.06) !important;
 }
 #document-quality-export-result,
 #document-quality-search-export-result,
@@ -577,7 +703,7 @@ UI_CSS = """
 #search-input-panel,
 #search-help-panel {
   height: 100%;
-  min-height: 220px;
+  min-height: 184px;
   align-self: stretch !important;
 }
 #search-input-panel {
@@ -587,7 +713,7 @@ UI_CSS = """
     var(--block-background-fill);
   border-radius: 22px;
   padding: 18px;
-  min-height: 220px;
+  min-height: 204px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -607,7 +733,7 @@ UI_CSS = """
   margin-top: 0;
 }
 #search-result-workspace {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 #search-pagination-row {
   margin-top: 6px !important;
@@ -973,7 +1099,7 @@ UI_CSS = """
 #quality-evidence-pagination-row > *,
 #quality-recent-pagination-row > *,
 #quality-evaluation-pagination-row > * {
-  flex: 1 1 160px !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
 }
 #quality-evaluation-action-row > .gradio-column:first-child {
@@ -986,23 +1112,6 @@ UI_CSS = """
 #quality-input-panel .gradio-row,
 #quality-action-panel .gradio-row {
   gap: 10px !important;
-}
-#quality-input-panel .gradio-button,
-#quality-action-panel .gradio-button,
-#quality-evaluation-panel .gradio-button {
-  min-height: 42px !important;
-}
-#quality-evaluation-action-row .gradio-button {
-  width: auto !important;
-}
-#quality-evaluation-action-row .gradio-column:first-child .gradio-button {
-  min-height: 38px !important;
-  padding: 0 16px !important;
-}
-#quality-input-panel .gradio-button,
-#quality-action-panel .gradio-button,
-#quality-evaluation-panel .gradio-button {
-  letter-spacing: 0.02em;
 }
 #quality-evidence-detail *,
 #review-evidence-detail *,
@@ -1073,9 +1182,9 @@ UI_CSS = """
 #review-action-row,
 #review-record-row,
 #review-evidence-row {
-  align-items: stretch !important;
-  gap: 14px !important;
-  margin-top: 8px !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  margin-top: 6px !important;
 }
 #review-focus-panel {
   background: transparent !important;
@@ -1091,13 +1200,13 @@ UI_CSS = """
 #review-result-panel,
 #review-export-result {
   margin-top: 0;
-  padding: 18px;
+  padding: 16px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 22px;
   background:
     radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 28%),
     var(--block-background-fill);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 #review-action-panel {
   display: flex;
@@ -1114,35 +1223,35 @@ UI_CSS = """
 }
 #review-action-feedback-row {
   display: flex;
-  align-items: stretch !important;
+  align-items: flex-start !important;
   gap: 10px !important;
 }
 #review-action-feedback-row > .gradio-column {
-  align-self: stretch !important;
+  align-self: flex-start !important;
 }
 #review-action-feedback-row .gradio-html {
-  height: 100%;
+  height: auto;
 }
 #review-help-panel,
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail {
-  height: 100%;
+  height: auto;
 }
 #review-help-panel > div,
 #review-claim-detail > div,
 #review-record-detail > div,
 #review-evidence-detail > div {
-  height: 100%;
+  height: auto;
 }
 #review-help-panel {
-  min-height: 220px;
+  min-height: 152px;
 }
 #review-result-panel {
-  min-height: 96px;
+  min-height: 72px;
 }
 #review-export-result {
-  min-height: 96px;
+  min-height: 72px;
 }
 #review-pending-pagination-row,
 #review-processed-pagination-row,
@@ -1151,16 +1260,17 @@ UI_CSS = """
   margin-top: 6px !important;
   gap: 10px !important;
   flex-wrap: wrap !important;
+  justify-content: flex-start !important;
 }
 #review-action-buttons {
   display: flex !important;
-  align-items: stretch !important;
+  align-items: flex-start !important;
   gap: 12px !important;
   flex-wrap: wrap !important;
   margin: 0 !important;
 }
 #review-action-buttons > * {
-  flex: 1 1 180px !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
 }
 #review-pending-table table th,
@@ -1286,10 +1396,6 @@ UI_CSS = """
   border-left: none !important;
   padding-left: 0 !important;
 }
-#review-action-panel .gradio-button {
-  min-height: 42px !important;
-  letter-spacing: 0.02em;
-}
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail,
@@ -1306,6 +1412,26 @@ UI_CSS = """
   line-height: 1.7 !important;
   vertical-align: top !important;
 }
+#search-results-table table th:nth-child(1),
+#search-results-table table td:nth-child(1) {
+  width: 56px !important;
+}
+#search-results-table table th:nth-child(2),
+#search-results-table table td:nth-child(2) {
+  width: 156px !important;
+}
+#search-results-table table th:nth-child(3),
+#search-results-table table td:nth-child(3) {
+  width: 128px !important;
+}
+#search-results-table table th:nth-child(4),
+#search-results-table table td:nth-child(4) {
+  width: 96px !important;
+}
+#search-results-table table th:nth-child(5),
+#search-results-table table td:nth-child(5) {
+  width: 96px !important;
+}
 #search-top-row,
 #search-result-row,
 #search-export-row {
@@ -1320,6 +1446,9 @@ UI_CSS = """
   background: transparent !important;
   box-shadow: none !important;
 }
+#search-help-panel {
+  min-height: 184px !important;
+}
 #search-help-panel > div,
 #search-result-summary > div,
 #search-result-detail > div,
@@ -1328,7 +1457,7 @@ UI_CSS = """
   padding-left: 0;
 }
 #search-action-panel {
-  margin-top: 10px !important;
+  margin-top: 8px !important;
   padding: 0 !important;
   border: none !important;
   background: transparent !important;
@@ -1420,7 +1549,7 @@ UI_CSS = """
   margin: 0 !important;
 }
 #search-export-result {
-  margin-top: 10px !important;
+  margin-top: 8px !important;
   padding: 0 !important;
   border: none !important;
   background: transparent !important;
@@ -1451,23 +1580,20 @@ UI_CSS = """
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
 }
-#settings-top-row,
-#settings-main-row,
-#settings-bottom-row,
-#settings-knowledge-base-row {
+#settings-top-row {
   align-items: stretch !important;
-  gap: 14px !important;
-}
-#settings-top-row > .gradio-column,
-#settings-main-row > .gradio-column,
-#settings-bottom-row > .gradio-column,
-#settings-knowledge-base-row > .gradio-column {
-  align-self: stretch !important;
-  min-width: 0 !important;
+  gap: 12px !important;
 }
 #settings-main-row,
 #settings-knowledge-base-row {
   align-items: flex-start !important;
+  gap: 12px !important;
+}
+#settings-top-row > .gradio-column,
+#settings-main-row > .gradio-column,
+#settings-knowledge-base-row > .gradio-column {
+  align-self: stretch !important;
+  min-width: 0 !important;
 }
 #settings-main-row > .gradio-column,
 #settings-knowledge-base-row > .gradio-column {
@@ -1482,6 +1608,12 @@ UI_CSS = """
 }
 #settings-footer-panel {
   margin-top: 10px;
+  padding: 10px 12px 14px 12px !important;
+  box-sizing: border-box !important;
+}
+#settings-footer-panel > div {
+  width: 100%;
+  box-sizing: border-box !important;
 }
 #settings-workspace-panel,
 #settings-knowledge-base-panel {
@@ -1493,7 +1625,7 @@ UI_CSS = """
 #settings-template-list-panel,
 #settings-knowledge-base-list-panel {
   margin-top: 0;
-  padding: 16px 18px 18px !important;
+  padding: 14px 16px 16px !important;
 }
 #settings-help-panel,
 #settings-runtime-panel,
@@ -1517,7 +1649,7 @@ UI_CSS = """
 }
 #settings-main-row,
 #settings-knowledge-base-row {
-  margin-top: 10px !important;
+  margin-top: 8px !important;
 }
 #settings-help-panel > div,
 #settings-runtime-panel > div,
@@ -1544,7 +1676,7 @@ UI_CSS = """
 }
 #settings-help-panel,
 #settings-runtime-panel {
-  min-height: 220px;
+  min-height: 188px;
 }
 #settings-template-detail,
 #settings-knowledge-base-detail {
@@ -1578,8 +1710,8 @@ UI_CSS = """
 }
 #settings-template-form > div > .gradio-markdown:not(:first-child),
 #settings-knowledge-base-form > div > .gradio-markdown:not(:first-child) {
-  margin-top: 8px !important;
-  padding-top: 10px !important;
+  margin-top: 6px !important;
+  padding-top: 8px !important;
   border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
 }
 #settings-template-form .gradio-markdown h3,
@@ -1600,7 +1732,9 @@ UI_CSS = """
 }
 #settings-basic-group,
 #settings-policy-group,
-#settings-prompt-group {
+#settings-prompt-group,
+#settings-knowledge-base-basic-group,
+#settings-knowledge-base-status-group {
   border: none !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -1608,7 +1742,9 @@ UI_CSS = """
 }
 #settings-basic-group > div,
 #settings-policy-group > div,
-#settings-prompt-group > div {
+#settings-prompt-group > div,
+#settings-knowledge-base-basic-group > div,
+#settings-knowledge-base-status-group > div {
   padding: 0 !important;
   gap: 10px !important;
 }
@@ -1654,7 +1790,7 @@ UI_CSS = """
 }
 #settings-template-list-header,
 #settings-knowledge-base-list-header {
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
 }
 #settings-template-list-header > div,
 #settings-knowledge-base-list-header > div {
@@ -1684,6 +1820,43 @@ UI_CSS = """
 #settings-knowledge-base-result {
   min-height: 84px;
 }
+#settings-footer-module {
+  padding: 18px 20px !important;
+  border: 1px solid rgba(148, 163, 184, 0.12) !important;
+  border-radius: 22px !important;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.04), transparent 28%),
+    var(--block-background-fill) !important;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04) !important;
+}
+#settings-footer-module > div {
+  width: 100%;
+}
+#settings-footer-module #settings-result-panel,
+#settings-footer-module #settings-export-result {
+  min-height: auto !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#settings-footer-module #settings-result-panel > div,
+#settings-footer-module #settings-export-result > div {
+  height: auto !important;
+  border-left: none !important;
+  padding-left: 0 !important;
+}
+#settings-export-panel {
+  margin-top: 10px !important;
+  padding: 10px 0 0 0 !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+}
+#settings-export-panel > div {
+  width: 100%;
+}
 #settings-template-page-info,
 #settings-knowledge-base-page-info {
   margin-top: 2px !important;
@@ -1696,13 +1869,13 @@ UI_CSS = """
 #settings-knowledge-base-actions {
   gap: 10px !important;
   flex-wrap: wrap !important;
-  margin-top: 6px !important;
+  margin-top: 4px !important;
 }
 #settings-list-actions > *,
 #settings-form-actions > *,
 #settings-knowledge-base-list-actions > *,
 #settings-knowledge-base-actions > * {
-  flex: 1 1 160px !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
 }
 #settings-list-actions button,
@@ -1720,14 +1893,15 @@ UI_CSS = """
 #settings-knowledge-base-actions,
 #settings-export-row {
   padding: 6px 2px 0 2px !important;
-  margin-top: 4px !important;
+  margin-top: 2px !important;
+  justify-content: flex-start !important;
 }
 #settings-form-actions,
 #settings-knowledge-base-actions {
   justify-content: flex-end !important;
   gap: 12px !important;
-  padding: 12px 0 0 0 !important;
-  margin-top: 10px !important;
+  padding: 10px 0 0 0 !important;
+  margin-top: 8px !important;
   border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
 }
 #settings-form-actions > *,
@@ -2050,13 +2224,52 @@ UI_CSS = """
 }
 #quality-dummy-action-panel .gradio-button,
 #quality-dummy-intake-panel .gradio-button {
-  min-height: 42px !important;
+  width: auto !important;
 }
 #quality-dummy-action-panel .gradio-row,
 #quality-dummy-intake-panel .gradio-row {
   gap: 10px !important;
 }
 """
+
+
+def ui_button(
+    value: str | None = None,
+    *,
+    tone: str | None = None,
+    elem_classes: str | list[str] | tuple[str, ...] | None = None,
+    **kwargs: object,
+) -> gr.Button:
+    """构建统一按钮，按语义映射样式，避免页面各自追加按钮补丁。"""
+
+    classes = ["ui-button"]
+    variant = str(kwargs.get("variant") or "").strip().lower()
+    resolved_tone = tone
+    if resolved_tone is None:
+        normalized_value = (value or "").strip()
+        if variant == "primary" or normalized_value.startswith(("保存", "开始模拟")):
+            resolved_tone = "primary"
+        elif variant == "stop" or normalized_value.startswith("删除"):
+            resolved_tone = "danger"
+        elif normalized_value in {"上一页", "下一页"}:
+            resolved_tone = "pagination"
+        else:
+            resolved_tone = "secondary"
+    classes.append(f"ui-button--{resolved_tone}")
+    resolved_min_width = 164
+    if resolved_tone == "pagination":
+        resolved_min_width = 136
+    elif resolved_tone in {"primary", "danger"}:
+        resolved_min_width = 148
+    elif (value or "").startswith("下载"):
+        resolved_min_width = 188
+    kwargs.setdefault("scale", 0)
+    kwargs.setdefault("min_width", resolved_min_width)
+    if isinstance(elem_classes, str):
+        classes.append(elem_classes)
+    elif elem_classes:
+        classes.extend(elem_classes)
+    return gr.Button(value, elem_classes=classes, **kwargs)
 
 
 def _build_quality_dummy_card_html(title: str, body: str, *, tone: str = "default") -> str:
@@ -6538,8 +6751,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 interactive=True,
                             )
                         with gr.Row():
-                            quality_button = gr.Button("开始质检")
-                            recent_quality_button = gr.Button("加载最近质检结果")
+                            quality_button = ui_button("开始质检")
+                            recent_quality_button = ui_button("加载最近质检结果")
                     with gr.Column(scale=1):
                         quality_help = gr.HTML(value=format_quality_help_html(), elem_id="quality-help-panel")
                 with gr.Row(elem_id="quality-template-row"):
@@ -6586,8 +6799,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="quality-claims-table",
                         )
                         with gr.Row(elem_id="quality-claim-pagination-row"):
-                            quality_claim_prev_button = gr.Button("上一页")
-                            quality_claim_next_button = gr.Button("下一页")
+                            quality_claim_prev_button = ui_button("上一页")
+                            quality_claim_next_button = ui_button("下一页")
                         quality_claim_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_quality_claim_page_info),
                             elem_id="quality-claim-page-info",
@@ -6615,8 +6828,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             max_height=420,
                         )
                         with gr.Row(elem_id="quality-evidence-pagination-row"):
-                            quality_evidence_prev_button = gr.Button("上一页")
-                            quality_evidence_next_button = gr.Button("下一页")
+                            quality_evidence_prev_button = ui_button("上一页")
+                            quality_evidence_next_button = ui_button("下一页")
                         quality_evidence_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_claim_evidence_page_info),
                             elem_id="quality-evidence-page-info",
@@ -6656,8 +6869,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             max_height=420,
                         )
                         with gr.Row(elem_id="quality-recent-pagination-row"):
-                            recent_quality_prev_button = gr.Button("上一页")
-                            recent_quality_next_button = gr.Button("下一页")
+                            recent_quality_prev_button = ui_button("上一页")
+                            recent_quality_next_button = ui_button("下一页")
                         recent_quality_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_recent_quality_page_info),
                             elem_id="quality-recent-page-info",
@@ -6666,7 +6879,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Column(scale=1, elem_id="quality-action-panel"):
                         gr.Markdown("### 5. 下载结果与动作")
                         with gr.Row(elem_id="quality-export-row"):
-                            quality_export_button = gr.Button("下载结果")
+                            quality_export_button = ui_button("下载结果")
                         quality_export_result = gr.HTML(
                             value=format_operation_result_html(None, title="下载结果"),
                             elem_id="quality-export-result",
@@ -6685,9 +6898,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
                         with gr.Row(elem_id="quality-evaluation-action-row", equal_height=True):
                             with gr.Column(scale=1):
-                                quality_evaluation_button = gr.Button("执行效果评测")
+                                quality_evaluation_button = ui_button("执行效果评测")
                             with gr.Column(scale=1):
-                                quality_evaluation_export_button = gr.Button("下载评测结果")
+                                quality_evaluation_export_button = ui_button("下载评测结果")
                                 quality_evaluation_export_result = gr.HTML(
                                     value=format_operation_result_html(None, title="下载结果"),
                                     elem_id="quality-evaluation-export-result",
@@ -6726,8 +6939,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_quality_evaluation_table_rows,
                         )
                         with gr.Row(elem_id="quality-evaluation-pagination-row"):
-                            quality_evaluation_prev_button = gr.Button("上一页")
-                            quality_evaluation_next_button = gr.Button("下一页")
+                            quality_evaluation_prev_button = ui_button("上一页")
+                            quality_evaluation_next_button = ui_button("下一页")
                         quality_evaluation_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_quality_evaluation_page_info),
                             elem_id="quality-evaluation-page-info",
@@ -6764,8 +6977,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="quality-dummy-mode",
                         )
                         with gr.Row():
-                            quality_dummy_submit = gr.Button("开始模拟质检", variant="primary")
-                            quality_dummy_export = gr.Button("导出模拟结果")
+                            quality_dummy_submit = ui_button("开始模拟质检", variant="primary")
+                            quality_dummy_export = ui_button("导出模拟结果")
                     with gr.Column(scale=1, elem_id="quality-dummy-help-panel"):
                         quality_dummy_help_panel = gr.HTML(
                             value=_build_quality_dummy_top_help_html(),
@@ -6810,8 +7023,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="quality-dummy-claims",
                         )
                         with gr.Row(elem_id="quality-dummy-claim-pagination-row"):
-                            quality_dummy_claim_prev = gr.Button("上一页")
-                            quality_dummy_claim_next = gr.Button("下一页")
+                            quality_dummy_claim_prev = ui_button("上一页")
+                            quality_dummy_claim_next = ui_button("下一页")
                         quality_dummy_claim_page_info = gr.HTML(
                             value="<div class='quality-dummy-note'>第 1 / 1 页，共 4 条 Claim</div>",
                             elem_id="quality-dummy-claim-page-info",
@@ -6840,8 +7053,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             max_height=420,
                         )
                         with gr.Row(elem_id="quality-dummy-evidence-pagination-row"):
-                            quality_dummy_evidence_prev = gr.Button("上一页")
-                            quality_dummy_evidence_next = gr.Button("下一页")
+                            quality_dummy_evidence_prev = ui_button("上一页")
+                            quality_dummy_evidence_next = ui_button("下一页")
                         quality_dummy_evidence_page_info = gr.HTML(
                             value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条证据</div>",
                             elem_id="quality-dummy-evidence-page-info",
@@ -6881,8 +7094,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             max_height=420,
                         )
                         with gr.Row(elem_id="quality-dummy-history-pagination-row"):
-                            quality_dummy_history_prev = gr.Button("上一页")
-                            quality_dummy_history_next = gr.Button("下一页")
+                            quality_dummy_history_prev = ui_button("上一页")
+                            quality_dummy_history_next = ui_button("下一页")
                         quality_dummy_history_page_info = gr.HTML(
                             value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条记录</div>",
                             elem_id="quality-dummy-history-page-info",
@@ -6890,7 +7103,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Column(scale=1, elem_id="quality-dummy-action-panel"):
                         gr.Markdown("### 5. 下载结果与动作")
                         with gr.Row(elem_id="quality-dummy-export-row"):
-                            quality_dummy_action_export = gr.Button("下载结果")
+                            quality_dummy_action_export = ui_button("下载结果")
                         quality_dummy_actions_result = gr.HTML(
                             value=_build_quality_dummy_export_result_html(),
                             elem_id="quality-dummy-export-result",
@@ -6914,9 +7127,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
                         with gr.Row(elem_id="quality-dummy-evaluation-action-row", equal_height=True):
                             with gr.Column(scale=1):
-                                quality_dummy_evaluation_button = gr.Button("执行效果评测")
+                                quality_dummy_evaluation_button = ui_button("执行效果评测")
                             with gr.Column(scale=1):
-                                quality_dummy_evaluation_export_button = gr.Button("下载评测结果")
+                                quality_dummy_evaluation_export_button = ui_button("下载评测结果")
                                 quality_dummy_evaluation_export_result = gr.HTML(
                                     value=_build_quality_dummy_export_result_html(),
                                     elem_id="quality-dummy-evaluation-export-result",
@@ -6970,7 +7183,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_evidence_page_state = gr.State(initial_review_evidence_page)
                 review_history_page_state = gr.State(initial_review_history_page)
                 with gr.Group(elem_id="review-focus-panel"):
-                    with gr.Row(elem_id="review-top-row", equal_height=True):
+                    with gr.Row(elem_id="review-top-row"):
                         with gr.Column(scale=1):
                             with gr.Row(elem_id="review-filter-row"):
                                 review_knowledge_base = gr.Dropdown(
@@ -7005,8 +7218,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=initial_review_pending_table_rows,
                             )
                             with gr.Row(elem_id="review-pending-pagination-row"):
-                                review_pending_prev_button = gr.Button("上一页")
-                                review_pending_next_button = gr.Button("下一页")
+                                review_pending_prev_button = ui_button("上一页")
+                                review_pending_next_button = ui_button("下一页")
                             review_pending_page_info = gr.HTML(
                                 value=format_table_pagination_html(initial_review_pending_page_info),
                                 elem_id="review-pending-page-info",
@@ -7023,13 +7236,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=initial_review_processed_table_rows,
                             )
                             with gr.Row(elem_id="review-processed-pagination-row"):
-                                review_processed_prev_button = gr.Button("上一页")
-                                review_processed_next_button = gr.Button("下一页")
+                                review_processed_prev_button = ui_button("上一页")
+                                review_processed_next_button = ui_button("下一页")
                             review_processed_page_info = gr.HTML(
                                 value=format_table_pagination_html(initial_review_processed_page_info),
                                 elem_id="review-processed-page-info",
                             )
-                    with gr.Row(elem_id="review-summary-row", equal_height=True):
+                    with gr.Row(elem_id="review-summary-row"):
                         with gr.Column(scale=5):
                             review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
                         with gr.Column(scale=4):
@@ -7037,8 +7250,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=initial_review_evidence_detail_html,
                                 elem_id="review-evidence-detail",
                             )
-                with gr.Row(elem_id="review-evidence-row", equal_height=True):
-                    with gr.Column(scale=5):
+                with gr.Row(elem_id="review-evidence-row"):
+                    with gr.Column(scale=6):
                         review_evidence_table = gr.Dataframe(
                             headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
                             datatype=["str"] * 9,
@@ -7051,13 +7264,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_review_evidence_table_rows,
                         )
                         with gr.Row(elem_id="review-evidence-pagination-row"):
-                            review_evidence_prev_button = gr.Button("上一页")
-                            review_evidence_next_button = gr.Button("下一页")
+                            review_evidence_prev_button = ui_button("上一页")
+                            review_evidence_next_button = ui_button("下一页")
                         review_evidence_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_review_evidence_page_info),
                             elem_id="review-evidence-page-info",
                         )
-                    with gr.Column(scale=4):
+                    with gr.Column(scale=3):
                         with gr.Group(elem_id="review-action-panel"):
                             with gr.Group(elem_id="review-action-form"):
                                 review_action_input = gr.Dropdown(
@@ -7072,10 +7285,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_review_note_value,
                                 )
                             with gr.Row(elem_id="review-action-buttons"):
-                                review_button = gr.Button("提交审核")
-                                review_history_button = gr.Button("刷新审核列表")
-                                review_export_button = gr.Button("下载当前审核结果")
-                            with gr.Row(elem_id="review-action-feedback-row", equal_height=True):
+                                review_button = ui_button("提交审核")
+                                review_history_button = ui_button("刷新审核列表")
+                                review_export_button = ui_button("下载当前审核结果")
+                            with gr.Row(elem_id="review-action-feedback-row"):
                                 with gr.Column(scale=1):
                                     review_result = gr.HTML(
                                         value=format_operation_result_html(None, title="审核结果"),
@@ -7086,8 +7299,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                         value=format_operation_result_html(None, title="下载结果"),
                                         elem_id="review-export-result",
                                     )
-                with gr.Row(elem_id="review-record-row", equal_height=True):
-                    with gr.Column(scale=5):
+                with gr.Row(elem_id="review-record-row"):
+                    with gr.Column(scale=6):
                         review_history = gr.Dataframe(
                             headers=["序号", "审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
                             datatype=["str"] * 9,
@@ -7100,13 +7313,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_review_history_table_rows,
                         )
                         with gr.Row(elem_id="review-history-pagination-row"):
-                            review_history_prev_button = gr.Button("上一页")
-                            review_history_next_button = gr.Button("下一页")
+                            review_history_prev_button = ui_button("上一页")
+                            review_history_next_button = ui_button("下一页")
                         review_history_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_review_history_page_info),
                             elem_id="review-history-page-info",
                         )
-                    with gr.Column(scale=4):
+                    with gr.Column(scale=3):
                         review_record_detail = gr.HTML(
                             value=initial_review_record_detail_html,
                             elem_id="review-record-detail",
@@ -7134,7 +7347,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 interactive=True,
                                 elem_id="document-knowledge-base",
                             )
-                            scan_button = gr.Button("刷新文档列表")
+                            scan_button = ui_button("刷新文档列表")
                 with gr.Row(elem_id="document-management-summary-row", equal_height=True):
                     with gr.Column(scale=1):
                         with gr.Group(elem_id="document-summary-panel"):
@@ -7165,11 +7378,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     interactive=True,
                                     elem_id="document-target-knowledge-base",
                                 )
-                                move_document_button = gr.Button("调整当前文档归属", elem_id="document-move-button")
-                            with gr.Row(elem_id="document-current-actions-row", equal_height=True):
-                                register_button = gr.Button("注册当前文档", interactive=initial_document_state["register_interactive"])
-                                rebuild_button = gr.Button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
-                                status_button = gr.Button("刷新状态")
+                                move_document_button = ui_button("调整当前文档归属", elem_id="document-move-button")
+                            with gr.Row(elem_id="document-current-actions-row"):
+                                register_button = ui_button("注册当前文档", interactive=initial_document_state["register_interactive"])
+                                rebuild_button = ui_button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
+                                status_button = ui_button("刷新状态")
                 database_summary_table = gr.Dataframe(
                     headers=["序号", "指标", "数量"],
                     datatype=["str", "str", "str"],
@@ -7182,8 +7395,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     value=initial_database_table_rows,
                 )
                 with gr.Row(elem_id="database-pagination-row"):
-                    database_prev_button = gr.Button("上一页")
-                    database_next_button = gr.Button("下一页")
+                    database_prev_button = ui_button("上一页")
+                    database_next_button = ui_button("下一页")
                 database_page_info = gr.HTML(
                     value=format_table_pagination_html(initial_database_page_info),
                     elem_id="database-page-info",
@@ -7200,14 +7413,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     value=initial_document_table_rows,
                 )
                 with gr.Row(elem_id="document-pagination-row"):
-                    document_prev_button = gr.Button("上一页")
-                    document_next_button = gr.Button("下一页")
+                    document_prev_button = ui_button("上一页")
+                    document_next_button = ui_button("下一页")
                 document_page_info = gr.HTML(
                     value=format_table_pagination_html(initial_document_page_info),
                     elem_id="document-page-info",
                 )
-                with gr.Row(elem_id="document-management-actions-row", equal_height=True):
-                    register_all_button = gr.Button("注册全部待处理文档")
+                with gr.Row(elem_id="document-management-actions-row"):
+                    register_all_button = ui_button("注册全部待处理文档")
                 with gr.Row(elem_id="document-management-result-row", equal_height=True):
                     with gr.Column(scale=1):
                         register_result = gr.HTML(
@@ -7222,8 +7435,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
                     with gr.Group(elem_id="document-quality-panel"):
                         with gr.Row(elem_id="document-quality-top-actions"):
-                            document_quality_run_button = gr.Button("执行入库质检")
-                            document_quality_result_export_button = gr.Button("下载质检结果")
+                            document_quality_run_button = ui_button("执行入库质检")
+                            document_quality_result_export_button = ui_button("下载质检结果")
                         document_quality_result_export_result = gr.HTML(
                             value=format_operation_result_html(None, title="下载结果"),
                             elem_id="document-quality-export-result",
@@ -7253,8 +7466,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_document_quality_sections_table_rows,
                                 )
                                 with gr.Row(elem_id="document-quality-sections-pagination-row"):
-                                    document_quality_sections_prev_button = gr.Button("上一页")
-                                    document_quality_sections_next_button = gr.Button("下一页")
+                                    document_quality_sections_prev_button = ui_button("上一页")
+                                    document_quality_sections_next_button = ui_button("下一页")
                                 document_quality_sections_page_info = gr.HTML(
                                     value=format_table_pagination_html(initial_document_quality_sections_page_info),
                                     elem_id="document-quality-sections-page-info",
@@ -7272,8 +7485,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_document_quality_chunks_table_rows,
                                 )
                                 with gr.Row(elem_id="document-quality-chunks-pagination-row"):
-                                    document_quality_chunks_prev_button = gr.Button("上一页")
-                                    document_quality_chunks_next_button = gr.Button("下一页")
+                                    document_quality_chunks_prev_button = ui_button("上一页")
+                                    document_quality_chunks_next_button = ui_button("下一页")
                                 document_quality_chunks_page_info = gr.HTML(
                                     value=format_table_pagination_html(initial_document_quality_chunks_page_info),
                                     elem_id="document-quality-chunks-page-info",
@@ -7286,8 +7499,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
                                 )
                                 with gr.Row(elem_id="document-quality-search-action-row"):
-                                    document_quality_search_button = gr.Button("验证当前文档检索")
-                                    document_quality_search_export_button = gr.Button("下载检索结果")
+                                    document_quality_search_button = ui_button("验证当前文档检索")
+                                    document_quality_search_export_button = ui_button("下载检索结果")
                             with gr.Column(scale=4):
                                 document_quality_search_summary = gr.HTML(
                                     value=initial_document_quality_search_summary,
@@ -7313,8 +7526,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_document_quality_search_table_rows,
                                 )
                                 with gr.Row(elem_id="document-quality-search-pagination-row"):
-                                    document_quality_search_prev_button = gr.Button("上一页")
-                                    document_quality_search_next_button = gr.Button("下一页")
+                                    document_quality_search_prev_button = ui_button("上一页")
+                                    document_quality_search_next_button = ui_button("下一页")
                                 document_quality_search_page_info = gr.HTML(
                                     value=format_table_pagination_html(initial_document_quality_search_page_info),
                                     elem_id="document-quality-search-page-info",
@@ -7325,9 +7538,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     elem_id="document-quality-search-detail",
                                 )
                         with gr.Row(elem_id="document-quality-batch-action-row"):
-                            document_quality_batch_button = gr.Button("执行全部文档质检")
-                            document_quality_csv_export_button = gr.Button("导出质检 CSV")
-                            document_quality_batch_export_button = gr.Button("下载批量结果")
+                            document_quality_batch_button = ui_button("执行全部文档质检")
+                            document_quality_csv_export_button = ui_button("导出质检 CSV")
+                            document_quality_batch_export_button = ui_button("下载批量结果")
                         with gr.Row(elem_id="document-quality-batch-row"):
                             with gr.Column(scale=4):
                                 document_quality_batch_summary = gr.HTML(
@@ -7355,8 +7568,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_document_quality_batch_table_rows,
                                 )
                                 with gr.Row(elem_id="document-quality-batch-pagination-row"):
-                                    document_quality_batch_prev_button = gr.Button("上一页")
-                                    document_quality_batch_next_button = gr.Button("下一页")
+                                    document_quality_batch_prev_button = ui_button("上一页")
+                                    document_quality_batch_next_button = ui_button("下一页")
                                 document_quality_batch_page_info = gr.HTML(
                                     value=format_table_pagination_html(initial_document_quality_batch_page_info),
                                     elem_id="document-quality-batch-page-info",
@@ -7414,8 +7627,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                             precision=0,
                                         )
                                     with gr.Row(elem_id="document-quality-config-action-row"):
-                                        document_quality_config_save_button = gr.Button("保存质检阈值", variant="primary")
-                                        document_quality_config_export_button = gr.Button("下载当前配置")
+                                        document_quality_config_save_button = ui_button("保存质检阈值", variant="primary")
+                                        document_quality_config_export_button = ui_button("下载当前配置")
                                     document_quality_config_export_result = gr.HTML(
                                         value=format_operation_result_html(None, title="下载结果"),
                                         elem_id="document-quality-config-export-result",
@@ -7438,7 +7651,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="search-knowledge-base",
                             )
                             search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=100, step=1, value=10)
-                            search_button = gr.Button("执行检索")
+                            search_button = ui_button("执行检索")
                     with gr.Column(scale=4):
                         search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
                 with gr.Group(elem_id="search-result-workspace"):
@@ -7464,8 +7677,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=initial_search_table_rows,
                             )
                             with gr.Row(elem_id="search-pagination-row"):
-                                search_prev_button = gr.Button("上一页")
-                                search_next_button = gr.Button("下一页")
+                                search_prev_button = ui_button("上一页")
+                                search_next_button = ui_button("下一页")
                             search_page_info = gr.HTML(
                                 value=format_table_pagination_html(initial_search_page_info),
                                 elem_id="search-page-info",
@@ -7473,7 +7686,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
                     with gr.Group(elem_id="search-action-panel"):
                         with gr.Row(elem_id="search-export-row"):
-                            search_export_button = gr.Button("下载结果")
+                            search_export_button = ui_button("下载结果")
                         search_export_result = gr.HTML(
                             value=format_operation_result_html(None, title="下载结果"),
                             elem_id="search-export-result",
@@ -7488,9 +7701,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 settings_knowledge_base_page_state = gr.State(initial_settings_knowledge_base_page)
                 with gr.Group(elem_id="settings-overview-panel"):
                     with gr.Row(elem_id="settings-top-row", equal_height=True):
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=6):
                             settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
-                        with gr.Column(scale=4):
+                        with gr.Column(scale=3):
                             settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
                 with gr.Group(elem_id="settings-workspace-panel"):
                     with gr.Group(elem_id="settings-template-list-panel"):
@@ -7518,17 +7731,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_settings_template_table_rows,
                         )
                         with gr.Row(elem_id="settings-pagination-row"):
-                            settings_template_prev_button = gr.Button("上一页")
-                            settings_template_next_button = gr.Button("下一页")
+                            settings_template_prev_button = ui_button("上一页")
+                            settings_template_next_button = ui_button("下一页")
                         settings_template_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_settings_template_page_info),
                             elem_id="settings-template-page-info",
                         )
                         with gr.Row(elem_id="settings-list-actions"):
-                            settings_new_button = gr.Button("新建模板")
-                            settings_refresh_button = gr.Button("刷新模板")
+                            settings_new_button = ui_button("新建模板")
+                            settings_refresh_button = ui_button("刷新模板")
                     with gr.Row(elem_id="settings-main-row"):
-                        with gr.Column(scale=4):
+                        with gr.Column(scale=3):
                             settings_template_detail = gr.HTML(
                                 value=initial_settings_template_detail_html,
                                 elem_id="settings-template-detail",
@@ -7567,8 +7780,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=initial_settings_delete_confirm,
                                 )
                                 with gr.Row(elem_id="settings-form-actions"):
-                                    settings_save_button = gr.Button("保存模板", variant="primary")
-                                    settings_delete_button = gr.Button("删除模板", variant="stop")
+                                    settings_save_button = ui_button("保存模板", variant="primary")
+                                    settings_delete_button = ui_button("删除模板", variant="stop")
                 with gr.Group(elem_id="settings-knowledge-base-panel"):
                     with gr.Group(elem_id="settings-knowledge-base-list-panel"):
                         gr.HTML(
@@ -7589,70 +7802,74 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=initial_settings_knowledge_base_selected_choice,
                         )
                         with gr.Row(elem_id="settings-knowledge-base-pagination-row"):
-                            settings_knowledge_base_prev_button = gr.Button("上一页")
-                            settings_knowledge_base_next_button = gr.Button("下一页")
+                            settings_knowledge_base_prev_button = ui_button("上一页")
+                            settings_knowledge_base_next_button = ui_button("下一页")
                         settings_knowledge_base_page_info = gr.HTML(
                             value=format_table_pagination_html(initial_settings_knowledge_base_page_info),
                             elem_id="settings-knowledge-base-page-info",
                         )
                         with gr.Row(elem_id="settings-knowledge-base-list-actions"):
-                            settings_knowledge_base_new_button = gr.Button("新建知识库")
-                            settings_knowledge_base_refresh_button = gr.Button("刷新知识库")
+                            settings_knowledge_base_new_button = ui_button("新建知识库")
+                            settings_knowledge_base_refresh_button = ui_button("刷新知识库")
                     with gr.Row(elem_id="settings-knowledge-base-row"):
-                        with gr.Column(scale=4):
+                        with gr.Column(scale=3):
                             settings_knowledge_base_detail = gr.HTML(
                                 value=initial_settings_knowledge_base_detail_html,
                                 elem_id="settings-knowledge-base-detail",
                             )
                         with gr.Column(scale=5):
                             with gr.Group(elem_id="settings-knowledge-base-form"):
-                                with gr.Row():
-                                    settings_knowledge_base_id = gr.Textbox(
-                                        label="知识库 ID",
-                                        value=initial_settings_knowledge_base_id_value,
-                                        scale=2,
+                                gr.Markdown("### 基础信息")
+                                with gr.Group(elem_id="settings-knowledge-base-basic-group"):
+                                    with gr.Row():
+                                        settings_knowledge_base_id = gr.Textbox(
+                                            label="知识库 ID",
+                                            value=initial_settings_knowledge_base_id_value,
+                                            scale=2,
+                                        )
+                                        settings_knowledge_base_name = gr.Textbox(
+                                            label="知识库名称",
+                                            value=initial_settings_knowledge_base_name_value,
+                                            scale=3,
+                                        )
+                                    settings_knowledge_base_description = gr.Textbox(
+                                        label="知识库说明",
+                                        lines=3,
+                                        value=initial_settings_knowledge_base_description_value,
                                     )
-                                    settings_knowledge_base_name = gr.Textbox(
-                                        label="知识库名称",
-                                        value=initial_settings_knowledge_base_name_value,
-                                        scale=3,
-                                    )
-                                settings_knowledge_base_description = gr.Textbox(
-                                    label="知识库说明",
-                                    lines=3,
-                                    value=initial_settings_knowledge_base_description_value,
-                                )
-                                with gr.Row():
-                                    settings_knowledge_base_status = gr.Dropdown(
-                                        label="状态",
-                                        choices=["active", "disabled"],
-                                        value=initial_settings_knowledge_base_status_value,
-                                        interactive=True,
-                                    )
-                                    settings_knowledge_base_is_default = gr.Checkbox(
-                                        label="设为默认",
-                                        value=initial_settings_knowledge_base_is_default,
-                                    )
+                                gr.Markdown("### 状态设置")
+                                with gr.Group(elem_id="settings-knowledge-base-status-group"):
+                                    with gr.Row():
+                                        settings_knowledge_base_status = gr.Dropdown(
+                                            label="状态",
+                                            choices=["active", "disabled"],
+                                            value=initial_settings_knowledge_base_status_value,
+                                            interactive=True,
+                                        )
+                                        settings_knowledge_base_is_default = gr.Checkbox(
+                                            label="设为默认",
+                                            value=initial_settings_knowledge_base_is_default,
+                                        )
                                 with gr.Row(elem_id="settings-knowledge-base-actions"):
-                                    settings_knowledge_base_save_button = gr.Button("保存知识库", variant="primary")
-                                    settings_knowledge_base_delete_button = gr.Button("删除知识库", variant="stop")
+                                    settings_knowledge_base_save_button = ui_button("保存知识库", variant="primary")
+                                    settings_knowledge_base_delete_button = ui_button("删除知识库", variant="stop")
                             settings_knowledge_base_result = gr.HTML(
                                 value=initial_settings_knowledge_base_result_html,
                                 elem_id="settings-knowledge-base-result",
                             )
                 with gr.Group(elem_id="settings-footer-panel"):
-                    with gr.Row(elem_id="settings-bottom-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            settings_result = gr.HTML(
-                                value=initial_settings_result_html,
-                                elem_id="settings-result-panel",
-                            )
+                    with gr.Group(elem_id="settings-footer-module"):
+                        settings_result = gr.HTML(
+                            value=initial_settings_result_html,
+                            elem_id="settings-result-panel",
+                        )
+                        with gr.Group(elem_id="settings-export-panel"):
                             with gr.Row(elem_id="settings-export-row"):
-                                settings_export_button = gr.Button("下载当前配置")
-                            settings_export_result = gr.HTML(
-                                value=format_operation_result_html(None, title="下载结果"),
-                                elem_id="settings-export-result",
-                            )
+                                settings_export_button = ui_button("下载当前配置")
+                        settings_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="settings-export-result",
+                        )
 
         document_knowledge_base.change(
             fn=change_document_knowledge_base_ui,
