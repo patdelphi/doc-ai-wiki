@@ -237,7 +237,6 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-evaluation-accordion" in elem_ids
     assert "quality-help-panel" in elem_ids
     assert "quality-template-panel" in elem_ids
-    assert "quality-bottom-help" in elem_ids
     assert "quality-progress-panel" in elem_ids
     assert "quality-result-panel" in elem_ids
     assert "quality-claim-list-panel" in elem_ids
@@ -264,8 +263,8 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
     assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-row")
     assert elem_ids.index("quality-evidence-row") < elem_ids.index("quality-history-row")
-    assert elem_ids.index("quality-history-row") < elem_ids.index("quality-evaluation-accordion")
-    assert elem_ids.index("quality-evaluation-accordion") < elem_ids.index("quality-bottom-help")
+    assert elem_ids.index("quality-history-row") < elem_ids.index("quality-bottom-row")
+    assert elem_ids.index("quality-bottom-row") < elem_ids.index("quality-evaluation-accordion")
 
 
 def test_create_ui_app_should_include_quality_dummy_workspace(tmp_path: Path) -> None:
@@ -456,9 +455,9 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     ]
 
     assert any("功能设置" in value for value in html_values)
-    assert visible_tab_labels == ["AI 质检", "AI 质检优化 Dummy", "人工审核", "知识库管理", "知识库检索", "功能设置"]
+    assert visible_tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
     assert len(dummy_tabs) == 1
-    assert dummy_tabs[0].get("props", {}).get("visible", True) is True
+    assert dummy_tabs[0].get("props", {}).get("visible", True) is False
     assert "settings-overview-panel" in elem_ids
     assert "settings-workspace-panel" in elem_ids
     assert "settings-knowledge-base-panel" in elem_ids

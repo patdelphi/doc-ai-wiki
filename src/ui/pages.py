@@ -112,7 +112,7 @@ UI_CSS = """
 #document-management-summary-row,
 #document-management-focus-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 14px !important;
 }
 #document-management-top-row > .gradio-column,
 #document-management-summary-row > .gradio-column,
@@ -126,15 +126,48 @@ UI_CSS = """
 #database-summary-panel {
   height: 100%;
 }
+#document-management-selector-panel,
+#document-summary-panel,
+#database-summary-panel,
+#document-register-result,
+#document-rebuild-result,
+#document-quality-report,
+#document-quality-checks,
+#document-quality-search-summary,
+#document-quality-search-detail,
+#document-quality-batch-summary,
+#document-quality-config-panel,
+#document-quality-config-result {
+  margin-top: 0;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 28%),
+    var(--block-background-fill);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+#document-management-help-panel,
+#document-summary-panel,
+#database-summary-panel,
+#document-register-result,
+#document-rebuild-result,
+#document-quality-report,
+#document-quality-checks,
+#document-quality-search-summary,
+#document-quality-search-detail,
+#document-quality-batch-summary,
+#document-quality-config-panel,
+#document-quality-config-result {
+  margin-top: 0;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
 #document-management-help-panel,
 #document-management-selector-panel {
   min-height: 220px;
-}
-#document-summary-panel,
-#database-summary-panel {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.08);
 }
 #document-summary-panel > div,
 #database-summary-panel > div {
@@ -145,9 +178,11 @@ UI_CSS = """
   width: 100%;
 }
 #document-current-panel {
-  border: 1px solid rgba(96, 165, 250, 0.36);
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.12), rgba(59, 130, 246, 0.05));
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 28%),
+    var(--block-background-fill);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
   position: relative;
   overflow: hidden;
   padding-left: 6px;
@@ -190,10 +225,10 @@ UI_CSS = """
   margin-top: 6px;
 }
 #document-current-detail > div {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.12);
-  padding: 6px 8px;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
 }
 #document-current-detail h3,
 #document-current-detail h4 {
@@ -221,11 +256,13 @@ UI_CSS = """
   font-size: 20px !important;
   font-weight: 700 !important;
   letter-spacing: 0.04em;
-  border-radius: 12px !important;
-  border: 1px solid rgba(148, 163, 184, 0.22) !important;
-  border-bottom: 2px solid rgba(96, 165, 250, 0.32) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 18px rgba(15, 23, 42, 0.08) !important;
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.14), rgba(71, 85, 105, 0.09)) !important;
+  border-radius: 18px !important;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.28) !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06) !important;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 30%),
+    var(--block-background-fill) !important;
 }
 #document-quality-accordion button span,
 #document-quality-accordion summary span {
@@ -241,6 +278,7 @@ UI_CSS = """
   padding-top: 6px;
 }
 #document-relationship-row,
+#document-current-actions-row,
 #database-pagination-row,
 #document-pagination-row,
 #document-management-actions-row,
@@ -256,6 +294,7 @@ UI_CSS = """
   margin-top: 4px !important;
 }
 #document-pagination-row button,
+#document-current-actions-row button,
 #document-management-actions-row button {
   min-height: 42px !important;
 }
@@ -271,7 +310,7 @@ UI_CSS = """
 #document-quality-batch-row,
 #document-quality-config-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 14px !important;
 }
 #document-management-actions-row > .gradio-column,
 #document-management-result-row > .gradio-column,
@@ -288,6 +327,15 @@ UI_CSS = """
   display: flex !important;
   flex-wrap: wrap !important;
   margin-top: 8px !important;
+}
+#document-current-actions-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  margin-top: 8px !important;
+}
+#document-current-actions-row > * {
+  flex: 1 1 180px !important;
+  min-width: 0 !important;
 }
 #document-management-actions-row > * {
   flex: 1 1 220px !important;
@@ -353,6 +401,22 @@ UI_CSS = """
 #document-quality-config-action-row button {
   width: 100% !important;
   min-height: 42px !important;
+}
+#document-management-help-panel > div,
+#document-summary-panel > div,
+#database-summary-panel > div,
+#document-register-result > div,
+#document-rebuild-result > div,
+#document-quality-report > div,
+#document-quality-checks > div,
+#document-quality-search-summary > div,
+#document-quality-search-detail > div,
+#document-quality-batch-summary > div,
+#document-quality-config-panel > div,
+#document-quality-config-result > div {
+  width: 100%;
+  border-left: none !important;
+  padding-left: 0 !important;
 }
 #settings-export-row,
 #quality-export-row,
@@ -425,6 +489,17 @@ UI_CSS = """
 #document-quality-batch-page-info {
   margin-top: 2px !important;
 }
+#database-page-info > div,
+#document-page-info > div,
+#document-quality-sections-page-info > div,
+#document-quality-chunks-page-info > div,
+#document-quality-search-page-info > div,
+#document-quality-batch-page-info > div {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.04);
+  color: var(--body-text-color-subdued);
+}
 #document-quality-config-form {
   padding: 12px !important;
 }
@@ -454,11 +529,20 @@ UI_CSS = """
 }
 #document-quality-batch-row,
 #document-quality-search-row {
-  gap: 10px !important;
+  gap: 14px !important;
 }
 #document-quality-batch-row > .gradio-column,
 #document-quality-search-row > .gradio-column {
   min-width: 0 !important;
+}
+#document-management-top-row .gradio-dropdown > div,
+#document-management-focus-row .gradio-dropdown > div,
+#document-quality-config-form .gradio-dropdown > div,
+#document-quality-config-form textarea,
+#document-quality-config-form input {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.04) !important;
 }
 #settings-export-result,
 #settings-export-result * {
@@ -475,11 +559,11 @@ UI_CSS = """
 #settings-workspace-panel,
 #settings-footer-panel {
   margin-top: 12px;
-  padding: 14px 16px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.02));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 #search-result-workspace > div,
 #quality-main-workspace > div,
@@ -497,16 +581,19 @@ UI_CSS = """
   align-self: stretch !important;
 }
 #search-input-panel {
-  border: none;
-  background: transparent;
-  border-radius: 0;
-  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 28%),
+    var(--block-background-fill);
+  border-radius: 22px;
+  padding: 18px;
   min-height: 220px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
-  gap: 10px;
+  gap: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 #search-input-panel > div,
 #search-help-panel > div {
@@ -520,17 +607,18 @@ UI_CSS = """
   margin-top: 0;
 }
 #search-result-workspace {
-  margin-top: 10px;
-  padding: 12px 14px;
+  margin-top: 12px;
 }
 #search-pagination-row {
-  margin-top: 4px !important;
+  margin-top: 6px !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
 }
 #search-page-info {
   margin-top: 2px !important;
 }
 #search-export-row {
-  margin-top: 8px !important;
+  margin-top: 0 !important;
 }
 #quality-top-row {
   align-items: stretch !important;
@@ -575,8 +663,7 @@ UI_CSS = """
 #quality-evidence-detail,
 #quality-history-panel,
 #quality-action-panel,
-#quality-evaluation-panel,
-#quality-bottom-help {
+#quality-evaluation-panel {
   margin-top: 0;
   padding: 18px;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -621,14 +708,13 @@ UI_CSS = """
 #quality-progress-panel > div,
 #quality-result-panel > div,
 #quality-claim-detail > div,
-#quality-evidence-detail > div,
-#quality-bottom-help > div {
+#quality-evidence-detail > div {
   height: 100%;
 }
 #quality-history-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 #quality-input-panel,
 #quality-history-panel > div {
@@ -664,12 +750,22 @@ UI_CSS = """
 #quality-evaluation-panel .gradio-dropdown {
   border-radius: 16px !important;
 }
+#quality-history-scope {
+  margin-top: 2px !important;
+  margin-bottom: 0 !important;
+}
 #quality-input-panel .gradio-dropdown > div,
 #quality-history-scope > div,
 #quality-evaluation-panel .gradio-dropdown > div {
   border-radius: 16px !important;
   border: 1px solid rgba(148, 163, 184, 0.24) !important;
   background: rgba(148, 163, 184, 0.04) !important;
+}
+#quality-history-panel .gradio-markdown,
+#quality-history-note,
+#quality-recent-table {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
 }
 #quality-input-panel label,
 #quality-evaluation-panel label,
@@ -722,7 +818,7 @@ UI_CSS = """
 #quality-recent-table > div,
 #quality-recent-table > div > div,
 #quality-recent-table > div > div > div {
-  min-height: 132px !important;
+  min-height: 0 !important;
 }
 #quality-claims-table table td,
 #quality-recent-table table td,
@@ -832,8 +928,7 @@ UI_CSS = """
   overflow: hidden !important;
 }
 #quality-evidence-detail,
-#quality-action-panel,
-#quality-bottom-help {
+#quality-action-panel {
   min-height: 136px;
 }
 #quality-relation-note {
@@ -859,25 +954,10 @@ UI_CSS = """
 #quality-evidence-detail > div,
 #quality-evaluation-help > div,
 #quality-evaluation-summary > div,
-#quality-bottom-help > div,
 #quality-export-result > div,
 #quality-evaluation-export-result > div {
-  border-left: 4px solid rgba(59, 130, 246, 0.58);
-  padding-left: 14px;
-}
-#quality-progress-panel > div {
-  border-left-color: rgba(34, 197, 94, 0.62);
-}
-#quality-result-panel > div,
-#quality-active-check > div {
-  border-left-color: rgba(245, 158, 11, 0.62);
-}
-#quality-evidence-detail > div {
-  border-left-color: rgba(96, 165, 250, 0.62);
-}
-#quality-export-result > div,
-#quality-evaluation-export-result > div {
-  border-left-color: rgba(34, 197, 94, 0.62);
+  border-left: none !important;
+  padding-left: 0 !important;
 }
 #quality-export-row,
 #quality-claim-pagination-row,
@@ -969,7 +1049,7 @@ UI_CSS = """
 }
 #review-top-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 14px !important;
 }
 #review-filter-row {
   align-items: stretch !important;
@@ -994,7 +1074,30 @@ UI_CSS = """
 #review-record-row,
 #review-evidence-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 14px !important;
+  margin-top: 8px !important;
+}
+#review-focus-panel {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#review-help-panel,
+#review-claim-detail,
+#review-record-detail,
+#review-evidence-detail,
+#review-action-panel,
+#review-result-panel,
+#review-export-result {
+  margin-top: 0;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.05), transparent 28%),
+    var(--block-background-fill);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 #review-action-panel {
   display: flex;
@@ -1045,7 +1148,9 @@ UI_CSS = """
 #review-processed-pagination-row,
 #review-evidence-pagination-row,
 #review-history-pagination-row {
-  margin-top: 4px !important;
+  margin-top: 6px !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
 }
 #review-action-buttons {
   display: flex !important;
@@ -1073,11 +1178,26 @@ UI_CSS = """
   line-height: 1.7 !important;
   vertical-align: top !important;
 }
+#review-pending-table table th,
+#review-processed-table table th,
+#review-history-table table th,
+#review-evidence-table table th {
+  font-size: 12px !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.06) !important;
+}
 #review-pending-table table tbody tr,
 #review-processed-table table tbody tr,
 #review-history-table table tbody tr,
 #review-evidence-table table tbody tr {
   transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+#review-pending-table table tbody tr:hover td,
+#review-processed-table table tbody tr:hover td,
+#review-history-table table tbody tr:hover td,
+#review-evidence-table table tbody tr:hover td {
+  background: rgba(148, 163, 184, 0.06) !important;
 }
 #review-pending-table button[aria-label="Select column"],
 #review-pending-table button[aria-label="Select row"],
@@ -1105,8 +1225,8 @@ UI_CSS = """
 #review-evidence-table tr:has(button:focus) td,
 #review-evidence-table tr:has(.selected) td,
 #review-evidence-table td.selected {
-  background: rgba(68, 68, 68, 0.22) !important;
-  box-shadow: inset 0 1px 0 0 rgba(68, 68, 68, 0.28), inset 0 -1px 0 0 rgba(68, 68, 68, 0.28);
+  background: rgba(127, 127, 127, 0.16) !important;
+  box-shadow: inset 0 1px 0 0 rgba(127, 127, 127, 0.22), inset 0 -1px 0 0 rgba(127, 127, 127, 0.22);
 }
 #review-pending-table tr:has(td:focus-within) td:first-child,
 #review-pending-table tr:has(button:focus) td:first-child,
@@ -1120,7 +1240,7 @@ UI_CSS = """
 #review-evidence-table tr:has(td:focus-within) td:first-child,
 #review-evidence-table tr:has(button:focus) td:first-child,
 #review-evidence-table tr:has(.selected) td:first-child {
-  box-shadow: inset 6px 0 0 0 rgba(68, 68, 68, 0.72) !important;
+  box-shadow: inset 6px 0 0 0 rgba(59, 130, 246, 0.52) !important;
 }
 #review-pending-table tr:has(td:focus-within) td,
 #review-pending-table tr:has(button:focus) td,
@@ -1131,6 +1251,44 @@ UI_CSS = """
 #review-evidence-table tr:has(td:focus-within) td,
 #review-evidence-table tr:has(button:focus) td {
   font-weight: 700 !important;
+}
+#review-filter-row .gradio-dropdown > div,
+#review-action-form .gradio-dropdown > div,
+#review-action-form textarea {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.04) !important;
+}
+#review-action-form textarea:focus {
+  border-color: rgba(59, 130, 246, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.10) !important;
+}
+#review-filter-row label,
+#review-action-form label {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+#review-pending-page-info > div,
+#review-processed-page-info > div,
+#review-evidence-page-info > div,
+#review-history-page-info > div {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.04);
+  color: var(--body-text-color-subdued);
+}
+#review-help-panel > div,
+#review-claim-detail > div,
+#review-record-detail > div,
+#review-evidence-detail > div,
+#review-result-panel > div,
+#review-export-result > div {
+  border-left: none !important;
+  padding-left: 0 !important;
+}
+#review-action-panel .gradio-button {
+  min-height: 42px !important;
+  letter-spacing: 0.02em;
 }
 #review-claim-detail,
 #review-record-detail,
@@ -1148,8 +1306,42 @@ UI_CSS = """
   line-height: 1.7 !important;
   vertical-align: top !important;
 }
+#search-top-row,
+#search-result-row,
+#search-export-row {
+  gap: 14px !important;
+}
+#search-help-panel,
+#search-result-summary,
+#search-result-detail {
+  margin-top: 0;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#search-help-panel > div,
+#search-result-summary > div,
+#search-result-detail > div,
+#search-export-result > div {
+  border-left: none;
+  padding-left: 0;
+}
+#search-action-panel {
+  margin-top: 10px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#search-action-panel > div {
+  width: 100%;
+}
 #search-result-row > .gradio-column {
   min-width: 0 !important;
+}
+#search-result-row {
+  margin-top: 10px !important;
 }
 #search-results-table,
 #search-results-table > div,
@@ -1189,6 +1381,51 @@ UI_CSS = """
   box-shadow: inset 3px 0 0 0 rgba(127, 127, 127, 0.45) !important;
 }
 #search-results-table mark,
+#search-results-table table th {
+  font-size: 12px !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.06) !important;
+}
+#search-results-table table tbody tr:hover td {
+  background: rgba(148, 163, 184, 0.06) !important;
+}
+#search-top-row .gradio-dropdown > div,
+#search-top-row textarea,
+#search-top-row input {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.04) !important;
+}
+#search-top-row textarea:focus,
+#search-top-row input:focus {
+  border-color: rgba(59, 130, 246, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.10) !important;
+}
+#search-page-info > div {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.04);
+  color: var(--body-text-color-subdued);
+}
+#search-action-panel .gradio-button,
+#search-input-panel .gradio-button {
+  width: auto !important;
+  min-width: 160px !important;
+  min-height: 40px !important;
+}
+#search-export-row {
+  justify-content: flex-start !important;
+  padding: 6px 2px 0 2px !important;
+  margin: 0 !important;
+}
+#search-export-result {
+  margin-top: 10px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
 #search-result-detail mark {
   background: rgba(245, 158, 11, 0.20);
   color: #b45309;
@@ -1219,7 +1456,7 @@ UI_CSS = """
 #settings-bottom-row,
 #settings-knowledge-base-row {
   align-items: stretch !important;
-  gap: 10px !important;
+  gap: 14px !important;
 }
 #settings-top-row > .gradio-column,
 #settings-main-row > .gradio-column,
@@ -1238,24 +1475,25 @@ UI_CSS = """
 }
 #settings-knowledge-base-panel {
   margin-top: 10px;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 #settings-footer-panel {
   margin-top: 10px;
 }
 #settings-workspace-panel,
 #settings-knowledge-base-panel {
-  padding: 2px 0 0 0 !important;
+  padding: 0 !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
 }
 #settings-template-list-panel,
 #settings-knowledge-base-list-panel {
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid rgba(96, 165, 250, 0.24);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.02));
+  margin-top: 0;
+  padding: 16px 18px 18px !important;
 }
 #settings-help-panel,
 #settings-runtime-panel,
@@ -1268,7 +1506,18 @@ UI_CSS = """
 #settings-result-panel,
 #settings-export-result,
 #settings-knowledge-base-result {
-  height: 100%;
+  margin-top: 0;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.04), transparent 28%),
+    var(--block-background-fill);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+#settings-main-row,
+#settings-knowledge-base-row {
+  margin-top: 10px !important;
 }
 #settings-help-panel > div,
 #settings-runtime-panel > div,
@@ -1283,6 +1532,16 @@ UI_CSS = """
 #settings-knowledge-base-result > div {
   height: 100%;
 }
+#settings-help-panel > div,
+#settings-runtime-panel > div,
+#settings-template-detail > div,
+#settings-knowledge-base-detail > div,
+#settings-result-panel > div,
+#settings-export-result > div,
+#settings-knowledge-base-result > div {
+  border-left: none;
+  padding-left: 0;
+}
 #settings-help-panel,
 #settings-runtime-panel {
   min-height: 220px;
@@ -1291,17 +1550,134 @@ UI_CSS = """
 #settings-knowledge-base-detail {
   min-height: 176px;
 }
+#settings-template-detail > div > div,
+#settings-knowledge-base-detail > div > div {
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: auto !important;
+}
+#settings-template-detail > div > div > div:first-child > div:last-child,
+#settings-knowledge-base-detail > div > div > div:first-child > div:last-child {
+  display: none !important;
+}
+#settings-template-detail > div > div ul,
+#settings-knowledge-base-detail > div > div ul {
+  margin-top: 10px !important;
+}
+#settings-template-form,
+#settings-knowledge-base-form {
+  padding: 18px 20px !important;
+}
+#settings-template-form .gradio-markdown,
+#settings-knowledge-base-form .gradio-markdown {
+  margin: 0 !important;
+}
+#settings-template-form > div > .gradio-markdown:not(:first-child),
+#settings-knowledge-base-form > div > .gradio-markdown:not(:first-child) {
+  margin-top: 8px !important;
+  padding-top: 10px !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+#settings-template-form .gradio-markdown h3,
+#settings-knowledge-base-form .gradio-markdown h3 {
+  margin: 0 0 8px 0 !important;
+  font-size: 15px !important;
+  line-height: 1.35 !important;
+}
+#settings-template-form > div,
+#settings-knowledge-base-form > div {
+  gap: 10px !important;
+}
+#settings-template-form .gradio-row,
+#settings-knowledge-base-form .gradio-row {
+  gap: 10px !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+#settings-basic-group,
+#settings-policy-group,
+#settings-prompt-group {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#settings-basic-group > div,
+#settings-policy-group > div,
+#settings-prompt-group > div {
+  padding: 0 !important;
+  gap: 10px !important;
+}
+#settings-template-form .gradio-textbox,
+#settings-template-form .gradio-number,
+#settings-template-form .gradio-dropdown,
+#settings-template-form .gradio-checkbox,
+#settings-knowledge-base-form .gradio-textbox,
+#settings-knowledge-base-form .gradio-number,
+#settings-knowledge-base-form .gradio-dropdown,
+#settings-knowledge-base-form .gradio-checkbox {
+  margin: 0 !important;
+}
+#settings-template-form .gradio-checkbox,
+#settings-knowledge-base-form .gradio-checkbox {
+  padding-top: 2px !important;
+}
 #settings-template-table {
-  min-height: 136px;
+  min-height: 0;
+  margin-top: 0 !important;
+}
+#settings-template-table .label-wrap,
+#settings-template-table > label,
+#settings-knowledge-base-table .label-wrap,
+#settings-knowledge-base-table > label {
+  display: none !important;
 }
 #settings-template-table > div,
 #settings-template-table > div > div,
 #settings-template-table > div > div > div {
-  min-height: 120px !important;
+  min-height: 0 !important;
+}
+#settings-template-table .table-wrap {
+  margin-top: 0 !important;
+}
+#settings-template-table button[aria-label="Copy table data"],
+#settings-template-table button[aria-label="Fullscreen"] {
+  display: none !important;
 }
 #settings-knowledge-base-table {
   gap: 6px !important;
   min-height: 72px;
+}
+#settings-template-list-header,
+#settings-knowledge-base-list-header {
+  margin-bottom: 12px !important;
+}
+#settings-template-list-header > div,
+#settings-knowledge-base-list-header > div {
+  padding: 0 !important;
+}
+.settings-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-list-header__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--body-text-color);
+}
+.settings-list-header__desc {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--body-text-color-subdued);
 }
 #settings-result-panel,
 #settings-export-result,
@@ -1328,6 +1704,161 @@ UI_CSS = """
 #settings-knowledge-base-actions > * {
   flex: 1 1 160px !important;
   min-width: 0 !important;
+}
+#settings-list-actions button,
+#settings-form-actions button,
+#settings-knowledge-base-list-actions button,
+#settings-knowledge-base-actions button,
+#settings-export-row button {
+  width: auto !important;
+  min-width: 160px !important;
+  flex: 0 0 auto !important;
+}
+#settings-list-actions,
+#settings-form-actions,
+#settings-knowledge-base-list-actions,
+#settings-knowledge-base-actions,
+#settings-export-row {
+  padding: 6px 2px 0 2px !important;
+  margin-top: 4px !important;
+}
+#settings-form-actions,
+#settings-knowledge-base-actions {
+  justify-content: flex-end !important;
+  gap: 12px !important;
+  padding: 12px 0 0 0 !important;
+  margin-top: 10px !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+#settings-form-actions > *,
+#settings-knowledge-base-actions > * {
+  flex: 0 0 auto !important;
+}
+#settings-form-actions button,
+#settings-knowledge-base-actions button {
+  min-width: 144px !important;
+}
+#settings-template-form .gradio-checkbox label,
+#settings-knowledge-base-form .gradio-checkbox label {
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+#settings-template-page-info > div,
+#settings-knowledge-base-page-info > div {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.04);
+  color: var(--body-text-color-subdued);
+}
+#settings-main-row .gradio-dropdown > div,
+#settings-main-row textarea,
+#settings-main-row input,
+#settings-knowledge-base-row .gradio-dropdown > div,
+#settings-knowledge-base-row textarea,
+#settings-knowledge-base-row input {
+  border-radius: 16px !important;
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(148, 163, 184, 0.04) !important;
+}
+#settings-main-row label,
+#settings-knowledge-base-row label {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+#settings-export-row {
+  justify-content: flex-start !important;
+  margin-top: 0 !important;
+}
+#settings-export-result {
+  margin-top: 10px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#search-results-table .label-wrap,
+#quality-evidence-table .label-wrap,
+#quality-recent-table .label-wrap,
+#quality-evaluation-table .label-wrap,
+#review-pending-table .label-wrap,
+#review-processed-table .label-wrap,
+#review-evidence-table .label-wrap,
+#review-history-table .label-wrap,
+#database-summary-table .label-wrap,
+#document-table .label-wrap,
+#document-quality-sections-table .label-wrap,
+#document-quality-chunks-table .label-wrap,
+#document-quality-search-results .label-wrap,
+#document-quality-batch-table .label-wrap {
+  padding: 0 0 2px 0 !important;
+  margin: 0 !important;
+  min-height: auto !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+}
+#search-results-table > div,
+#quality-evidence-table > div,
+#quality-recent-table > div,
+#quality-evaluation-table > div,
+#review-pending-table > div,
+#review-processed-table > div,
+#review-evidence-table > div,
+#review-history-table > div,
+#database-summary-table > div,
+#document-table > div,
+#document-quality-sections-table > div,
+#document-quality-chunks-table > div,
+#document-quality-search-results > div,
+#document-quality-batch-table > div {
+  gap: 0 !important;
+}
+#search-results-table .table-wrap,
+#quality-evidence-table .table-wrap,
+#quality-recent-table .table-wrap,
+#quality-evaluation-table .table-wrap,
+#review-pending-table .table-wrap,
+#review-processed-table .table-wrap,
+#review-evidence-table .table-wrap,
+#review-history-table .table-wrap,
+#database-summary-table .table-wrap,
+#document-table .table-wrap,
+#document-quality-sections-table .table-wrap,
+#document-quality-chunks-table .table-wrap,
+#document-quality-search-results .table-wrap,
+#document-quality-batch-table .table-wrap {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+#search-results-table button[aria-label="Copy table data"],
+#search-results-table button[aria-label="Fullscreen"],
+#quality-evidence-table button[aria-label="Copy table data"],
+#quality-evidence-table button[aria-label="Fullscreen"],
+#quality-recent-table button[aria-label="Copy table data"],
+#quality-recent-table button[aria-label="Fullscreen"],
+#quality-evaluation-table button[aria-label="Copy table data"],
+#quality-evaluation-table button[aria-label="Fullscreen"],
+#review-pending-table button[aria-label="Copy table data"],
+#review-pending-table button[aria-label="Fullscreen"],
+#review-processed-table button[aria-label="Copy table data"],
+#review-processed-table button[aria-label="Fullscreen"],
+#review-evidence-table button[aria-label="Copy table data"],
+#review-evidence-table button[aria-label="Fullscreen"],
+#review-history-table button[aria-label="Copy table data"],
+#review-history-table button[aria-label="Fullscreen"],
+#database-summary-table button[aria-label="Copy table data"],
+#database-summary-table button[aria-label="Fullscreen"],
+#document-table button[aria-label="Copy table data"],
+#document-table button[aria-label="Fullscreen"],
+#document-quality-sections-table button[aria-label="Copy table data"],
+#document-quality-sections-table button[aria-label="Fullscreen"],
+#document-quality-chunks-table button[aria-label="Copy table data"],
+#document-quality-chunks-table button[aria-label="Fullscreen"],
+#document-quality-search-results button[aria-label="Copy table data"],
+#document-quality-search-results button[aria-label="Fullscreen"],
+#document-quality-batch-table button[aria-label="Copy table data"],
+#document-quality-batch-table button[aria-label="Fullscreen"] {
+  display: none !important;
 }
 #quality-dummy-row-1,
 #quality-dummy-row-2,
@@ -6078,6 +6609,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=9,
                             label="证据列表",
+                            buttons=[],
                             elem_id="quality-evidence-table",
                             value=initial_claim_evidence_table_rows,
                             max_height=420,
@@ -6118,6 +6650,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=TABLE_PAGE_SIZE,
                             column_count=9,
                             label="最近质检记录",
+                            buttons=[],
                             elem_id="quality-recent-table",
                             value=initial_recent_quality_table_rows,
                             max_height=420,
@@ -6129,14 +6662,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=format_table_pagination_html(initial_recent_quality_page_info),
                             elem_id="quality-recent-page-info",
                         )
+                with gr.Row(elem_id="quality-bottom-row"):
                     with gr.Column(scale=1, elem_id="quality-action-panel"):
                         gr.Markdown("### 5. 下载结果与动作")
                         with gr.Row(elem_id="quality-export-row"):
                             quality_export_button = gr.Button("下载结果")
-                            quality_export_result = gr.HTML(
-                                value=format_operation_result_html(None, title="下载结果"),
-                                elem_id="quality-export-result",
-                            )
+                        quality_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="quality-export-result",
+                        )
                 with gr.Accordion("效果评测", open=False, elem_id="quality-evaluation-accordion"):
                     with gr.Column(scale=1, elem_id="quality-evaluation-panel"):
                         quality_evaluation_help = gr.HTML(
@@ -6187,6 +6721,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=16,
                             label="效果评测明细",
+                            buttons=[],
                             elem_id="quality-evaluation-table",
                             value=initial_quality_evaluation_table_rows,
                         )
@@ -6197,14 +6732,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             value=format_table_pagination_html(initial_quality_evaluation_page_info),
                             elem_id="quality-evaluation-page-info",
                         )
-                with gr.Row(elem_id="quality-bottom-row", equal_height=True):
-                    with gr.Column(scale=1):
-                        quality_bottom_help = gr.HTML(
-                            value=format_quality_help_html(),
-                            elem_id="quality-bottom-help",
-                        )
 
-            with gr.Tab("AI 质检优化 Dummy", visible=True):
+            with gr.Tab("AI 质检优化 Dummy", visible=False):
                 with gr.Row(elem_id="quality-dummy-row-1", equal_height=True):
                     with gr.Column(scale=1, elem_id="quality-dummy-intake-panel"):
                         gr.Markdown("### 1. 输入与执行")
@@ -6442,7 +6971,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_history_page_state = gr.State(initial_review_history_page)
                 with gr.Group(elem_id="review-focus-panel"):
                     with gr.Row(elem_id="review-top-row", equal_height=True):
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=1):
                             with gr.Row(elem_id="review-filter-row"):
                                 review_knowledge_base = gr.Dropdown(
                                     label="当前知识库",
@@ -6463,6 +6992,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     value=review_risk_choices[0],
                                     interactive=True,
                                 )
+                            review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
                             review_pending_candidates = gr.Dataframe(
                                 headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
                                 datatype=["str"] * 9,
@@ -6470,6 +7000,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 row_count=0,
                                 column_count=9,
                                 label="待处理记录",
+                                buttons=[],
                                 elem_id="review-pending-table",
                                 value=initial_review_pending_table_rows,
                             )
@@ -6487,6 +7018,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 row_count=0,
                                 column_count=9,
                                 label="已处理 Claim",
+                                buttons=[],
                                 elem_id="review-processed-table",
                                 value=initial_review_processed_table_rows,
                             )
@@ -6497,8 +7029,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=format_table_pagination_html(initial_review_processed_page_info),
                                 elem_id="review-processed-page-info",
                             )
-                        with gr.Column(scale=4):
-                            review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
                     with gr.Row(elem_id="review-summary-row", equal_height=True):
                         with gr.Column(scale=5):
                             review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
@@ -6516,6 +7046,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=9,
                             label="关联证据列表",
+                            buttons=[],
                             elem_id="review-evidence-table",
                             value=initial_review_evidence_table_rows,
                         )
@@ -6564,6 +7095,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             row_count=0,
                             column_count=9,
                             label="已审核记录",
+                            buttons=[],
                             elem_id="review-history-table",
                             value=initial_review_history_table_rows,
                         )
@@ -6611,7 +7143,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Group(elem_id="database-summary-panel"):
                             database_summary = gr.HTML(value=initial_database_summary)
                 with gr.Row(elem_id="document-management-focus-row"):
-                    with gr.Column(scale=6):
+                    with gr.Column(scale=1):
                         with gr.Group(elem_id="document-current-panel"):
                             gr.Markdown("### 当前选中文档", elem_id="document-current-title")
                             gr.HTML(
@@ -6634,23 +7166,28 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     elem_id="document-target-knowledge-base",
                                 )
                                 move_document_button = gr.Button("调整当前文档归属", elem_id="document-move-button")
-                    with gr.Column(scale=4):
-                        database_summary_table = gr.Dataframe(
-                            headers=["序号", "指标", "数量"],
-                            datatype=["str", "str", "str"],
-                            interactive=False,
-                            row_count=0,
-                            column_count=3,
-                            label="数据库统计",
-                            value=initial_database_table_rows,
-                        )
-                        with gr.Row(elem_id="database-pagination-row"):
-                            database_prev_button = gr.Button("上一页")
-                            database_next_button = gr.Button("下一页")
-                        database_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_database_page_info),
-                            elem_id="database-page-info",
-                        )
+                            with gr.Row(elem_id="document-current-actions-row", equal_height=True):
+                                register_button = gr.Button("注册当前文档", interactive=initial_document_state["register_interactive"])
+                                rebuild_button = gr.Button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
+                                status_button = gr.Button("刷新状态")
+                database_summary_table = gr.Dataframe(
+                    headers=["序号", "指标", "数量"],
+                    datatype=["str", "str", "str"],
+                    interactive=False,
+                    row_count=0,
+                    column_count=3,
+                    label="数据库统计",
+                    buttons=[],
+                    elem_id="database-summary-table",
+                    value=initial_database_table_rows,
+                )
+                with gr.Row(elem_id="database-pagination-row"):
+                    database_prev_button = gr.Button("上一页")
+                    database_next_button = gr.Button("下一页")
+                database_page_info = gr.HTML(
+                    value=format_table_pagination_html(initial_database_page_info),
+                    elem_id="database-page-info",
+                )
                 document_table = gr.Dataframe(
                     headers=["序号", "文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
                     datatype=["str"] * 11,
@@ -6658,6 +7195,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     row_count=0,
                     column_count=11,
                     label="现有文档列表",
+                    buttons=[],
+                    elem_id="document-table",
                     value=initial_document_table_rows,
                 )
                 with gr.Row(elem_id="document-pagination-row"):
@@ -6668,10 +7207,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     elem_id="document-page-info",
                 )
                 with gr.Row(elem_id="document-management-actions-row", equal_height=True):
-                    register_button = gr.Button("注册当前文档", interactive=initial_document_state["register_interactive"])
                     register_all_button = gr.Button("注册全部待处理文档")
-                    rebuild_button = gr.Button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
-                    status_button = gr.Button("刷新状态")
                 with gr.Row(elem_id="document-management-result-row", equal_height=True):
                     with gr.Column(scale=1):
                         register_result = gr.HTML(
@@ -6712,6 +7248,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     row_count=0,
                                     column_count=6,
                                     label="章节抽样",
+                                    buttons=[],
                                     elem_id="document-quality-sections-table",
                                     value=initial_document_quality_sections_table_rows,
                                 )
@@ -6730,6 +7267,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     row_count=0,
                                     column_count=7,
                                     label="分块抽样",
+                                    buttons=[],
                                     elem_id="document-quality-chunks-table",
                                     value=initial_document_quality_chunks_table_rows,
                                 )
@@ -6770,6 +7308,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     row_count=0,
                                     column_count=6,
                                     label="文档内检索结果",
+                                    buttons=[],
                                     elem_id="document-quality-search-results",
                                     value=initial_document_quality_search_table_rows,
                                 )
@@ -6811,6 +7350,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     row_count=0,
                                     column_count=10,
                                     label="批量质检结果",
+                                    buttons=[],
                                     elem_id="document-quality-batch-table",
                                     value=initial_document_quality_batch_table_rows,
                                 )
@@ -6902,13 +7442,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     with gr.Column(scale=4):
                         search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
                 with gr.Group(elem_id="search-result-workspace"):
-                    search_result_summary = gr.HTML(value=format_search_summary_html(None), elem_id="search-result-summary")
                     search_result_state = gr.State([])
                     search_query_state = gr.State("")
                     search_selected_row_state = gr.State({})
                     search_page_state = gr.State(initial_search_page)
+                    search_result_summary = gr.HTML(
+                        value=format_search_summary_html(None),
+                        elem_id="search-result-summary",
+                    )
                     with gr.Row(elem_id="search-result-row"):
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=1):
                             search_result = gr.Dataframe(
                                 headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
                                 datatype=["markdown"] * 6,
@@ -6916,6 +7459,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 row_count=0,
                                 column_count=6,
                                 label="检索结果列表",
+                                buttons=[],
                                 elem_id="search-results-table",
                                 value=initial_search_table_rows,
                             )
@@ -6926,14 +7470,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 value=format_table_pagination_html(initial_search_page_info),
                                 elem_id="search-page-info",
                             )
-                        with gr.Column(scale=4):
-                            search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
-                    with gr.Row(elem_id="search-export-row"):
-                        search_export_button = gr.Button("下载结果")
-                    search_export_result = gr.HTML(
-                        value=format_operation_result_html(None, title="下载结果"),
-                        elem_id="search-export-result",
-                    )
+                    search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
+                    with gr.Group(elem_id="search-action-panel"):
+                        with gr.Row(elem_id="search-export-row"):
+                            search_export_button = gr.Button("下载结果")
+                        search_export_result = gr.HTML(
+                            value=format_operation_result_html(None, title="下载结果"),
+                            elem_id="search-export-result",
+                        )
 
             with gr.Tab("功能设置"):
                 settings_template_state = gr.State(initial_settings_template_state)
@@ -6949,33 +7493,47 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Column(scale=4):
                             settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
                 with gr.Group(elem_id="settings-workspace-panel"):
+                    with gr.Group(elem_id="settings-template-list-panel"):
+                        gr.HTML(
+                            value="""
+                            <div class="settings-list-header">
+                              <div>
+                                <h3 class="settings-list-header__title">模板列表</h3>
+                                <p class="settings-list-header__desc">先在这里选模板，再去右侧查看详情和编辑，避免标题贴角和工具栏占位过高。</p>
+                              </div>
+                            </div>
+                            """,
+                            elem_id="settings-template-list-header",
+                        )
+                        settings_template_table = gr.Dataframe(
+                            headers=["序号", "模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
+                            datatype=["str"] * 7,
+                            interactive=False,
+                            row_count=0,
+                            column_count=7,
+                            label="模板列表",
+                            show_label=False,
+                            buttons=[],
+                            elem_id="settings-template-table",
+                            value=initial_settings_template_table_rows,
+                        )
+                        with gr.Row(elem_id="settings-pagination-row"):
+                            settings_template_prev_button = gr.Button("上一页")
+                            settings_template_next_button = gr.Button("下一页")
+                        settings_template_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_settings_template_page_info),
+                            elem_id="settings-template-page-info",
+                        )
+                        with gr.Row(elem_id="settings-list-actions"):
+                            settings_new_button = gr.Button("新建模板")
+                            settings_refresh_button = gr.Button("刷新模板")
                     with gr.Row(elem_id="settings-main-row"):
-                        with gr.Column(scale=4, elem_id="settings-template-list-panel"):
-                            settings_template_table = gr.Dataframe(
-                                headers=["序号", "模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
-                                datatype=["str"] * 7,
-                                interactive=False,
-                                row_count=0,
-                                column_count=7,
-                                label="模板列表",
-                                elem_id="settings-template-table",
-                                value=initial_settings_template_table_rows,
-                            )
-                            with gr.Row(elem_id="settings-pagination-row"):
-                                settings_template_prev_button = gr.Button("上一页")
-                                settings_template_next_button = gr.Button("下一页")
-                            settings_template_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_settings_template_page_info),
-                                elem_id="settings-template-page-info",
-                            )
-                            with gr.Row(elem_id="settings-list-actions"):
-                                settings_new_button = gr.Button("新建模板")
-                                settings_refresh_button = gr.Button("刷新模板")
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=4):
                             settings_template_detail = gr.HTML(
                                 value=initial_settings_template_detail_html,
                                 elem_id="settings-template-detail",
                             )
+                        with gr.Column(scale=5):
                             with gr.Group(elem_id="settings-template-form"):
                                 gr.Markdown("### 基础信息")
                                 with gr.Group(elem_id="settings-basic-group"):
@@ -7012,29 +7570,41 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     settings_save_button = gr.Button("保存模板", variant="primary")
                                     settings_delete_button = gr.Button("删除模板", variant="stop")
                 with gr.Group(elem_id="settings-knowledge-base-panel"):
+                    with gr.Group(elem_id="settings-knowledge-base-list-panel"):
+                        gr.HTML(
+                            value="""
+                            <div class="settings-list-header">
+                              <div>
+                                <h3 class="settings-list-header__title">知识库列表</h3>
+                                <p class="settings-list-header__desc">先选中目标知识库，再在右侧维护详情与默认状态，保持操作路径稳定。</p>
+                              </div>
+                            </div>
+                            """,
+                            elem_id="settings-knowledge-base-list-header",
+                        )
+                        settings_knowledge_base_table = gr.Radio(
+                            label="知识库列表",
+                            elem_id="settings-knowledge-base-table",
+                            choices=initial_settings_knowledge_base_choices,
+                            value=initial_settings_knowledge_base_selected_choice,
+                        )
+                        with gr.Row(elem_id="settings-knowledge-base-pagination-row"):
+                            settings_knowledge_base_prev_button = gr.Button("上一页")
+                            settings_knowledge_base_next_button = gr.Button("下一页")
+                        settings_knowledge_base_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_settings_knowledge_base_page_info),
+                            elem_id="settings-knowledge-base-page-info",
+                        )
+                        with gr.Row(elem_id="settings-knowledge-base-list-actions"):
+                            settings_knowledge_base_new_button = gr.Button("新建知识库")
+                            settings_knowledge_base_refresh_button = gr.Button("刷新知识库")
                     with gr.Row(elem_id="settings-knowledge-base-row"):
-                        with gr.Column(scale=4, elem_id="settings-knowledge-base-list-panel"):
-                            settings_knowledge_base_table = gr.Radio(
-                                label="知识库列表",
-                                elem_id="settings-knowledge-base-table",
-                                choices=initial_settings_knowledge_base_choices,
-                                value=initial_settings_knowledge_base_selected_choice,
-                            )
-                            with gr.Row(elem_id="settings-knowledge-base-pagination-row"):
-                                settings_knowledge_base_prev_button = gr.Button("上一页")
-                                settings_knowledge_base_next_button = gr.Button("下一页")
-                            settings_knowledge_base_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_settings_knowledge_base_page_info),
-                                elem_id="settings-knowledge-base-page-info",
-                            )
-                            with gr.Row(elem_id="settings-knowledge-base-list-actions"):
-                                settings_knowledge_base_new_button = gr.Button("新建知识库")
-                                settings_knowledge_base_refresh_button = gr.Button("刷新知识库")
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=4):
                             settings_knowledge_base_detail = gr.HTML(
                                 value=initial_settings_knowledge_base_detail_html,
                                 elem_id="settings-knowledge-base-detail",
                             )
+                        with gr.Column(scale=5):
                             with gr.Group(elem_id="settings-knowledge-base-form"):
                                 with gr.Row():
                                     settings_knowledge_base_id = gr.Textbox(
@@ -7072,12 +7642,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             )
                 with gr.Group(elem_id="settings-footer-panel"):
                     with gr.Row(elem_id="settings-bottom-row", equal_height=True):
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=1):
                             settings_result = gr.HTML(
                                 value=initial_settings_result_html,
                                 elem_id="settings-result-panel",
                             )
-                        with gr.Column(scale=4):
                             with gr.Row(elem_id="settings-export-row"):
                                 settings_export_button = gr.Button("下载当前配置")
                             settings_export_result = gr.HTML(
