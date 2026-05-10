@@ -467,12 +467,10 @@ UI_CSS = """
 #search-export-row > * {
   min-width: 0 !important;
 }
-#settings-export-row button,
-#quality-export-row button,
-#search-export-row button {
-  width: auto !important;
-  min-width: 180px !important;
-  flex: 0 0 auto !important;
+#search-export-row,
+#quality-export-row {
+  justify-content: flex-start !important;
+  gap: 10px !important;
 }
 #settings-export-result,
 #quality-export-result,
@@ -1537,12 +1535,6 @@ UI_CSS = """
   background: rgba(148, 163, 184, 0.04);
   color: var(--body-text-color-subdued);
 }
-#search-action-panel .gradio-button,
-#search-input-panel .gradio-button {
-  width: auto !important;
-  min-width: 160px !important;
-  min-height: 40px !important;
-}
 #search-export-row {
   justify-content: flex-start !important;
   padding: 6px 2px 0 2px !important;
@@ -1878,15 +1870,6 @@ UI_CSS = """
   flex: 0 0 auto !important;
   min-width: 0 !important;
 }
-#settings-list-actions button,
-#settings-form-actions button,
-#settings-knowledge-base-list-actions button,
-#settings-knowledge-base-actions button,
-#settings-export-row button {
-  width: auto !important;
-  min-width: 160px !important;
-  flex: 0 0 auto !important;
-}
 #settings-list-actions,
 #settings-form-actions,
 #settings-knowledge-base-list-actions,
@@ -1907,10 +1890,6 @@ UI_CSS = """
 #settings-form-actions > *,
 #settings-knowledge-base-actions > * {
   flex: 0 0 auto !important;
-}
-#settings-form-actions button,
-#settings-knowledge-base-actions button {
-  min-width: 144px !important;
 }
 #settings-template-form .gradio-checkbox label,
 #settings-knowledge-base-form .gradio-checkbox label {
@@ -2221,10 +2200,6 @@ UI_CSS = """
 }
 .quality-dummy-highlight strong {
   color: var(--body-text-color);
-}
-#quality-dummy-action-panel .gradio-button,
-#quality-dummy-intake-panel .gradio-button {
-  width: auto !important;
 }
 #quality-dummy-action-panel .gradio-row,
 #quality-dummy-intake-panel .gradio-row {
