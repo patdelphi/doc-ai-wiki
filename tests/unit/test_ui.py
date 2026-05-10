@@ -230,9 +230,9 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-template-row" in elem_ids
     assert "quality-summary-row" in elem_ids
     assert "quality-claim-row" in elem_ids
-    assert "quality-evidence-row" in elem_ids
-    assert "quality-history-row" in elem_ids
-    assert "quality-bottom-row" in elem_ids
+    assert "quality-evidence-list-panel" in elem_ids
+    assert "quality-action-panel" in elem_ids
+    assert "quality-history-panel" in elem_ids
     assert "quality-evaluation-action-row" in elem_ids
     assert "quality-evaluation-accordion" in elem_ids
     assert "quality-help-panel" in elem_ids
@@ -240,13 +240,10 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-progress-panel" in elem_ids
     assert "quality-result-panel" in elem_ids
     assert "quality-claim-list-panel" in elem_ids
-    assert "quality-evidence-list-panel" in elem_ids
-    assert "quality-action-panel" in elem_ids
     assert "quality-evaluation-panel" in elem_ids
     assert "quality-knowledge-base" in elem_ids
     assert "quality-claims-table" in elem_ids
     assert "quality-recent-table" in elem_ids
-    assert "quality-history-panel" in elem_ids
     assert "quality-history-note" in elem_ids
     assert "quality-history-scope" in elem_ids
     assert "quality-evidence-table" in elem_ids
@@ -260,11 +257,13 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert evidence_tables and evidence_tables[0].get("max_height") == 420
     assert recent_tables and recent_tables[0].get("max_height") == 420
     assert recent_tables[0].get("column_count", [])[0] == 9
+    # 验证面板顺序：summary → claim → evidence → history → action → evaluation
     assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
-    assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-row")
-    assert elem_ids.index("quality-evidence-row") < elem_ids.index("quality-history-row")
-    assert elem_ids.index("quality-history-row") < elem_ids.index("quality-bottom-row")
-    assert elem_ids.index("quality-bottom-row") < elem_ids.index("quality-evaluation-accordion")
+    assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-list-panel")
+    assert elem_ids.index("quality-evidence-list-panel") < elem_ids.index("quality-evidence-detail")
+    assert elem_ids.index("quality-evidence-detail") < elem_ids.index("quality-history-panel")
+    assert elem_ids.index("quality-history-panel") < elem_ids.index("quality-action-panel")
+    assert elem_ids.index("quality-action-panel") < elem_ids.index("quality-evaluation-accordion")
 
 
 def test_create_ui_app_should_include_quality_dummy_workspace(tmp_path: Path) -> None:
@@ -638,8 +637,6 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert layout_components["document-quality-result-row"].get("equal_height") in (None, False)
     assert layout_components["document-quality-batch-row"].get("equal_height") in (None, False)
     assert layout_components["document-quality-config-row"].get("equal_height") in (None, False)
-    assert layout_components["quality-evidence-row"].get("equal_height") in (None, False)
-    assert layout_components["quality-history-row"].get("equal_height") in (None, False)
     assert layout_components["search-result-row"].get("equal_height") in (None, False)
     assert layout_components["settings-main-row"].get("equal_height") in (None, False)
     assert layout_components["settings-knowledge-base-row"].get("equal_height") in (None, False)
@@ -2119,19 +2116,17 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#quality-template-row" in UI_CSS
     assert "#quality-summary-row" in UI_CSS
     assert "#quality-claim-row" in UI_CSS
-    assert "#quality-evidence-row" in UI_CSS
-    assert "#quality-history-row" in UI_CSS
     assert "#quality-input-panel" in UI_CSS
     assert "#quality-history-panel" in UI_CSS
+    assert "#quality-action-panel" in UI_CSS
+    assert "#quality-evidence-list-panel" in UI_CSS
+    assert "#quality-evidence-detail" in UI_CSS
     assert "#quality-active-check" in UI_CSS
     assert "#quality-claims-table" in UI_CSS
     assert "#quality-recent-table" in UI_CSS
     assert "#quality-evidence-table" in UI_CSS
-    assert "#quality-evidence-detail" in UI_CSS
     assert "#quality-evidence-page-info" in UI_CSS
     assert "#quality-recent-page-info" in UI_CSS
-    assert "#quality-evidence-row > .gradio-column" in UI_CSS
-    assert "#quality-history-row > .gradio-column" in UI_CSS
     assert "#quality-export-row" in UI_CSS
     assert "#quality-export-result" in UI_CSS
     assert "#quality-export-result a" in UI_CSS

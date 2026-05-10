@@ -752,19 +752,13 @@ UI_CSS = """
 #quality-template-row > .gradio-column,
 #quality-summary-row > .gradio-column,
 #quality-claim-row > .gradio-column,
-#quality-evidence-row > .gradio-column,
-#quality-history-row > .gradio-column,
-#quality-evaluation-action-row > .gradio-column,
-#quality-bottom-row > .gradio-column {
+#quality-evaluation-action-row > .gradio-column {
   align-self: stretch !important;
   min-width: 0 !important;
 }
 #quality-template-row,
 #quality-summary-row,
-#quality-claim-row,
-#quality-evidence-row,
-#quality-history-row,
-#quality-bottom-row {
+#quality-claim-row {
   align-items: stretch !important;
   gap: 14px !important;
   margin-top: 8px !important;
@@ -813,15 +807,6 @@ UI_CSS = """
 }
 #quality-template-panel {
   width: 100%;
-}
-#quality-evidence-row,
-#quality-history-row {
-  align-items: flex-start !important;
-  gap: 14px !important;
-}
-#quality-evidence-row > .gradio-column,
-#quality-history-row > .gradio-column {
-  align-self: flex-start !important;
 }
 #quality-evaluation-action-row {
   align-items: stretch !important;
@@ -1051,23 +1036,11 @@ UI_CSS = """
   max-width: 100% !important;
   overflow: hidden !important;
 }
-#quality-evidence-detail,
-#quality-action-panel {
+#quality-evidence-detail {
   min-height: 136px;
 }
-#quality-relation-note {
-  margin-top: 4px !important;
-}
-#quality-relation-note > div {
-  padding: 12px 14px;
-  border: 1px dashed rgba(148, 163, 184, 0.24);
-  border-radius: 14px;
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--body-text-color-subdued);
-  background: rgba(148, 163, 184, 0.04);
-}
 #quality-action-panel {
+  min-height: 136px;
   gap: 12px !important;
 }
 #quality-help-panel > div,
@@ -6745,15 +6718,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
                     with gr.Column(scale=1):
                         quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
-                quality_relation_note = gr.HTML(
-                    value=(
-                        "<div>"
-                        "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
-                        "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
-                        "</div>"
-                    ),
-                    elem_id="quality-relation-note",
-                )
+
+                # State 组件不占布局空间，放在 Row 外部
+                selected_claim_state = gr.State(initial_selected_claim)
+                claim_detail_state = gr.State(initial_claim_detail_map)
+                recent_quality_state = gr.State(_initial_recent_results_state)
+                evidence_items_state = gr.State(initial_evidence_items)
+
                 with gr.Row(elem_id="quality-claim-row", equal_height=True):
                     with gr.Column(scale=1, elem_id="quality-claim-list-panel"):
                         gr.Markdown("### 2. Claim 列表")
@@ -6781,84 +6752,82 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="quality-claim-page-info",
                         )
                     with gr.Column(scale=1):
-                        selected_claim_state = gr.State(initial_selected_claim)
-                        claim_detail_state = gr.State(initial_claim_detail_map)
-                        recent_quality_state = gr.State(_initial_recent_results_state)
-                        evidence_items_state = gr.State(initial_evidence_items)
                         claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
                         quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
-                with gr.Row(elem_id="quality-evidence-row"):
-                    with gr.Column(scale=1, elem_id="quality-evidence-list-panel"):
-                        gr.Markdown("### 3. 证据列表")
-                        claim_evidence_table = gr.Dataframe(
-                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="证据列表",
-                            buttons=[],
-                            elem_id="quality-evidence-table",
-                            value=initial_claim_evidence_table_rows,
-                            max_height=420,
-                        )
-                        with gr.Row(elem_id="quality-evidence-pagination-row"):
-                            quality_evidence_prev_button = ui_button("上一页")
-                            quality_evidence_next_button = ui_button("下一页")
-                        quality_evidence_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_claim_evidence_page_info),
-                            elem_id="quality-evidence-page-info",
-                        )
-                    with gr.Column(scale=1):
-                        claim_evidence_detail = gr.HTML(
-                            value=initial_evidence_detail_html,
-                            elem_id="quality-evidence-detail",
-                        )
-                with gr.Row(elem_id="quality-history-row"):
-                    with gr.Column(scale=1, elem_id="quality-history-panel"):
-                        gr.Markdown("### 4. 历史质检记录")
-                        recent_quality_note = gr.HTML(
-                            value=(
-                                "<div>最近质检记录用于回看历史质检任务。"
-                                "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
-                            ),
-                            elem_id="quality-history-note",
-                        )
-                        recent_quality_scope_filter = gr.Dropdown(
-                            label="历史任务范围",
-                            choices=recent_quality_scope_choices,
-                            value=initial_recent_quality_scope_value,
-                            interactive=True,
-                            elem_id="quality-history-scope",
-                        )
-                        recent_quality_checks = gr.Dataframe(
-                            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=TABLE_PAGE_SIZE,
-                            column_count=9,
-                            label="最近质检记录",
-                            buttons=[],
-                            elem_id="quality-recent-table",
-                            value=initial_recent_quality_table_rows,
-                            max_height=420,
-                        )
-                        with gr.Row(elem_id="quality-recent-pagination-row"):
-                            recent_quality_prev_button = ui_button("上一页")
-                            recent_quality_next_button = ui_button("下一页")
-                        recent_quality_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_recent_quality_page_info),
-                            elem_id="quality-recent-page-info",
-                        )
-                with gr.Row(elem_id="quality-bottom-row"):
-                    with gr.Column(scale=1, elem_id="quality-action-panel"):
-                        gr.Markdown("### 5. 下载结果与动作")
-                        with gr.Row(elem_id="quality-export-row"):
-                            quality_export_button = ui_button("下载结果")
-                        quality_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="quality-export-result",
-                        )
+
+                # 证据列表：单栏全宽表格 + 详情下沉
+                with gr.Column(elem_id="quality-evidence-list-panel"):
+                    gr.Markdown("### 3. 证据列表")
+                    claim_evidence_table = gr.Dataframe(
+                        headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                        datatype=["str"] * 9,
+                        interactive=False,
+                        row_count=0,
+                        column_count=9,
+                        label="证据列表",
+                        buttons=[],
+                        elem_id="quality-evidence-table",
+                        value=initial_claim_evidence_table_rows,
+                        max_height=420,
+                    )
+                    with gr.Row(elem_id="quality-evidence-pagination-row"):
+                        quality_evidence_prev_button = ui_button("上一页")
+                        quality_evidence_next_button = ui_button("下一页")
+                    quality_evidence_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_claim_evidence_page_info),
+                        elem_id="quality-evidence-page-info",
+                    )
+                claim_evidence_detail = gr.HTML(
+                    value=initial_evidence_detail_html,
+                    elem_id="quality-evidence-detail",
+                )
+
+                # 历史质检记录：去掉冗余 Row 包裹，Column 直接挂 Tab 下
+                with gr.Column(scale=1, elem_id="quality-history-panel"):
+                    gr.Markdown("### 4. 历史质检记录")
+                    recent_quality_note = gr.HTML(
+                        value=(
+                            "<div>最近质检记录用于回看历史质检任务。"
+                            "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
+                        ),
+                        elem_id="quality-history-note",
+                    )
+                    recent_quality_scope_filter = gr.Dropdown(
+                        label="历史任务范围",
+                        choices=recent_quality_scope_choices,
+                        value=initial_recent_quality_scope_value,
+                        interactive=True,
+                        elem_id="quality-history-scope",
+                    )
+                    recent_quality_checks = gr.Dataframe(
+                        headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+                        datatype=["str"] * 9,
+                        interactive=False,
+                        row_count=TABLE_PAGE_SIZE,
+                        column_count=9,
+                        label="最近质检记录",
+                        buttons=[],
+                        elem_id="quality-recent-table",
+                        value=initial_recent_quality_table_rows,
+                        max_height=420,
+                    )
+                    with gr.Row(elem_id="quality-recent-pagination-row"):
+                        recent_quality_prev_button = ui_button("上一页")
+                        recent_quality_next_button = ui_button("下一页")
+                    recent_quality_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_recent_quality_page_info),
+                        elem_id="quality-recent-page-info",
+                    )
+
+                # 下载结果与动作：去掉冗余 Row 包裹，Column 直接挂 Tab 下
+                with gr.Column(scale=1, elem_id="quality-action-panel"):
+                    gr.Markdown("### 5. 下载结果与动作")
+                    with gr.Row(elem_id="quality-export-row"):
+                        quality_export_button = ui_button("下载结果")
+                    quality_export_result = gr.HTML(
+                        value=format_operation_result_html(None, title="下载结果"),
+                        elem_id="quality-export-result",
+                    )
                 with gr.Accordion("效果评测", open=False, elem_id="quality-evaluation-accordion"):
                     with gr.Column(scale=1, elem_id="quality-evaluation-panel"):
                         quality_evaluation_help = gr.HTML(
