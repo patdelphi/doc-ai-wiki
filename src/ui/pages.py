@@ -184,10 +184,14 @@ UI_CSS = """
     var(--block-background-fill);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
   overflow: hidden;
-  padding-left: 0;
+  padding: 18px 20px;
 }
 #document-current-panel > div,
-#document-quality-panel > div {
+#document-quality-panel > div,
+#database-summary-table-panel > div,
+#document-list-panel > div,
+#document-quality-batch-panel > div,
+#document-quality-result-panel > div {
   height: 100%;
 }
 #document-current-title {
@@ -269,7 +273,6 @@ UI_CSS = """
 #document-quality-panel {
   padding-top: 6px;
 }
-#document-relationship-row,
 #document-current-actions-row,
 #database-pagination-row,
 #document-pagination-row,
@@ -313,14 +316,16 @@ UI_CSS = """
 #document-management-actions-row {
   display: flex !important;
   flex-wrap: wrap !important;
-  margin-top: 8px !important;
+  margin-top: 10px !important;
   justify-content: flex-start !important;
+  gap: 12px !important;
 }
 #document-current-actions-row {
   display: flex !important;
   flex-wrap: wrap !important;
-  margin-top: 8px !important;
+  margin-top: 10px !important;
   justify-content: flex-start !important;
+  gap: 12px !important;
 }
 #document-current-actions-row > * {
   flex: 0 0 auto !important;
@@ -329,19 +334,6 @@ UI_CSS = """
 #document-management-actions-row > * {
   flex: 0 0 auto !important;
   min-width: 0 !important;
-}
-#document-relationship-row {
-  display: flex !important;
-  align-items: flex-end !important;
-  gap: 10px !important;
-  flex-wrap: wrap !important;
-}
-#document-relationship-row > *:first-child {
-  flex: 1 1 280px !important;
-  min-width: 0 !important;
-}
-#document-relationship-row > *:last-child {
-  flex: 0 0 auto !important;
 }
 #document-management-result-row {
   margin-top: 8px !important;
@@ -485,22 +477,14 @@ UI_CSS = """
 #document-quality-config-export-result {
   min-height: 72px;
 }
-/* 按钮规范：统一由语义类驱动，避免各页面继续堆叠局部补丁。 */
-.ui-button {
+/* 按钮规范：Gradio 直接在 <button> 上挂 elem_classes，所以选择器直接用 button.ui-button。 */
+button.ui-button {
   display: inline-flex !important;
   flex: 0 0 auto !important;
   width: fit-content !important;
-  min-width: 0 !important;
-  max-width: 100% !important;
-  align-self: flex-start !important;
-}
-.ui-button button {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: fit-content !important;
   min-width: 132px !important;
   max-width: 100% !important;
+  align-self: flex-start !important;
   min-height: 42px !important;
   padding: 0 18px !important;
   border-radius: 14px !important;
@@ -509,6 +493,7 @@ UI_CSS = """
     linear-gradient(180deg, rgba(71, 85, 105, 0.26), rgba(51, 65, 85, 0.18)) !important;
   color: var(--body-text-color) !important;
   font-weight: 700 !important;
+  font-size: 14px !important;
   letter-spacing: 0.02em !important;
   box-shadow:
     0 8px 18px rgba(15, 23, 42, 0.12),
@@ -518,8 +503,10 @@ UI_CSS = """
     border-color 0.18s ease,
     background 0.18s ease,
     box-shadow 0.18s ease !important;
+  cursor: pointer !important;
+  margin: 4px 2px !important;
 }
-.ui-button button:hover {
+button.ui-button:hover {
   transform: translateY(-1px) !important;
   border-color: rgba(96, 165, 250, 0.34) !important;
   background:
@@ -528,29 +515,23 @@ UI_CSS = """
     0 10px 22px rgba(15, 23, 42, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
-.ui-button button:active {
+button.ui-button:active {
   transform: scale(0.98) !important;
 }
-.ui-button button:focus-visible {
+button.ui-button:focus-visible {
   outline: none !important;
   border-color: rgba(96, 165, 250, 0.42) !important;
   box-shadow:
     0 0 0 3px rgba(59, 130, 246, 0.12),
     0 10px 22px rgba(15, 23, 42, 0.14) !important;
 }
-.ui-button button:disabled {
+button.ui-button:disabled {
   opacity: 0.6 !important;
   cursor: not-allowed !important;
   transform: none !important;
   box-shadow: none !important;
 }
-.ui-button--secondary button {
-  border-color: rgba(148, 163, 184, 0.24) !important;
-  background:
-    linear-gradient(180deg, rgba(71, 85, 105, 0.26), rgba(51, 65, 85, 0.18)) !important;
-  color: var(--body-text-color) !important;
-}
-.ui-button--primary button {
+button.ui-button--primary {
   border-color: rgba(96, 165, 250, 0.38) !important;
   background:
     linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.82)) !important;
@@ -559,7 +540,7 @@ UI_CSS = """
     0 10px 22px rgba(37, 99, 235, 0.20),
     inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
 }
-.ui-button--danger button {
+button.ui-button--danger {
   border-color: rgba(248, 113, 113, 0.28) !important;
   background:
     linear-gradient(180deg, rgba(127, 29, 29, 0.88), rgba(153, 27, 27, 0.78)) !important;
@@ -568,7 +549,7 @@ UI_CSS = """
     0 10px 22px rgba(127, 29, 29, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
-.ui-button--pagination button {
+button.ui-button--pagination {
   min-width: 96px !important;
   min-height: 38px !important;
   padding: 0 14px !important;
@@ -727,14 +708,15 @@ UI_CSS = """
 #search-input-panel .gradio-container-4-44-1 {
   background: transparent !important;
 }
-#search-input-panel button {
-  margin-top: 0;
+#search-input-panel button.ui-button,
+#quality-input-panel button.ui-button {
+  margin-top: 6px;
 }
 #search-result-workspace {
   margin-top: 10px;
 }
 #search-pagination-row {
-  margin-top: 6px !important;
+  margin-top: 8px !important;
   gap: 10px !important;
   flex-wrap: wrap !important;
 }
@@ -839,7 +821,7 @@ UI_CSS = """
   border-radius: 14px;
   background: rgba(148, 163, 184, 0.04);
 }
-#quality-input-panel button {
+#quality-input-panel button.ui-button {
   margin-top: 8px;
 }
 #quality-input-panel textarea,
@@ -1061,9 +1043,9 @@ UI_CSS = """
 #quality-evidence-pagination-row,
 #quality-recent-pagination-row,
 #quality-evaluation-pagination-row {
-  gap: 10px !important;
+  gap: 12px !important;
   flex-wrap: wrap !important;
-  margin-top: 6px !important;
+  margin-top: 8px !important;
 }
 #quality-export-row > *,
 #quality-claim-pagination-row > *,
@@ -1141,19 +1123,12 @@ UI_CSS = """
   flex: 1 1 200px !important;
   min-width: 0 !important;
 }
-#review-top-row > .gradio-column,
-#review-summary-row > .gradio-column,
-#review-action-row > .gradio-column,
-#review-record-row > .gradio-column,
-#review-evidence-row > .gradio-column {
+#review-summary-row > .gradio-column {
   align-self: stretch !important;
   min-width: 0 !important;
 }
-#review-summary-row,
-#review-action-row,
-#review-record-row,
-#review-evidence-row {
-  align-items: flex-start !important;
+#review-summary-row {
+  align-items: stretch !important;
   gap: 12px !important;
   margin-top: 6px !important;
 }
@@ -1167,6 +1142,10 @@ UI_CSS = """
 #review-claim-detail,
 #review-record-detail,
 #review-evidence-detail,
+#review-pending-panel,
+#review-processed-panel,
+#review-evidence-list-panel,
+#review-history-panel,
 #review-action-panel,
 #review-result-panel,
 #review-export-result {
@@ -1184,13 +1163,22 @@ UI_CSS = """
   flex-direction: column;
   justify-content: flex-start;
   box-sizing: border-box;
-  gap: 12px;
+  gap: 14px;
   min-height: 0;
+  padding: 20px !important;
 }
 #review-action-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+#review-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding-top: 4px;
 }
 #review-action-feedback-row {
   display: flex;
@@ -1235,10 +1223,11 @@ UI_CSS = """
 }
 #review-action-buttons {
   display: flex !important;
-  align-items: flex-start !important;
+  align-items: center !important;
   gap: 12px !important;
   flex-wrap: wrap !important;
   margin: 0 !important;
+  padding-top: 6px !important;
 }
 #review-action-buttons > * {
   flex: 0 0 auto !important;
@@ -1832,9 +1821,9 @@ UI_CSS = """
 #settings-knowledge-base-pagination-row,
 #settings-knowledge-base-list-actions,
 #settings-knowledge-base-actions {
-  gap: 10px !important;
+  gap: 12px !important;
   flex-wrap: wrap !important;
-  margin-top: 4px !important;
+  margin-top: 8px !important;
 }
 #settings-list-actions > *,
 #settings-form-actions > *,
@@ -1848,16 +1837,16 @@ UI_CSS = """
 #settings-knowledge-base-list-actions,
 #settings-knowledge-base-actions,
 #settings-export-row {
-  padding: 6px 2px 0 2px !important;
-  margin-top: 2px !important;
+  padding: 8px 4px !important;
+  margin-top: 6px !important;
   justify-content: flex-start !important;
 }
 #settings-form-actions,
 #settings-knowledge-base-actions {
   justify-content: flex-end !important;
   gap: 12px !important;
-  padding: 10px 0 0 0 !important;
-  margin-top: 8px !important;
+  padding: 12px 4px 8px 4px !important;
+  margin-top: 12px !important;
   border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
 }
 #settings-form-actions > *,
@@ -7127,147 +7116,156 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_evidence_page_state = gr.State(initial_review_evidence_page)
                 review_history_page_state = gr.State(initial_review_history_page)
                 with gr.Group(elem_id="review-focus-panel"):
-                    with gr.Row(elem_id="review-top-row"):
+                    # 顶部筛选
+                    with gr.Row(elem_id="review-filter-row"):
+                        review_knowledge_base = gr.Dropdown(
+                            label="当前知识库",
+                            choices=knowledge_base_choices,
+                            value=initial_knowledge_base_choice,
+                            interactive=True,
+                            elem_id="review-knowledge-base",
+                        )
+                        review_scope_filter = gr.Dropdown(
+                            label="列表范围",
+                            choices=review_scope_choices,
+                            value=review_scope_choices[0],
+                            interactive=True,
+                        )
+                        review_risk_filter = gr.Dropdown(
+                            label="风险筛选",
+                            choices=review_risk_choices,
+                            value=review_risk_choices[0],
+                            interactive=True,
+                        )
+                    review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
+
+                    # 待处理记录：单栏全宽
+                    with gr.Column(elem_id="review-pending-panel"):
+                        review_pending_candidates = gr.Dataframe(
+                            headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                            datatype=["str"] * 9,
+                            interactive=False,
+                            row_count=0,
+                            column_count=9,
+                            label="待处理记录",
+                            buttons=[],
+                            elem_id="review-pending-table",
+                            value=initial_review_pending_table_rows,
+                        )
+                        with gr.Row(elem_id="review-pending-pagination-row"):
+                            review_pending_prev_button = ui_button("上一页")
+                            review_pending_next_button = ui_button("下一页")
+                        review_pending_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_review_pending_page_info),
+                            elem_id="review-pending-page-info",
+                        )
+
+                    # 已处理 Claim：单栏全宽
+                    with gr.Column(elem_id="review-processed-panel"):
+                        review_processed_candidates = gr.Dataframe(
+                            headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
+                            datatype=["str"] * 9,
+                            interactive=False,
+                            row_count=0,
+                            column_count=9,
+                            label="已处理 Claim",
+                            buttons=[],
+                            elem_id="review-processed-table",
+                            value=initial_review_processed_table_rows,
+                        )
+                        with gr.Row(elem_id="review-processed-pagination-row"):
+                            review_processed_prev_button = ui_button("上一页")
+                            review_processed_next_button = ui_button("下一页")
+                        review_processed_page_info = gr.HTML(
+                            value=format_table_pagination_html(initial_review_processed_page_info),
+                            elem_id="review-processed-page-info",
+                        )
+
+                # Claim 详情与证据详情：合理双栏
+                with gr.Row(elem_id="review-summary-row", equal_height=True):
+                    with gr.Column(scale=1):
+                        review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
+                    with gr.Column(scale=1):
+                        review_evidence_detail = gr.HTML(
+                            value=initial_review_evidence_detail_html,
+                            elem_id="review-evidence-detail",
+                        )
+
+                # 证据列表：单栏全宽
+                with gr.Column(elem_id="review-evidence-list-panel"):
+                    review_evidence_table = gr.Dataframe(
+                        headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
+                        datatype=["str"] * 9,
+                        interactive=False,
+                        row_count=0,
+                        column_count=9,
+                        label="关联证据列表",
+                        buttons=[],
+                        elem_id="review-evidence-table",
+                        value=initial_review_evidence_table_rows,
+                    )
+                    with gr.Row(elem_id="review-evidence-pagination-row"):
+                        review_evidence_prev_button = ui_button("上一页")
+                        review_evidence_next_button = ui_button("下一页")
+                    review_evidence_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_review_evidence_page_info),
+                        elem_id="review-evidence-page-info",
+                    )
+
+                # 审核动作与反馈
+                with gr.Group(elem_id="review-action-panel"):
+                    with gr.Group(elem_id="review-action-form"):
+                        review_action_input = gr.Dropdown(
+                            choices=review_action_choices,
+                            value=initial_review_action_value,
+                            label="审核动作",
+                            interactive=True,
+                        )
+                        review_note_input = gr.Textbox(
+                            label="审核备注",
+                            lines=4,
+                            value=initial_review_note_value,
+                        )
+                    with gr.Row(elem_id="review-action-buttons"):
+                        review_button = ui_button("提交审核")
+                        review_history_button = ui_button("刷新审核列表")
+                        review_export_button = ui_button("下载当前审核结果")
+                    with gr.Row(elem_id="review-action-feedback-row"):
                         with gr.Column(scale=1):
-                            with gr.Row(elem_id="review-filter-row"):
-                                review_knowledge_base = gr.Dropdown(
-                                    label="当前知识库",
-                                    choices=knowledge_base_choices,
-                                    value=initial_knowledge_base_choice,
-                                    interactive=True,
-                                    elem_id="review-knowledge-base",
-                                )
-                                review_scope_filter = gr.Dropdown(
-                                    label="列表范围",
-                                    choices=review_scope_choices,
-                                    value=review_scope_choices[0],
-                                    interactive=True,
-                                )
-                                review_risk_filter = gr.Dropdown(
-                                    label="风险筛选",
-                                    choices=review_risk_choices,
-                                    value=review_risk_choices[0],
-                                    interactive=True,
-                                )
-                            review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
-                            review_pending_candidates = gr.Dataframe(
-                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=0,
-                                column_count=9,
-                                label="待处理记录",
-                                buttons=[],
-                                elem_id="review-pending-table",
-                                value=initial_review_pending_table_rows,
+                            review_result = gr.HTML(
+                                value=format_operation_result_html(None, title="审核结果"),
+                                elem_id="review-result-panel",
                             )
-                            with gr.Row(elem_id="review-pending-pagination-row"):
-                                review_pending_prev_button = ui_button("上一页")
-                                review_pending_next_button = ui_button("下一页")
-                            review_pending_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_review_pending_page_info),
-                                elem_id="review-pending-page-info",
+                        with gr.Column(scale=1):
+                            review_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="下载结果"),
+                                elem_id="review-export-result",
                             )
-                            review_processed_candidates = gr.Dataframe(
-                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=0,
-                                column_count=9,
-                                label="已处理 Claim",
-                                buttons=[],
-                                elem_id="review-processed-table",
-                                value=initial_review_processed_table_rows,
-                            )
-                            with gr.Row(elem_id="review-processed-pagination-row"):
-                                review_processed_prev_button = ui_button("上一页")
-                                review_processed_next_button = ui_button("下一页")
-                            review_processed_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_review_processed_page_info),
-                                elem_id="review-processed-page-info",
-                            )
-                    with gr.Row(elem_id="review-summary-row"):
-                        with gr.Column(scale=5):
-                            review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
-                        with gr.Column(scale=4):
-                            review_evidence_detail = gr.HTML(
-                                value=initial_review_evidence_detail_html,
-                                elem_id="review-evidence-detail",
-                            )
-                with gr.Row(elem_id="review-evidence-row"):
-                    with gr.Column(scale=6):
-                        review_evidence_table = gr.Dataframe(
-                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="关联证据列表",
-                            buttons=[],
-                            elem_id="review-evidence-table",
-                            value=initial_review_evidence_table_rows,
-                        )
-                        with gr.Row(elem_id="review-evidence-pagination-row"):
-                            review_evidence_prev_button = ui_button("上一页")
-                            review_evidence_next_button = ui_button("下一页")
-                        review_evidence_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_review_evidence_page_info),
-                            elem_id="review-evidence-page-info",
-                        )
-                    with gr.Column(scale=3):
-                        with gr.Group(elem_id="review-action-panel"):
-                            with gr.Group(elem_id="review-action-form"):
-                                review_action_input = gr.Dropdown(
-                                    choices=review_action_choices,
-                                    value=initial_review_action_value,
-                                    label="审核动作",
-                                    interactive=True,
-                                )
-                                review_note_input = gr.Textbox(
-                                    label="审核备注",
-                                    lines=4,
-                                    value=initial_review_note_value,
-                                )
-                            with gr.Row(elem_id="review-action-buttons"):
-                                review_button = ui_button("提交审核")
-                                review_history_button = ui_button("刷新审核列表")
-                                review_export_button = ui_button("下载当前审核结果")
-                            with gr.Row(elem_id="review-action-feedback-row"):
-                                with gr.Column(scale=1):
-                                    review_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="审核结果"),
-                                        elem_id="review-result-panel",
-                                    )
-                                with gr.Column(scale=1):
-                                    review_export_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="下载结果"),
-                                        elem_id="review-export-result",
-                                    )
-                with gr.Row(elem_id="review-record-row"):
-                    with gr.Column(scale=6):
-                        review_history = gr.Dataframe(
-                            headers=["序号", "审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="已审核记录",
-                            buttons=[],
-                            elem_id="review-history-table",
-                            value=initial_review_history_table_rows,
-                        )
-                        with gr.Row(elem_id="review-history-pagination-row"):
-                            review_history_prev_button = ui_button("上一页")
-                            review_history_next_button = ui_button("下一页")
-                        review_history_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_review_history_page_info),
-                            elem_id="review-history-page-info",
-                        )
-                    with gr.Column(scale=3):
-                        review_record_detail = gr.HTML(
-                            value=initial_review_record_detail_html,
-                            elem_id="review-record-detail",
-                        )
+
+                # 已审核记录：单栏全宽
+                with gr.Column(elem_id="review-history-panel"):
+                    review_history = gr.Dataframe(
+                        headers=["序号", "审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
+                        datatype=["str"] * 9,
+                        interactive=False,
+                        row_count=0,
+                        column_count=9,
+                        label="已审核记录",
+                        buttons=[],
+                        elem_id="review-history-table",
+                        value=initial_review_history_table_rows,
+                    )
+                    with gr.Row(elem_id="review-history-pagination-row"):
+                        review_history_prev_button = ui_button("上一页")
+                        review_history_next_button = ui_button("下一页")
+                    review_history_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_review_history_page_info),
+                        elem_id="review-history-page-info",
+                    )
+                    review_record_detail = gr.HTML(
+                        value=initial_review_record_detail_html,
+                        elem_id="review-record-detail",
+                    )
 
             with gr.Tab("知识库管理"):
                 database_page_state = gr.State(initial_database_page)
@@ -7276,13 +7274,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_quality_chunks_page_state = gr.State(initial_document_quality_chunks_page)
                 document_quality_search_page_state = gr.State(initial_document_quality_search_page)
                 document_quality_batch_page_state = gr.State(initial_document_quality_batch_page)
-                with gr.Row(elem_id="document-management-top-row", equal_height=True):
-                    with gr.Column(scale=5):
+                with gr.Row(elem_id="document-management-top-row"):
+                    with gr.Column(scale=1):
                         document_management_help = gr.HTML(
                             value=format_document_management_help_html(),
                             elem_id="document-management-help-panel",
                         )
-                    with gr.Column(scale=4):
+                    with gr.Column(scale=1):
                         with gr.Group(elem_id="document-management-selector-panel"):
                             document_knowledge_base = gr.Dropdown(
                                 label="当前知识库",
@@ -7292,80 +7290,86 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="document-knowledge-base",
                             )
                             scan_button = ui_button("刷新文档列表")
-                with gr.Row(elem_id="document-management-summary-row", equal_height=True):
+                with gr.Row(elem_id="document-management-summary-row"):
                     with gr.Column(scale=1):
                         with gr.Group(elem_id="document-summary-panel"):
                             document_summary = gr.HTML(value=initial_document_summary)
                     with gr.Column(scale=1):
                         with gr.Group(elem_id="database-summary-panel"):
                             database_summary = gr.HTML(value=initial_database_summary)
-                with gr.Row(elem_id="document-management-focus-row"):
-                    with gr.Column(scale=1):
-                        with gr.Group(elem_id="document-current-panel"):
-                            gr.Markdown("### 当前选中文档", elem_id="document-current-title")
-                            gr.HTML(
-                                value="<p>优先在这里选择目标文档，再执行注册、重建或入库质检。</p>",
-                                elem_id="document-current-note",
-                            )
-                            document_choices = gr.Dropdown(
-                                label="选择文档",
-                                choices=initial_document_state["document_choices"],
-                                value=initial_document_state["active_choice"],
-                                interactive=True,
-                            )
-                            document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
-                            with gr.Row(elem_id="document-relationship-row"):
-                                document_target_knowledge_base = gr.Dropdown(
-                                    label="调整归属到",
-                                    choices=knowledge_base_choices,
-                                    value=initial_knowledge_base_choice,
-                                    interactive=True,
-                                    elem_id="document-target-knowledge-base",
-                                )
-                                move_document_button = ui_button("调整当前文档归属", elem_id="document-move-button")
-                            with gr.Row(elem_id="document-current-actions-row"):
-                                register_button = ui_button("注册当前文档", interactive=initial_document_state["register_interactive"])
-                                rebuild_button = ui_button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
-                                status_button = ui_button("刷新状态")
-                database_summary_table = gr.Dataframe(
-                    headers=["序号", "指标", "数量"],
-                    datatype=["str", "str", "str"],
-                    interactive=False,
-                    row_count=0,
-                    column_count=3,
-                    label="数据库统计",
-                    buttons=[],
-                    elem_id="database-summary-table",
-                    value=initial_database_table_rows,
-                )
-                with gr.Row(elem_id="database-pagination-row"):
-                    database_prev_button = ui_button("上一页")
-                    database_next_button = ui_button("下一页")
-                database_page_info = gr.HTML(
-                    value=format_table_pagination_html(initial_database_page_info),
-                    elem_id="database-page-info",
-                )
-                document_table = gr.Dataframe(
-                    headers=["序号", "文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
-                    datatype=["str"] * 11,
-                    interactive=False,
-                    row_count=0,
-                    column_count=11,
-                    label="现有文档列表",
-                    buttons=[],
-                    elem_id="document-table",
-                    value=initial_document_table_rows,
-                )
-                with gr.Row(elem_id="document-pagination-row"):
-                    document_prev_button = ui_button("上一页")
-                    document_next_button = ui_button("下一页")
-                document_page_info = gr.HTML(
-                    value=format_table_pagination_html(initial_document_page_info),
-                    elem_id="document-page-info",
-                )
+
+                # 当前选中文档：去掉冗余 Row 包裹
+                with gr.Group(elem_id="document-current-panel"):
+                    gr.Markdown("### 当前选中文档", elem_id="document-current-title")
+                    gr.HTML(
+                        value="<p>优先在这里选择目标文档，再执行注册、重建或入库质检。</p>",
+                        elem_id="document-current-note",
+                    )
+                    document_choices = gr.Dropdown(
+                        label="选择文档",
+                        choices=initial_document_state["document_choices"],
+                        value=initial_document_state["active_choice"],
+                        interactive=True,
+                    )
+                    document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
+                    document_target_knowledge_base = gr.Dropdown(
+                        label="调整归属到",
+                        choices=knowledge_base_choices,
+                        value=initial_knowledge_base_choice,
+                        interactive=True,
+                        elem_id="document-target-knowledge-base",
+                    )
+                    with gr.Row(elem_id="document-current-actions-row"):
+                        register_button = ui_button("注册当前文档", interactive=initial_document_state["register_interactive"])
+                        rebuild_button = ui_button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
+                        status_button = ui_button("刷新状态")
+                        move_document_button = ui_button("调整文档归属", elem_id="document-move-button")
+
+                # 数据库统计表格：加 Column 包裹
+                with gr.Column(elem_id="database-summary-table-panel"):
+                    database_summary_table = gr.Dataframe(
+                        headers=["序号", "指标", "数量"],
+                        datatype=["str", "str", "str"],
+                        interactive=False,
+                        row_count=0,
+                        column_count=3,
+                        label="数据库统计",
+                        buttons=[],
+                        elem_id="database-summary-table",
+                        value=initial_database_table_rows,
+                    )
+                    with gr.Row(elem_id="database-pagination-row"):
+                        database_prev_button = ui_button("上一页")
+                        database_next_button = ui_button("下一页")
+                    database_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_database_page_info),
+                        elem_id="database-page-info",
+                    )
+
+                # 文档列表：11 列宽表，单栏全宽 + Column 包裹
+                with gr.Column(elem_id="document-list-panel"):
+                    document_table = gr.Dataframe(
+                        headers=["序号", "文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
+                        datatype=["str"] * 11,
+                        interactive=False,
+                        row_count=0,
+                        column_count=11,
+                        label="现有文档列表",
+                        buttons=[],
+                        elem_id="document-table",
+                        value=initial_document_table_rows,
+                    )
+                    with gr.Row(elem_id="document-pagination-row"):
+                        document_prev_button = ui_button("上一页")
+                        document_next_button = ui_button("下一页")
+                    document_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_document_page_info),
+                        elem_id="document-page-info",
+                    )
+                # 注册全部按钮：放在列表下方，与结果区相邻
                 with gr.Row(elem_id="document-management-actions-row"):
                     register_all_button = ui_button("注册全部待处理文档")
-                with gr.Row(elem_id="document-management-result-row", equal_height=True):
+                with gr.Row(elem_id="document-management-result-row"):
                     with gr.Column(scale=1):
                         register_result = gr.HTML(
                             value=format_operation_result_html(None, title="注册结果"),
@@ -7436,7 +7440,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     elem_id="document-quality-chunks-page-info",
                                 )
                         with gr.Row(elem_id="document-quality-search-row"):
-                            with gr.Column(scale=5):
+                            with gr.Column(scale=1):
                                 document_quality_search_query = gr.Textbox(
                                     label="文档内检索验证",
                                     lines=2,
@@ -7445,7 +7449,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 with gr.Row(elem_id="document-quality-search-action-row"):
                                     document_quality_search_button = ui_button("验证当前文档检索")
                                     document_quality_search_export_button = ui_button("下载检索结果")
-                            with gr.Column(scale=4):
+                            with gr.Column(scale=1):
                                 document_quality_search_summary = gr.HTML(
                                     value=initial_document_quality_search_summary,
                                     elem_id="document-quality-search-summary",
@@ -7456,131 +7460,128 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         )
                         document_quality_search_state = gr.State(initial_document_quality_search_state)
                         document_quality_search_query_state = gr.State("")
-                        with gr.Row(elem_id="document-quality-result-row"):
-                            with gr.Column(scale=5):
-                                document_quality_search_results = gr.Dataframe(
-                                    headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
-                                    datatype=["markdown"] * 6,
-                                    interactive=False,
-                                    row_count=0,
-                                    column_count=6,
-                                    label="文档内检索结果",
-                                    buttons=[],
-                                    elem_id="document-quality-search-results",
-                                    value=initial_document_quality_search_table_rows,
-                                )
-                                with gr.Row(elem_id="document-quality-search-pagination-row"):
-                                    document_quality_search_prev_button = ui_button("上一页")
-                                    document_quality_search_next_button = ui_button("下一页")
-                                document_quality_search_page_info = gr.HTML(
-                                    value=format_table_pagination_html(initial_document_quality_search_page_info),
-                                    elem_id="document-quality-search-page-info",
-                                )
-                            with gr.Column(scale=4):
-                                document_quality_search_detail = gr.HTML(
-                                    value=initial_document_quality_search_detail,
-                                    elem_id="document-quality-search-detail",
-                                )
+                        # 文档内检索结果：单栏全宽
+                        with gr.Column(elem_id="document-quality-result-panel"):
+                            document_quality_search_results = gr.Dataframe(
+                                headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
+                                datatype=["markdown"] * 6,
+                                interactive=False,
+                                row_count=0,
+                                column_count=6,
+                                label="文档内检索结果",
+                                buttons=[],
+                                elem_id="document-quality-search-results",
+                                value=initial_document_quality_search_table_rows,
+                            )
+                            with gr.Row(elem_id="document-quality-search-pagination-row"):
+                                document_quality_search_prev_button = ui_button("上一页")
+                                document_quality_search_next_button = ui_button("下一页")
+                            document_quality_search_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_document_quality_search_page_info),
+                                elem_id="document-quality-search-page-info",
+                            )
+                        document_quality_search_detail = gr.HTML(
+                            value=initial_document_quality_search_detail,
+                            elem_id="document-quality-search-detail",
+                        )
                         with gr.Row(elem_id="document-quality-batch-action-row"):
                             document_quality_batch_button = ui_button("执行全部文档质检")
                             document_quality_csv_export_button = ui_button("导出质检 CSV")
                             document_quality_batch_export_button = ui_button("下载批量结果")
-                        with gr.Row(elem_id="document-quality-batch-row"):
-                            with gr.Column(scale=4):
-                                document_quality_batch_summary = gr.HTML(
-                                    value=initial_document_quality_batch_summary,
-                                    elem_id="document-quality-batch-summary",
-                                )
-                                document_quality_csv_export_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="导出结果"),
-                                    elem_id="document-quality-csv-export-result",
-                                )
-                                document_quality_batch_export_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="下载结果"),
-                                    elem_id="document-quality-batch-export-result",
-                                )
-                            with gr.Column(scale=5):
-                                document_quality_batch_table = gr.Dataframe(
-                                    headers=["序号", "文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                                    datatype=["str"] * 10,
-                                    interactive=False,
-                                    row_count=0,
-                                    column_count=10,
-                                    label="批量质检结果",
-                                    buttons=[],
-                                    elem_id="document-quality-batch-table",
-                                    value=initial_document_quality_batch_table_rows,
-                                )
-                                with gr.Row(elem_id="document-quality-batch-pagination-row"):
-                                    document_quality_batch_prev_button = ui_button("上一页")
-                                    document_quality_batch_next_button = ui_button("下一页")
-                                document_quality_batch_page_info = gr.HTML(
-                                    value=format_table_pagination_html(initial_document_quality_batch_page_info),
-                                    elem_id="document-quality-batch-page-info",
-                                )
-                        with gr.Row(elem_id="document-quality-config-row"):
-                            with gr.Column(scale=4):
-                                document_quality_config_panel = gr.HTML(
-                                    value=initial_document_quality_config_html,
-                                    elem_id="document-quality-config-panel",
-                                )
-                                document_quality_config_result = gr.HTML(
-                                    value=initial_document_quality_config_result,
-                                    elem_id="document-quality-config-result",
-                                )
-                            with gr.Column(scale=5):
-                                with gr.Group(elem_id="document-quality-config-form"):
-                                    gr.Markdown("### 质检阈值配置")
-                                    with gr.Row(elem_id="document-quality-config-form-row-1"):
-                                        document_quality_sample_limit = gr.Number(
-                                            label="抽样数量",
-                                            value=initial_quality_sample_limit,
-                                            precision=0,
-                                        )
-                                        document_quality_long_document_char_threshold = gr.Number(
-                                            label="长文字数阈值",
-                                            value=initial_quality_long_document_char_threshold,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-2"):
-                                        document_quality_min_sections_for_long_doc = gr.Number(
-                                            label="长文最少章节",
-                                            value=initial_quality_min_sections_for_long_doc,
-                                            precision=0,
-                                        )
-                                        document_quality_max_avg_chunks_per_section = gr.Number(
-                                            label="每章分块上限",
-                                            value=initial_quality_max_avg_chunks_per_section,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-3"):
-                                        document_quality_max_chunk_chars = gr.Number(
-                                            label="超长分块阈值",
-                                            value=initial_quality_max_chunk_chars,
-                                            precision=0,
-                                        )
-                                        document_quality_short_chunk_chars = gr.Number(
-                                            label="过短分块阈值",
-                                            value=initial_quality_short_chunk_chars,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-4"):
-                                        document_quality_short_chunk_warn_min_chunk_count = gr.Number(
-                                            label="过短分块告警起点",
-                                            value=initial_quality_short_chunk_warn_min_chunk_count,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-action-row"):
-                                        document_quality_config_save_button = ui_button("保存质检阈值", variant="primary")
-                                        document_quality_config_export_button = ui_button("下载当前配置")
-                                    document_quality_config_export_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="下载结果"),
-                                        elem_id="document-quality-config-export-result",
+                        # 批量质检结果：10列宽表改为单栏全宽
+                        with gr.Column(elem_id="document-quality-batch-panel"):
+                            document_quality_batch_summary = gr.HTML(
+                                value=initial_document_quality_batch_summary,
+                                elem_id="document-quality-batch-summary",
+                            )
+                            document_quality_csv_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="导出结果"),
+                                elem_id="document-quality-csv-export-result",
+                            )
+                            document_quality_batch_export_result = gr.HTML(
+                                value=format_operation_result_html(None, title="下载结果"),
+                                elem_id="document-quality-batch-export-result",
+                            )
+                            document_quality_batch_table = gr.Dataframe(
+                                headers=["序号", "文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
+                                datatype=["str"] * 10,
+                                interactive=False,
+                                row_count=0,
+                                column_count=10,
+                                label="批量质检结果",
+                                buttons=[],
+                                elem_id="document-quality-batch-table",
+                                value=initial_document_quality_batch_table_rows,
+                            )
+                            with gr.Row(elem_id="document-quality-batch-pagination-row"):
+                                document_quality_batch_prev_button = ui_button("上一页")
+                                document_quality_batch_next_button = ui_button("下一页")
+                            document_quality_batch_page_info = gr.HTML(
+                                value=format_table_pagination_html(initial_document_quality_batch_page_info),
+                                elem_id="document-quality-batch-page-info",
+                            )
+                        # 质检配置：单栏全宽
+                        with gr.Column(elem_id="document-quality-config-panel"):
+                            document_quality_config_panel = gr.HTML(
+                                value=initial_document_quality_config_html,
+                                elem_id="document-quality-config-panel-html",
+                            )
+                            document_quality_config_result = gr.HTML(
+                                value=initial_document_quality_config_result,
+                                elem_id="document-quality-config-result",
+                            )
+                            with gr.Group(elem_id="document-quality-config-form"):
+                                gr.Markdown("### 质检阈值配置")
+                                with gr.Row(elem_id="document-quality-config-form-row-1"):
+                                    document_quality_sample_limit = gr.Number(
+                                        label="抽样数量",
+                                        value=initial_quality_sample_limit,
+                                        precision=0,
                                     )
+                                    document_quality_long_document_char_threshold = gr.Number(
+                                        label="长文字数阈值",
+                                        value=initial_quality_long_document_char_threshold,
+                                        precision=0,
+                                    )
+                                with gr.Row(elem_id="document-quality-config-form-row-2"):
+                                    document_quality_min_sections_for_long_doc = gr.Number(
+                                        label="长文最少章节",
+                                        value=initial_quality_min_sections_for_long_doc,
+                                        precision=0,
+                                    )
+                                    document_quality_max_avg_chunks_per_section = gr.Number(
+                                        label="每章分块上限",
+                                        value=initial_quality_max_avg_chunks_per_section,
+                                        precision=0,
+                                    )
+                                with gr.Row(elem_id="document-quality-config-form-row-3"):
+                                    document_quality_max_chunk_chars = gr.Number(
+                                        label="超长分块阈值",
+                                        value=initial_quality_max_chunk_chars,
+                                        precision=0,
+                                    )
+                                    document_quality_short_chunk_chars = gr.Number(
+                                        label="过短分块阈值",
+                                        value=initial_quality_short_chunk_chars,
+                                        precision=0,
+                                    )
+                                with gr.Row(elem_id="document-quality-config-form-row-4"):
+                                    document_quality_short_chunk_warn_min_chunk_count = gr.Number(
+                                        label="过短分块告警起点",
+                                        value=initial_quality_short_chunk_warn_min_chunk_count,
+                                        precision=0,
+                                    )
+                                with gr.Row(elem_id="document-quality-config-action-row"):
+                                    document_quality_config_save_button = ui_button("保存质检阈值", variant="primary")
+                                    document_quality_config_export_button = ui_button("下载当前配置")
+                                document_quality_config_export_result = gr.HTML(
+                                    value=format_operation_result_html(None, title="下载结果"),
+                                    elem_id="document-quality-config-export-result",
+                                )
 
             with gr.Tab("知识库检索"):
-                with gr.Row(elem_id="search-top-row", equal_height=True):
-                    with gr.Column(scale=5):
+                with gr.Row(elem_id="search-top-row"):
+                    with gr.Column(scale=1):
                         with gr.Group(elem_id="search-input-panel"):
                             search_query = gr.Textbox(
                                 label="检索内容",
@@ -7596,7 +7597,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             )
                             search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=100, step=1, value=10)
                             search_button = ui_button("执行检索")
-                    with gr.Column(scale=4):
+                    with gr.Column(scale=1):
                         search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
                 with gr.Group(elem_id="search-result-workspace"):
                     search_result_state = gr.State([])
@@ -7607,34 +7608,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         value=format_search_summary_html(None),
                         elem_id="search-result-summary",
                     )
-                    with gr.Row(elem_id="search-result-row"):
-                        with gr.Column(scale=1):
-                            search_result = gr.Dataframe(
-                                headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
-                                datatype=["markdown"] * 6,
-                                interactive=False,
-                                row_count=0,
-                                column_count=6,
-                                label="检索结果列表",
-                                buttons=[],
-                                elem_id="search-results-table",
-                                value=initial_search_table_rows,
-                            )
-                            with gr.Row(elem_id="search-pagination-row"):
-                                search_prev_button = ui_button("上一页")
-                                search_next_button = ui_button("下一页")
-                            search_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_search_page_info),
-                                elem_id="search-page-info",
-                            )
-                    search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
-                    with gr.Group(elem_id="search-action-panel"):
-                        with gr.Row(elem_id="search-export-row"):
-                            search_export_button = ui_button("下载结果")
-                        search_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="search-export-result",
-                        )
+                    # 检索结果表格：单栏全宽
+                    search_result = gr.Dataframe(
+                        headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
+                        datatype=["markdown"] * 6,
+                        interactive=False,
+                        row_count=0,
+                        column_count=6,
+                        label="检索结果列表",
+                        buttons=[],
+                        elem_id="search-results-table",
+                        value=initial_search_table_rows,
+                    )
+                    with gr.Row(elem_id="search-pagination-row"):
+                        search_prev_button = ui_button("上一页")
+                        search_next_button = ui_button("下一页")
+                    search_page_info = gr.HTML(
+                        value=format_table_pagination_html(initial_search_page_info),
+                        elem_id="search-page-info",
+                    )
+                search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
+                with gr.Group(elem_id="search-action-panel"):
+                    with gr.Row(elem_id="search-export-row"):
+                        search_export_button = ui_button("下载结果")
+                    search_export_result = gr.HTML(
+                        value=format_operation_result_html(None, title="下载结果"),
+                        elem_id="search-export-result",
+                    )
 
             with gr.Tab("功能设置"):
                 settings_template_state = gr.State(initial_settings_template_state)
@@ -7644,11 +7644,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 settings_selected_knowledge_base_state = gr.State(initial_settings_selected_knowledge_base_id)
                 settings_knowledge_base_page_state = gr.State(initial_settings_knowledge_base_page)
                 with gr.Group(elem_id="settings-overview-panel"):
-                    with gr.Row(elem_id="settings-top-row", equal_height=True):
-                        with gr.Column(scale=6):
-                            settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
-                        with gr.Column(scale=3):
-                            settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
+                    settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
+                    settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
                 with gr.Group(elem_id="settings-workspace-panel"):
                     with gr.Group(elem_id="settings-template-list-panel"):
                         gr.HTML(
@@ -7684,13 +7681,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row(elem_id="settings-list-actions"):
                             settings_new_button = ui_button("新建模板")
                             settings_refresh_button = ui_button("刷新模板")
+                    # 模板详情与表单：合理双栏
                     with gr.Row(elem_id="settings-main-row"):
-                        with gr.Column(scale=3):
+                        with gr.Column(scale=1):
                             settings_template_detail = gr.HTML(
                                 value=initial_settings_template_detail_html,
                                 elem_id="settings-template-detail",
                             )
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=2):
                             with gr.Group(elem_id="settings-template-form"):
                                 gr.Markdown("### 基础信息")
                                 with gr.Group(elem_id="settings-basic-group"):
@@ -7755,13 +7753,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         with gr.Row(elem_id="settings-knowledge-base-list-actions"):
                             settings_knowledge_base_new_button = ui_button("新建知识库")
                             settings_knowledge_base_refresh_button = ui_button("刷新知识库")
+                    # 知识库详情与表单：合理双栏
                     with gr.Row(elem_id="settings-knowledge-base-row"):
-                        with gr.Column(scale=3):
+                        with gr.Column(scale=1):
                             settings_knowledge_base_detail = gr.HTML(
                                 value=initial_settings_knowledge_base_detail_html,
                                 elem_id="settings-knowledge-base-detail",
                             )
-                        with gr.Column(scale=5):
+                        with gr.Column(scale=2):
                             with gr.Group(elem_id="settings-knowledge-base-form"):
                                 gr.Markdown("### 基础信息")
                                 with gr.Group(elem_id="settings-knowledge-base-basic-group"):
@@ -7802,18 +7801,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="settings-knowledge-base-result",
                             )
                 with gr.Group(elem_id="settings-footer-panel"):
-                    with gr.Group(elem_id="settings-footer-module"):
-                        settings_result = gr.HTML(
-                            value=initial_settings_result_html,
-                            elem_id="settings-result-panel",
-                        )
-                        with gr.Group(elem_id="settings-export-panel"):
-                            with gr.Row(elem_id="settings-export-row"):
-                                settings_export_button = ui_button("下载当前配置")
-                        settings_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="settings-export-result",
-                        )
+                    settings_result = gr.HTML(
+                        value=initial_settings_result_html,
+                        elem_id="settings-result-panel",
+                    )
+                    with gr.Group(elem_id="settings-export-panel"):
+                        with gr.Row(elem_id="settings-export-row"):
+                            settings_export_button = ui_button("下载当前配置")
+                    settings_export_result = gr.HTML(
+                        value=format_operation_result_html(None, title="下载结果"),
+                        elem_id="settings-export-result",
+                    )
 
         document_knowledge_base.change(
             fn=change_document_knowledge_base_ui,

@@ -174,12 +174,11 @@ def test_create_ui_app_should_configure_search_controls_and_detail_panel(tmp_pat
     assert "search-input-panel" in elem_ids
     assert "search-top-row" in elem_ids
     assert "search-result-workspace" in elem_ids
-    assert "search-result-row" in elem_ids
+    assert "search-results-table" in elem_ids
     assert "search-export-row" in elem_ids
     assert "search-export-result" in elem_ids
     assert elem_ids.index("search-help-panel") < elem_ids.index("search-result-summary")
     assert elem_ids.index("search-top-row") < elem_ids.index("search-result-workspace")
-    assert elem_ids.index("search-result-summary") < elem_ids.index("search-results-table")
     assert elem_ids.index("search-results-table") < elem_ids.index("search-result-detail")
     assert elem_ids.index("search-export-row") < elem_ids.index("search-export-result")
 
@@ -388,10 +387,11 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
 
     assert any("人工审核用于处理 AI 质检产生的待审核 Claim" in value for value in html_values)
-    assert "review-top-row" in elem_ids
     assert "review-summary-row" in elem_ids
-    assert "review-record-row" in elem_ids
-    assert "review-evidence-row" in elem_ids
+    assert "review-pending-panel" in elem_ids
+    assert "review-processed-panel" in elem_ids
+    assert "review-evidence-list-panel" in elem_ids
+    assert "review-history-panel" in elem_ids
     assert "review-knowledge-base" in elem_ids
     assert "review-focus-panel" in elem_ids
     assert "review-action-panel" in elem_ids
@@ -415,8 +415,10 @@ def test_create_ui_app_should_configure_review_workspace(tmp_path: Path) -> None
     assert "已审核记录" in labels
     assert "列表范围" in labels
     assert "风险筛选" in labels
-    assert elem_ids.index("review-focus-panel") < elem_ids.index("review-evidence-row")
-    assert elem_ids.index("review-evidence-row") < elem_ids.index("review-record-row")
+    assert elem_ids.index("review-focus-panel") < elem_ids.index("review-summary-row")
+    assert elem_ids.index("review-summary-row") < elem_ids.index("review-evidence-list-panel")
+    assert elem_ids.index("review-evidence-list-panel") < elem_ids.index("review-action-panel")
+    assert elem_ids.index("review-action-panel") < elem_ids.index("review-history-panel")
 
 
 def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None:
@@ -462,16 +464,14 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "settings-workspace-panel" in elem_ids
     assert "settings-knowledge-base-panel" in elem_ids
     assert "settings-footer-panel" in elem_ids
-    assert "settings-footer-module" in elem_ids
-    assert "settings-top-row" in elem_ids
+    assert "settings-help-panel" in elem_ids
+    assert "settings-runtime-panel" in elem_ids
     assert "settings-main-row" in elem_ids
     assert "settings-list-actions" in elem_ids
     assert "settings-form-actions" in elem_ids
     assert "settings-basic-group" in elem_ids
     assert "settings-policy-group" in elem_ids
     assert "settings-prompt-group" in elem_ids
-    assert "settings-help-panel" in elem_ids
-    assert "settings-runtime-panel" in elem_ids
     assert "settings-template-list-panel" in elem_ids
     assert "settings-template-table" in elem_ids
     assert "settings-template-detail" in elem_ids
@@ -504,9 +504,6 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert elem_ids.index("settings-overview-panel") < elem_ids.index("settings-workspace-panel")
     assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-knowledge-base-panel")
     assert elem_ids.index("settings-knowledge-base-panel") < elem_ids.index("settings-footer-panel")
-    assert elem_ids.index("settings-footer-panel") < elem_ids.index("settings-footer-module")
-    assert elem_ids.index("settings-top-row") < elem_ids.index("settings-main-row")
-    assert elem_ids.index("settings-main-row") < elem_ids.index("settings-footer-module")
     assert elem_ids.index("settings-help-panel") < elem_ids.index("settings-runtime-panel")
     assert elem_ids.index("settings-template-table") < elem_ids.index("settings-template-detail")
     assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
@@ -578,7 +575,7 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert "document-knowledge-base" in elem_ids
     assert "document-target-knowledge-base" in elem_ids
     assert "document-move-button" in elem_ids
-    assert "document-relationship-row" in elem_ids
+    assert "document-current-actions-row" in elem_ids
     assert "document-current-title" in elem_ids
     assert "document-quality-accordion" in elem_ids
     assert "document-quality-panel" in elem_ids
@@ -634,12 +631,6 @@ def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path)
     assert dataframes["document-quality-chunks-table"]["headers"][0] == "序号"
     assert dataframes["document-quality-batch-table"]["headers"][0] == "序号"
     assert layout_components["document-quality-search-row"].get("equal_height") in (None, False)
-    assert layout_components["document-quality-result-row"].get("equal_height") in (None, False)
-    assert layout_components["document-quality-batch-row"].get("equal_height") in (None, False)
-    assert layout_components["document-quality-config-row"].get("equal_height") in (None, False)
-    assert layout_components["search-result-row"].get("equal_height") in (None, False)
-    assert layout_components["settings-main-row"].get("equal_height") in (None, False)
-    assert layout_components["settings-knowledge-base-row"].get("equal_height") in (None, False)
     assert elem_ids.index("document-quality-search-row") < elem_ids.index("document-quality-search-export-result")
     assert elem_ids.index("document-quality-config-action-row") < elem_ids.index("document-quality-config-export-result")
 
@@ -2094,7 +2085,7 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "display:none" in UI_CSS.replace(" ", "")
     assert "font-size:14px" in UI_CSS.replace(" ", "")
     assert "#search-top-row" in UI_CSS
-    assert "#search-result-row > .gradio-column" in UI_CSS
+    assert "#search-results-table" in UI_CSS
     assert "#search-export-row" in UI_CSS
     assert "#search-export-result" in UI_CSS
     assert "#document-quality-search-export-result" in UI_CSS
@@ -2136,10 +2127,7 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#quality-evidence-table tr:has(button:focus) td" in UI_CSS
     assert "#quality-recent-table tr:has(.selected) td" in UI_CSS
     assert "box-shadow: inset 5px 0 0 0" in UI_CSS
-    assert "#review-top-row" in UI_CSS
     assert "#review-summary-row" in UI_CSS
-    assert "#review-record-row" in UI_CSS
-    assert "#review-evidence-row" in UI_CSS
     assert "#review-filter-row" in UI_CSS
     assert "#review-action-form" in UI_CSS
     assert "#review-action-feedback-row" in UI_CSS
@@ -2147,9 +2135,15 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-export-result" in UI_CSS
     assert "#review-action-buttons" in UI_CSS
     assert "#review-help-panel > div" in UI_CSS
-    assert "#document-management-summary-row" in UI_CSS
+    assert "#review-pending-panel" in UI_CSS
+    assert "#review-processed-panel" in UI_CSS
+    assert "#review-evidence-list-panel" in UI_CSS
+    assert "#review-history-panel" in UI_CSS
     assert "#document-summary-panel" in UI_CSS
     assert "#database-summary-panel" in UI_CSS
+    assert "#document-current-panel" in UI_CSS
+    assert "#database-summary-table-panel" in UI_CSS
+    assert "#document-list-panel" in UI_CSS
     assert "#document-management-actions-row" in UI_CSS
     assert "#document-management-result-row" in UI_CSS
     assert "#document-pagination-row" in UI_CSS
@@ -2160,9 +2154,9 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#document-quality-sample-row" in UI_CSS
     assert "#document-quality-search-row" in UI_CSS
     assert "#document-quality-search-action-row" in UI_CSS
-    assert "#document-quality-result-row" in UI_CSS
-    assert "#document-quality-config-row" in UI_CSS
-    assert "#document-quality-batch-row" in UI_CSS
+    assert "#document-quality-result-panel" in UI_CSS
+    assert "#document-quality-config-panel" in UI_CSS
+    assert "#document-quality-batch-panel" in UI_CSS
     assert "#document-quality-batch-summary" in UI_CSS
     assert "#document-quality-search-page-info" in UI_CSS
     assert "#document-quality-batch-page-info" in UI_CSS
@@ -2193,10 +2187,10 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#settings-form-actions" in UI_CSS
     assert "#settings-knowledge-base-list-actions" in UI_CSS
     assert "#settings-knowledge-base-actions" in UI_CSS
-    assert ".ui-button button" in UI_CSS
-    assert ".ui-button--primary button" in UI_CSS
-    assert ".ui-button--danger button" in UI_CSS
-    assert ".ui-button--pagination button" in UI_CSS
+    assert "button.ui-button" in UI_CSS
+    assert "button.ui-button--primary" in UI_CSS
+    assert "button.ui-button--danger" in UI_CSS
+    assert "button.ui-button--pagination" in UI_CSS
     assert "border-radius:14px" in UI_CSS.replace(" ", "")
     assert "transform:translateY(-1px)" in UI_CSS.replace(" ", "")
     assert "transform:scale(0.98)" in UI_CSS.replace(" ", "")
