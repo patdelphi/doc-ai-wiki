@@ -15,7 +15,8 @@ from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
 from src.ui.exporters import resolve_export_docs_dir
-from src.ui.pages import UI_CSS, build_ui
+from src.ui.pages import build_ui
+from src.ui.css import UI_CSS
 
 
 def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
