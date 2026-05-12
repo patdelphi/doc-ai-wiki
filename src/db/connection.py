@@ -41,6 +41,7 @@ def initialize_database(database_path: Path) -> None:
 
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with create_connection(database_path) as connection:
+        _ensure_auth_tables(connection)
         # 兼容旧库：先补齐会被 schema 中索引立即引用的关键列，避免 executescript 提前失败。
         _preflight_legacy_columns(connection)
         connection.executescript(SCHEMA_SQL)
@@ -49,6 +50,45 @@ def initialize_database(database_path: Path) -> None:
         _ensure_quality_check_columns(connection)
         _ensure_quality_claim_columns(connection)
         _backfill_knowledge_base_columns(connection)
+
+
+def _ensure_auth_tables(connection: sqlite3.Connection) -> None:
+    """补齐认证与授权相关表，确保登录页可直接使用。"""
+
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_tab_access (
+            user_id TEXT NOT NULL,
+            tab_name TEXT NOT NULL,
+            PRIMARY KEY (user_id, tab_name),
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_kb_access (
+            user_id TEXT NOT NULL,
+            knowledge_base_id TEXT NOT NULL,
+            PRIMARY KEY (user_id, knowledge_base_id),
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            user_id TEXT PRIMARY KEY,
+            permissions_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        """
+    )
 
 
 def _preflight_legacy_columns(connection: sqlite3.Connection) -> None:

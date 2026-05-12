@@ -534,6 +534,158 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     )
 
 
+def test_create_ui_app_should_place_auth_controls_beside_tab_header(tmp_path: Path) -> None:
+    """登录后的用户名与退出按钮应独立挂在主 Tabs 顶部区域。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    elem_ids = [str(component.get("props", {}).get("elem_id", "")) for component in components]
+    html_components = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("props", {})
+        for component in components
+        if component.get("type") == "html"
+    }
+    button_components = [component.get("props", {}) for component in components if component.get("type") == "button"]
+
+    assert "main-content" in elem_ids
+    assert "main-tabs" in elem_ids
+    assert "auth-header-actions" in elem_ids
+    assert "auth-user-display" in elem_ids
+    assert "auth-logout-btn" in elem_ids
+    assert elem_ids.index("auth-header-actions") < elem_ids.index("main-tabs")
+    assert elem_ids.index("auth-user-display") > elem_ids.index("auth-header-actions")
+    assert elem_ids.index("auth-logout-btn") > elem_ids.index("auth-header-actions")
+    assert html_components["auth-user-display"].get("value") == ""
+    assert any(
+        props.get("value") == "退出登录" and props.get("elem_id") == "auth-logout-btn"
+        for props in button_components
+    )
+    assert any(
+        str(component.get("props", {}).get("elem_id", "")) == "auth-page"
+        and component.get("props", {}).get("visible") is False
+        for component in components
+    )
+
+
+def test_auth_interactions_should_disable_queue_to_avoid_stuck_pending_state(tmp_path: Path) -> None:
+    """登录、注册与登出是轻量事件，应禁用队列避免前端持续显示处理中。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    dependencies = demo.config.get("dependencies", [])
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    assert any(name == "_do_login" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+    assert any(name == "_do_register" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+    assert any(name == "<lambda>" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+
+
+def test_login_state_should_use_browser_persistence_and_restore_handler(tmp_path: Path) -> None:
+    """登录态应持久化到浏览器，并在刷新后通过 change 事件恢复。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    dependencies = demo.config.get("dependencies", [])
+    component_types = {component.get("id"): str(component.get("type", "")) for component in components}
+
+    browser_state_components = [component for component in components if component.get("type") == "browserstate"]
+    assert browser_state_components
+    assert browser_state_components[0].get("props", {}).get("storage_key") == "wiki-donge-auth-session"
+
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    assert any(
+        name == "_restore_login_session"
+        and any(target[1] == "change" for target in dependency.get("targets", []))
+        and "state" in {component_types.get(output_id, "") for output_id in dependency.get("outputs", [])}
+        for name, dependency in dependency_pairs
+    )
+
+
+def test_input_driven_controls_should_not_use_change_events_on_startup(tmp_path: Path) -> None:
+    """知识库切换、筛选和 Claim 选择应只响应用户输入，避免首屏自动触发 processing。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    dependencies = demo.config.get("dependencies", [])
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    expected_input_handlers = {
+        "change_document_knowledge_base_ui",
+        "change_search_knowledge_base_ui",
+        "render_quality_template",
+        "change_quality_knowledge_base_ui",
+        "select_quality_claim",
+        "select_settings_knowledge_base",
+        "change_review_knowledge_base_ui",
+        "change_review_filters",
+    }
+
+    for handler_name in expected_input_handlers:
+        assert any(
+            name == handler_name and any(target[1] == "input" for target in dependency.get("targets", []))
+            for name, dependency in dependency_pairs
+        ), handler_name
+
+    assert any(
+        name == "list_recent_quality_results_ui" and any(target[1] == "input" for target in dependency.get("targets", []))
+        for name, dependency in dependency_pairs
+    )
+
+
 def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
     """文档管理页应提供突出显示的当前文档区，以及底部折叠的入库质检区。"""
 
@@ -743,8 +895,8 @@ def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp
     assert "阿胶源于驴皮熬制" in str(claim_details[0].get("value", ""))
 
 
-def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> None:
-    """AI 质检页进入时应自动显示最近质检记录。"""
+def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path) -> None:
+    """AI 质检页首次进入时不应自动回填上一次质检记录。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -803,11 +955,9 @@ def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> 
     assert recent_tables
     assert claim_selectors
     assert recent_tables[0].get("value")
-    assert recent_tables[0]["value"]["data"][0][1] == "当前"
-    assert recent_tables[0]["value"]["data"][0][2] == "chkres_demo_001"
-    assert claim_selectors[0].get("value")
-    assert "claim_demo_001" in str(claim_selectors[0].get("value"))
-    assert any("claim_demo_001" in str(choice) for choice in claim_selectors[0].get("choices", []))
+    assert recent_tables[0]["value"]["data"] == []
+    assert claim_selectors[0].get("value") in (None, "")
+    assert claim_selectors[0].get("choices", []) == []
 
 
 def test_create_ui_app_should_paginate_more_than_ten_recent_quality_records(tmp_path: Path) -> None:
@@ -1531,6 +1681,69 @@ def test_quality_interactions_should_disable_queue_for_table_refresh(tmp_path: P
         name == "select_quality_evidence"
         and dependency.get("queue") is False
         and dependency.get("api_name") == "select_quality_evidence"
+        for name, dependency in dependency_pairs
+    )
+
+
+def test_logout_should_clear_auth_inputs_and_messages(tmp_path: Path) -> None:
+    """退出登录时应重置登录页可见状态、输入框和提示信息。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    dependencies = demo.config.get("dependencies", [])
+    component_elem_ids = {
+        component.get("id"): str(component.get("props", {}).get("elem_id", ""))
+        for component in components
+    }
+    component_types = {
+        component.get("id"): str(component.get("type", ""))
+        for component in components
+    }
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    assert any(elem_id == "auth-login-username" for elem_id in component_elem_ids.values())
+    assert any(elem_id == "auth-login-password" for elem_id in component_elem_ids.values())
+
+    expected_reset_outputs = {
+        "auth-page",
+        "main-content",
+        "auth-login-form",
+        "auth-register-form",
+        "auth-login-username",
+        "auth-login-password",
+        "auth-login-result",
+        "auth-register-username",
+        "auth-register-password",
+        "auth-register-password-confirm",
+        "auth-register-result",
+    }
+
+    assert any(
+        name == "_reset_auth_forms"
+        and expected_reset_outputs.issubset({component_elem_ids.get(output_id, "") for output_id in dependency.get("outputs", [])})
+        and dependency.get("queue") is False
+        for name, dependency in dependency_pairs
+    )
+    assert any(
+        name == "<lambda>"
+        and "browserstate" in {component_types.get(output_id, "") for output_id in dependency.get("outputs", [])}
+        and "auth-user-display" in {component_elem_ids.get(output_id, "") for output_id in dependency.get("outputs", [])}
+        and dependency.get("queue") is False
         for name, dependency in dependency_pairs
     )
 

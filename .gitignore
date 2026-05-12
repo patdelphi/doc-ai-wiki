@@ -17,3 +17,8 @@ Docs/*.csv
 index/Docs/
 chat_history.md
 todo - 副本.md
+
+anthropic_skills_temp/
+skill_install_temp/
+.claude/
+.trae/

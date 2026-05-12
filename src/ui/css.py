@@ -2069,4 +2069,201 @@ button.ui-button--pagination {
 #quality-dummy-intake-panel .gradio-row {
   gap: 10px !important;
 }
+
+/* 登录页面：仅在可见时参与布局，避免 visible=False 后仍占满一屏 */
+#auth-page.hide,
+#auth-page.hidden,
+#auth-page[style*="display: none"] {
+  display: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#auth-page:not(.hide):not(.hidden):not([style*="display: none"]) {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--background-fill-primary, #f5f7fa) 0%, var(--background-fill-secondary, #c3cfe2) 100%);
+}
+#auth-center-container {
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 12px;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+  height: auto !important;
+  flex: 0 0 auto !important;
+}
+#auth-center-container h1 {
+  text-align: center;
+  margin-bottom: 20px;
+}
+#auth-login-form,
+#auth-register-form {
+  background: var(--block-background-fill, white);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+#auth-login-form h3,
+#auth-register-form h3 {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+/* 用户信息区：挂到独立绝对定位容器中，确保与标签栏同高同线 */
+#main-content {
+  position: relative;
+}
+#main-tabs {
+  position: relative;
+}
+#main-tabs [role="tablist"] {
+  align-items: stretch !important;
+  min-height: 52px !important;
+  padding-right: 320px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+#main-tabs [role="tablist"] button,
+#main-tabs button[role="tab"] {
+  min-height: 52px !important;
+  height: 52px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+#auth-header-actions {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  z-index: 35 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 18px !important;
+  width: auto !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#auth-header-actions > .gradio-html,
+#auth-header-actions > .gradio-button,
+#auth-header-actions > div {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+}
+#auth-user-display {
+  position: static !important;
+  width: auto !important;
+  max-width: 180px !important;
+  flex: 0 0 auto !important;
+  font-size: 15px;
+  color: var(--body-text-color, #333);
+  line-height: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  height: 52px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#auth-user-display > div,
+#auth-user-display p,
+#auth-user-display span {
+  margin: 0 !important;
+}
+#auth-user-display span {
+  font-size: 15px;
+  font-weight: 600;
+}
+#auth-logout-btn {
+  position: static !important;
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#auth-logout-btn > div,
+#auth-logout-btn > .wrap,
+#auth-logout-btn .wrap,
+#auth-logout-btn .gradio-button {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#auth-logout-btn button,
+#auth-logout-btn .gradio-button {
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--body-text-color, #333) !important;
+  border-radius: 0 !important;
+  transform: none !important;
+  transition: color 0.18s ease !important;
+}
+#auth-logout-btn button:hover,
+#auth-logout-btn .gradio-button:hover,
+#auth-logout-btn button:focus,
+#auth-logout-btn .gradio-button:focus {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+  color: rgba(37, 99, 235, 0.92) !important;
+}
+#auth-logout-btn button:focus-visible,
+#auth-logout-btn .gradio-button:focus-visible,
+#auth-logout-btn button:active,
+#auth-logout-btn .gradio-button:active {
+  outline: none !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+@media (max-width: 960px) {
+  #main-tabs [role="tablist"] {
+    padding-right: 0 !important;
+    min-height: 88px !important;
+  }
+  #auth-header-actions {
+    top: 48px !important;
+    min-height: 36px !important;
+    height: 36px !important;
+    gap: 14px !important;
+  }
+  #auth-user-display {
+    min-height: 36px !important;
+    height: 36px !important;
+  }
+  #auth-logout-btn button,
+  #auth-logout-btn .gradio-button {
+    min-height: 36px !important;
+    height: 36px !important;
+  }
+}
 """

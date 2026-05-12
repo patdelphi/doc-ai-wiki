@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import gradio as gr
 
 from src.ai.embedding import build_embedding_client
 from src.ai.llm import DisabledLLMClient, build_llm_client
 from src.ai.rerank import build_reranker
+from src.auth.service import AuthService
 from src.common.config import AppSettings, get_settings
 from src.db.connection import initialize_database
 from src.ingest.service import IngestService
@@ -25,6 +28,10 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     settings = settings_override or get_settings()
     settings.ensure_runtime_directories()
     initialize_database(settings.sqlite_db_path)
+
+    conn = sqlite3.connect(str(settings.sqlite_db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    auth_service = AuthService(conn)
 
     embedding_client = build_embedding_client(settings)
     llm_client = build_llm_client(settings)
@@ -54,6 +61,7 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
         retrieval_service=retrieval_service,
         quality_service=quality_service,
         review_service=review_service,
+        auth_service=auth_service,
         runtime_config={
             "input_root": str(settings.input_root),
             "templates_dir": str(settings.templates_dir),
