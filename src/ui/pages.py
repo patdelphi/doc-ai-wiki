@@ -11,6 +11,28 @@ from src.auth.service import AUTH_TAB_NAMES, normalize_auth_tab_name
 from src.common.errors import AppError
 from src.ui.css import UI_CSS
 from src.ui.exporters import build_download_url, save_markdown_export
+from src.ui.page_helpers import (
+    TABLE_PAGE_SIZE,
+    build_markdown_table,
+    build_visible_knowledge_base_bundle,
+    change_table_page,
+    filter_visible_knowledge_base_items,
+    format_table_pagination_html,
+    get_row_from_paged_table,
+    get_selected_search_item_from_page_rows,
+    normalize_table_rows,
+    paginate_table_rows,
+    rebuild_readonly_dataframe,
+    reset_table_pagination,
+    resolve_table_row_count,
+    ui_button,
+    extract_login_session_permissions as _extract_login_session_permissions,
+)
+from src.ui.document_page import bind_document_events, build_document_tab
+from src.ui.quality_page import bind_quality_events, build_quality_tab
+from src.ui.review_page import bind_review_events, build_review_tab
+from src.ui.search_page import bind_search_events, build_search_tab
+from src.ui.settings_page import bind_settings_events, build_settings_tab
 from src.ui.viewmodels import (
     build_claim_evidence_rows,
     build_database_summary_rows,
@@ -36,7 +58,6 @@ from src.ui.viewmodels import (
     format_claim_detail_markdown,
     format_active_quality_check_html,
     format_database_summary_html,
-    format_document_management_help_html,
     format_document_detail_html,
     format_document_quality_batch_export_markdown,
     format_document_quality_batch_summary_markdown,
@@ -96,67 +117,10 @@ from src.ui.viewmodels import (
 )
 
 
-TABLE_PAGE_SIZE = 10
 RECENT_QUALITY_FETCH_LIMIT = 200
 AUTH_SESSION_STORAGE_KEY = "wiki-donge-auth-session"
 AUTH_SESSION_SECRET = "wiki_donge_auth_session_v1"
 MAIN_TAB_NAMES = list(AUTH_TAB_NAMES)
-
-
-def filter_visible_knowledge_base_items(
-    knowledge_base_items: list[dict],
-    allowed_kb_ids: set[str] | None,
-    *,
-    is_admin: bool,
-) -> list[dict]:
-    """按权限过滤知识库列表；管理员保持全量可见。"""
-
-    if is_admin or allowed_kb_ids is None:
-        return list(knowledge_base_items)
-    normalized_kb_ids = {str(item_id or "").strip() for item_id in allowed_kb_ids if str(item_id or "").strip()}
-    return [
-        item
-        for item in knowledge_base_items
-        if str(item.get("knowledge_base_id") or "").strip() in normalized_kb_ids
-    ]
-
-
-def build_visible_knowledge_base_bundle(
-    knowledge_base_items: list[dict],
-    allowed_kb_ids: set[str] | None,
-    *,
-    is_admin: bool,
-    selected_knowledge_base_id: str | None = None,
-) -> tuple[list[dict], list[str], str | None]:
-    """根据权限构建可见知识库列表、下拉选项与当前选中项。"""
-
-    visible_items = filter_visible_knowledge_base_items(
-        knowledge_base_items,
-        allowed_kb_ids,
-        is_admin=is_admin,
-    )
-    visible_choices = build_knowledge_base_choices(visible_items)
-    default_choice = next(
-        (
-            choice
-            for choice in visible_choices
-            if any(
-                item.get("is_default")
-                and parse_knowledge_base_choice(choice) == item.get("knowledge_base_id")
-                for item in visible_items
-            )
-        ),
-        visible_choices[0] if visible_choices else None,
-    )
-    normalized_selected_id = str(selected_knowledge_base_id or "").strip()
-    available_ids = {str(item.get("knowledge_base_id") or "").strip() for item in visible_items}
-    if normalized_selected_id not in available_ids:
-        normalized_selected_id = parse_knowledge_base_choice(default_choice or "")
-    selected_choice = next(
-        (choice for choice in visible_choices if parse_knowledge_base_choice(choice) == normalized_selected_id),
-        default_choice,
-    )
-    return visible_items, visible_choices, selected_choice
 
 
 def extract_login_session_permissions(
@@ -164,67 +128,7 @@ def extract_login_session_permissions(
 ) -> tuple[bool, set[str] | None, set[str] | None]:
     """从登录态中提取管理员标记、页签权限和知识库权限。"""
 
-    if session is None:
-        # 兼容直接调用内部回调函数的历史路径：未显式传入登录态时，保持全量可见。
-        return True, None, None
-    if not isinstance(session, dict):
-        return False, set(), set()
-    is_admin = bool(session.get("is_admin", False))
-    permissions = session.get("permissions") if isinstance(session.get("permissions"), dict) else {}
-    if is_admin:
-        return True, None, None
-    tab_names = {
-        normalize_auth_tab_name(str(tab_name or ""))
-        for tab_name in (permissions.get("tab_names") or [])
-        if str(tab_name or "").strip()
-    }
-    kb_ids = {
-        str(knowledge_base_id or "").strip()
-        for knowledge_base_id in (permissions.get("kb_ids") or [])
-        if str(knowledge_base_id or "").strip()
-    }
-    return False, tab_names, kb_ids
-
-
-
-
-def ui_button(
-    value: str | None = None,
-    *,
-    tone: str | None = None,
-    elem_classes: str | list[str] | tuple[str, ...] | None = None,
-    **kwargs: object,
-) -> gr.Button:
-    """构建统一按钮，按语义映射样式，避免页面各自追加按钮补丁。"""
-
-    classes = ["ui-button"]
-    variant = str(kwargs.get("variant") or "").strip().lower()
-    resolved_tone = tone
-    if resolved_tone is None:
-        normalized_value = (value or "").strip()
-        if variant == "primary" or normalized_value.startswith(("保存", "开始模拟")):
-            resolved_tone = "primary"
-        elif variant == "stop" or normalized_value.startswith("删除"):
-            resolved_tone = "danger"
-        elif normalized_value in {"上一页", "下一页"}:
-            resolved_tone = "pagination"
-        else:
-            resolved_tone = "secondary"
-    classes.append(f"ui-button--{resolved_tone}")
-    resolved_min_width = 164
-    if resolved_tone == "pagination":
-        resolved_min_width = 136
-    elif resolved_tone in {"primary", "danger"}:
-        resolved_min_width = 148
-    elif (value or "").startswith("下载"):
-        resolved_min_width = 188
-    kwargs.setdefault("scale", 0)
-    kwargs.setdefault("min_width", resolved_min_width)
-    if isinstance(elem_classes, str):
-        classes.append(elem_classes)
-    elif elem_classes:
-        classes.extend(elem_classes)
-    return gr.Button(value, elem_classes=classes, **kwargs)
+    return _extract_login_session_permissions(session, normalize_tab_name=normalize_auth_tab_name)
 
 
 def _build_quality_dummy_card_html(title: str, body: str, *, tone: str = "default") -> str:
@@ -1702,143 +1606,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 title="下载结果",
             )
 
-    def build_markdown_table(headers: list[object], rows: list[list[object]]) -> str:
-        """将表头和行数据转换为 Markdown 表格。"""
-
-        normalized_headers = [str(item if item not in (None, "") else "-").replace("|", "\\|") for item in headers]
-        header_row = "| " + " | ".join(normalized_headers) + " |"
-        separator_row = "| " + " | ".join("---" for _ in normalized_headers) + " |"
-        body_rows = [
-            "| " + " | ".join(str(cell if cell not in (None, "") else "-").replace("\r", " ").replace("\n", "<br>").replace("|", "\\|") for cell in row) + " |"
-            for row in rows
-        ]
-        return "\n".join([header_row, separator_row, *body_rows])
-
-    def normalize_table_rows(rows: object) -> list[list[object]]:
-        """将 DataFrame 或任意二维列表规范化为列表行。"""
-
-        if hasattr(rows, "values"):
-            return rows.values.tolist()
-        normalized_rows = rows or []
-        return list(normalized_rows)
-
-    def paginate_table_rows(
-        rows: object,
-        page: int | float | None,
-        *,
-        prepend_sequence: bool,
-    ) -> tuple[list[list[object]], int, int, str]:
-        """按固定页大小裁剪表格行，并按需补自然序号。"""
-
-        normalized_rows = normalize_table_rows(rows)
-        total_rows = len(normalized_rows)
-        total_pages = max(1, (total_rows + TABLE_PAGE_SIZE - 1) // TABLE_PAGE_SIZE)
-        try:
-            resolved_page = int(page or 1)
-        except (TypeError, ValueError):
-            resolved_page = 1
-        resolved_page = max(1, min(resolved_page, total_pages))
-        start_index = (resolved_page - 1) * TABLE_PAGE_SIZE
-        end_index = start_index + TABLE_PAGE_SIZE
-        page_rows = normalized_rows[start_index:end_index]
-        if prepend_sequence:
-            page_rows = [[str(start_index + offset + 1), *list(row)] for offset, row in enumerate(page_rows)]
-        page_info = f"第 {resolved_page} / {total_pages} 页，共 {total_rows} 条，每页最多 {TABLE_PAGE_SIZE} 行"
-        return page_rows, resolved_page, total_pages, page_info
-
-    def change_table_page(
-        rows: object,
-        current_page: int | float | None,
-        *,
-        action: str,
-        prepend_sequence: bool,
-    ) -> tuple[list[list[object]], int, str]:
-        """根据上一页/下一页动作切换表格分页。"""
-
-        normalized_rows = normalize_table_rows(rows)
-        _current_rows, resolved_page, total_pages, _page_info = paginate_table_rows(
-            normalized_rows,
-            current_page,
-            prepend_sequence=prepend_sequence,
-        )
-        target_page = resolved_page - 1 if action == "prev" else resolved_page + 1
-        if action not in {"prev", "next"}:
-            target_page = resolved_page
-        target_page = max(1, min(target_page, total_pages))
-        page_rows, final_page, _final_total_pages, page_info = paginate_table_rows(
-            normalized_rows,
-            target_page,
-            prepend_sequence=prepend_sequence,
-        )
-        return page_rows, final_page, page_info
-
-    def reset_table_pagination(
-        rows: object,
-        *,
-        prepend_sequence: bool,
-    ) -> tuple[list[list[object]], int, str]:
-        """将表格重置到第一页。"""
-
-        page_rows, page, _total_pages, page_info = paginate_table_rows(
-            rows,
-            1,
-            prepend_sequence=prepend_sequence,
-        )
-        return page_rows, page, page_info
-
-    def get_row_from_paged_table(
-        rows: object,
-        evt: gr.SelectData,
-        *,
-        id_column_index: int,
-    ) -> list[object]:
-        """从当前页表格中取出被点击的整行。"""
-
-        normalized_rows = normalize_table_rows(rows)
-        if not normalized_rows:
-            return []
-        index = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
-        try:
-            row_index = int(index)
-        except (TypeError, ValueError):
-            row_index = 0
-        if row_index < 0 or row_index >= len(normalized_rows):
-            row_index = 0
-        selected_row = normalized_rows[row_index] if normalized_rows else []
-        if not selected_row:
-            return []
-        if id_column_index >= len(selected_row):
-            return []
-        return list(selected_row)
-
-    def get_selected_search_item_from_page_rows(
-        page_rows: object,
-        raw_rows: list[dict] | None,
-        evt: gr.SelectData,
-    ) -> dict | None:
-        """根据当前页表格的序号列，定位被点击的原始检索结果。"""
-
-        normalized_page_rows = normalize_table_rows(page_rows)
-        normalized_raw_rows = raw_rows or []
-        if not normalized_page_rows or not normalized_raw_rows:
-            return None
-        selected_row = get_row_from_paged_table(normalized_page_rows, evt, id_column_index=0)
-        if not selected_row:
-            return None
-        sequence_text = re.sub(r"<[^>]+>", "", str(selected_row[0] if selected_row else "")).strip()
-        matched = re.search(r"\d+", sequence_text)
-        if not matched:
-            return None
-        raw_index = int(matched.group()) - 1
-        if raw_index < 0 or raw_index >= len(normalized_raw_rows):
-            return None
-        return normalized_raw_rows[raw_index]
-
-    def format_table_pagination_html(page_info: str) -> str:
-        """格式化表格分页提示。"""
-
-        return f"<div style='padding: 6px 2px 0 2px; color: #6b7280; font-size: 12px;'>{page_info}</div>"
-
     def build_document_table_page_outputs(
         rows: object,
         page: int | float | None = 1,
@@ -2077,34 +1844,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             prepend_sequence=True,
         )
         return page_rows, resolved_page, format_table_pagination_html(page_info)
-
-    def resolve_table_row_count(rows: list[list[object]] | None, *, default_rows: int = TABLE_PAGE_SIZE) -> int:
-        """根据当前页实际数据量返回更稳定的表格可见行数。"""
-
-        row_count = len(rows or [])
-        if row_count <= 0:
-            return 1
-        return min(default_rows, row_count)
-
-    def rebuild_readonly_dataframe(
-        *,
-        headers: list[str],
-        rows: list[list[object]] | None,
-        label: str,
-        elem_id: str,
-        row_count: int,
-        component_key: str,
-        max_height: int = 420,
-    ) -> dict:
-        """返回只读表格更新参数，避免在 select 事件里重建 Dataframe。"""
-
-        _ = (headers, label, elem_id, component_key)
-        resolved_rows = rows or []
-        return gr.update(
-            value=resolved_rows,
-            row_count=max(1, int(row_count)),
-            max_height=max_height,
-        )
 
     def build_settings_template_table_page_outputs(
         template_items: list[dict] | None,
@@ -4825,220 +4564,93 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 auth_logout_btn = gr.Button("退出登录", elem_id="auth-logout-btn", variant="secondary")
             with gr.Tabs(elem_id="main-tabs"):
                 with gr.Tab("AI 质检") as quality_tab:
-                    with gr.Row(elem_id="quality-top-row"):
-                        with gr.Column(scale=1, elem_id="quality-input-panel"):
-                            gr.Markdown("### 1. 输入与执行")
-                            with gr.Row():
-                                quality_input = gr.Textbox(
-                                    label="待质检文本",
-                                    lines=8,
-                                    placeholder="建议一行或一句输入一个明确说法，系统会拆成多条 Claim 逐条质检。",
-                                )
-                            with gr.Row():
-                                quality_knowledge_base = gr.Dropdown(
-                                    label="当前知识库",
-                                    choices=knowledge_base_choices,
-                                    value=initial_knowledge_base_choice,
-                                    interactive=True,
-                                    elem_id="quality-knowledge-base",
-                                )
-                                quality_template = gr.Dropdown(
-                                    label="质检模板",
-                                    choices=template_choices,
-                                    value=default_template_choice,
-                                    interactive=True,
-                                )
-                            with gr.Row():
-                                quality_button = ui_button("开始质检")
-                                recent_quality_button = ui_button("加载最近质检结果")
-                        with gr.Column(scale=1):
-                            quality_help = gr.HTML(value=format_quality_help_html(), elem_id="quality-help-panel")
-                    with gr.Row(elem_id="quality-template-row"):
-                        quality_template_detail = gr.HTML(
-                            value=format_quality_template_html(default_template),
-                            elem_id="quality-template-panel",
-                        )
-                    formatted_quality_result_state = gr.State(initial_formatted_quality_result)
-                    quality_claim_page_state = gr.State(initial_quality_claim_page)
-                    quality_evidence_page_state = gr.State(initial_claim_evidence_page)
-                    recent_quality_page_state = gr.State(initial_recent_quality_page)
-                    quality_evaluation_page_state = gr.State(initial_quality_evaluation_page)
-                    with gr.Row(elem_id="quality-summary-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            quality_progress = gr.HTML(value=initial_progress_html, elem_id="quality-progress-panel")
-                        with gr.Column(scale=1):
-                            quality_result = gr.HTML(value=initial_result_html, elem_id="quality-result-panel")
-
-                    # State 组件不占布局空间，放在 Row 外部
-                    selected_claim_state = gr.State(initial_selected_claim)
-                    claim_detail_state = gr.State(initial_claim_detail_map)
-                    recent_quality_state = gr.State(_initial_recent_results_state)
-                    evidence_items_state = gr.State(initial_evidence_items)
-
-                    with gr.Row(elem_id="quality-claim-row", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-claim-list-panel"):
-                            gr.Markdown("### 2. Claim 列表")
-                            quality_active_check = gr.HTML(
-                                value=initial_active_quality_check_html,
-                                elem_id="quality-active-check",
-                            )
-                            initial_claim_choices, initial_selected_claim_choice, _initial_claim_choice_page, _initial_claim_choice_page_info = build_quality_claim_selector_page_outputs(
-                                initial_formatted_quality_result,
-                                initial_selected_claim,
-                                initial_quality_claim_page,
-                            )
-                            quality_claims = gr.Radio(
-                                choices=initial_claim_choices,
-                                value=initial_selected_claim_choice,
-                                interactive=True,
-                                label="Claim 列表",
-                                elem_id="quality-claims-table",
-                            )
-                            with gr.Row(elem_id="quality-claim-pagination-row"):
-                                quality_claim_prev_button = ui_button("上一页")
-                                quality_claim_next_button = ui_button("下一页")
-                            quality_claim_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_quality_claim_page_info),
-                                elem_id="quality-claim-page-info",
-                            )
-                        with gr.Column(scale=1):
-                            claim_detail_view = gr.HTML(value=initial_claim_view, elem_id="quality-claim-detail")
-                            quality_review_claim_detail = gr.HTML(value=initial_review_view, visible=False)
-
-                    # 证据列表：单栏全宽表格 + 详情下沉
-                    with gr.Column(elem_id="quality-evidence-list-panel"):
-                        gr.Markdown("### 3. 证据列表")
-                        claim_evidence_table = gr.Dataframe(
-                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="证据列表",
-                            buttons=[],
-                            elem_id="quality-evidence-table",
-                            value=initial_claim_evidence_table_rows,
-                            max_height=420,
-                        )
-                        with gr.Row(elem_id="quality-evidence-pagination-row"):
-                            quality_evidence_prev_button = ui_button("上一页")
-                            quality_evidence_next_button = ui_button("下一页")
-                        quality_evidence_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_claim_evidence_page_info),
-                            elem_id="quality-evidence-page-info",
-                        )
-                    claim_evidence_detail = gr.HTML(
-                        value=initial_evidence_detail_html,
-                        elem_id="quality-evidence-detail",
+                    initial_claim_choices, initial_selected_claim_choice, _initial_claim_choice_page, _initial_claim_choice_page_info = build_quality_claim_selector_page_outputs(
+                        initial_formatted_quality_result,
+                        initial_selected_claim,
+                        initial_quality_claim_page,
                     )
-
-                    # 历史质检记录：去掉冗余 Row 包裹，Column 直接挂 Tab 下
-                    with gr.Column(scale=1, elem_id="quality-history-panel"):
-                        gr.Markdown("### 4. 历史质检记录")
-                        recent_quality_note = gr.HTML(
-                            value=(
-                                "<div>最近质检记录用于回看历史质检任务。"
-                                "切换历史记录后，可重新查看当次的 Claim 与证据。</div>"
-                            ),
-                            elem_id="quality-history-note",
-                        )
-                        recent_quality_scope_filter = gr.Dropdown(
-                            label="历史任务范围",
-                            choices=recent_quality_scope_choices,
-                            value=initial_recent_quality_scope_value,
-                            interactive=True,
-                            elem_id="quality-history-scope",
-                        )
-                        recent_quality_checks = gr.Dataframe(
-                            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=TABLE_PAGE_SIZE,
-                            column_count=9,
-                            label="最近质检记录",
-                            buttons=[],
-                            elem_id="quality-recent-table",
-                            value=initial_recent_quality_table_rows,
-                            max_height=420,
-                        )
-                        with gr.Row(elem_id="quality-recent-pagination-row"):
-                            recent_quality_prev_button = ui_button("上一页")
-                            recent_quality_next_button = ui_button("下一页")
-                        recent_quality_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_recent_quality_page_info),
-                            elem_id="quality-recent-page-info",
-                        )
-
-                    # 下载结果与动作：去掉冗余 Row 包裹，Column 直接挂 Tab 下
-                    with gr.Column(scale=1, elem_id="quality-action-panel"):
-                        gr.Markdown("### 5. 下载结果与动作")
-                        with gr.Row(elem_id="quality-export-row"):
-                            quality_export_button = ui_button("下载结果")
-                        quality_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="quality-export-result",
-                        )
-                    with gr.Accordion("效果评测", open=False, elem_id="quality-evaluation-accordion"):
-                        with gr.Column(scale=1, elem_id="quality-evaluation-panel"):
-                            quality_evaluation_help = gr.HTML(
-                                value=format_quality_evaluation_help_html(),
-                                elem_id="quality-evaluation-help",
-                            )
-                            quality_evaluation_cases = gr.Textbox(
-                                label="效果评测样例 JSON",
-                                lines=12,
-                                value=initial_quality_evaluation_cases,
-                                placeholder="输入 JSON 数组，每项至少包含 input_text，可选 expected_overall_verdict / expected_risk_level / expected_claim_count",
-                            )
-                            with gr.Row(elem_id="quality-evaluation-action-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    quality_evaluation_button = ui_button("执行效果评测")
-                                with gr.Column(scale=1):
-                                    quality_evaluation_export_button = ui_button("下载评测结果")
-                                    quality_evaluation_export_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="下载结果"),
-                                        elem_id="quality-evaluation-export-result",
-                                    )
-                            quality_evaluation_summary = gr.HTML(
-                                value=initial_quality_evaluation_summary,
-                                elem_id="quality-evaluation-summary",
-                            )
-                            quality_evaluation_result_state = gr.State(initial_quality_evaluation_result)
-                            quality_evaluation_table = gr.Dataframe(
-                                headers=[
-                                    "序号",
-                                    "样例 ID",
-                                    "预期结论",
-                                    "实际结论",
-                                    "结论命中",
-                                    "预期风险",
-                                    "实际风险",
-                                    "风险命中",
-                                    "预期 Claim 数",
-                                    "实际 Claim 数",
-                                    "Claim 数命中",
-                                    "宽松命中",
-                                    "完全命中",
-                                    "差异说明",
-                                    "建议排查方向",
-                                    "输入摘要",
-                                ],
-                                datatype=["str"] * 16,
-                                interactive=False,
-                                row_count=0,
-                                column_count=16,
-                                label="效果评测明细",
-                                buttons=[],
-                                elem_id="quality-evaluation-table",
-                                value=initial_quality_evaluation_table_rows,
-                            )
-                            with gr.Row(elem_id="quality-evaluation-pagination-row"):
-                                quality_evaluation_prev_button = ui_button("上一页")
-                                quality_evaluation_next_button = ui_button("下一页")
-                            quality_evaluation_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_quality_evaluation_page_info),
-                                elem_id="quality-evaluation-page-info",
-                            )
+                    quality_components = build_quality_tab(
+                        knowledge_base_choices=knowledge_base_choices,
+                        initial_knowledge_base_choice=initial_knowledge_base_choice,
+                        template_choices=template_choices,
+                        default_template_choice=default_template_choice,
+                        default_template=default_template,
+                        initial_formatted_quality_result=initial_formatted_quality_result,
+                        initial_quality_claim_page=initial_quality_claim_page,
+                        initial_quality_claim_choices=initial_claim_choices,
+                        initial_selected_claim_choice=initial_selected_claim_choice,
+                        initial_selected_claim=initial_selected_claim,
+                        initial_quality_claim_page_info=initial_quality_claim_page_info,
+                        initial_claim_view=initial_claim_view,
+                        initial_claim_detail_map=initial_claim_detail_map,
+                        initial_review_view=initial_review_view,
+                        initial_evidence_items=initial_evidence_items,
+                        initial_claim_evidence_page=initial_claim_evidence_page,
+                        initial_claim_evidence_table_rows=initial_claim_evidence_table_rows,
+                        initial_claim_evidence_page_info=initial_claim_evidence_page_info,
+                        initial_evidence_detail_html=initial_evidence_detail_html,
+                        recent_quality_scope_choices=recent_quality_scope_choices,
+                        initial_recent_quality_scope_value=initial_recent_quality_scope_value,
+                        initial_recent_results_state=_initial_recent_results_state,
+                        initial_recent_quality_page=initial_recent_quality_page,
+                        initial_recent_quality_table_rows=initial_recent_quality_table_rows,
+                        initial_recent_quality_page_info=initial_recent_quality_page_info,
+                        initial_progress_html=initial_progress_html,
+                        initial_result_html=initial_result_html,
+                        initial_active_quality_check_html=initial_active_quality_check_html,
+                        initial_quality_evaluation_cases=initial_quality_evaluation_cases,
+                        initial_quality_evaluation_summary=initial_quality_evaluation_summary,
+                        initial_quality_evaluation_result=initial_quality_evaluation_result,
+                        initial_quality_evaluation_page=initial_quality_evaluation_page,
+                        initial_quality_evaluation_table_rows=initial_quality_evaluation_table_rows,
+                        initial_quality_evaluation_page_info=initial_quality_evaluation_page_info,
+                    )
+                    quality_input = quality_components["quality_input"]
+                    quality_knowledge_base = quality_components["quality_knowledge_base"]
+                    quality_template = quality_components["quality_template"]
+                    quality_button = quality_components["quality_button"]
+                    recent_quality_button = quality_components["recent_quality_button"]
+                    quality_template_detail = quality_components["quality_template_detail"]
+                    formatted_quality_result_state = quality_components["formatted_quality_result_state"]
+                    quality_claim_page_state = quality_components["quality_claim_page_state"]
+                    quality_evidence_page_state = quality_components["quality_evidence_page_state"]
+                    recent_quality_page_state = quality_components["recent_quality_page_state"]
+                    quality_evaluation_page_state = quality_components["quality_evaluation_page_state"]
+                    quality_progress = quality_components["quality_progress"]
+                    quality_result = quality_components["quality_result"]
+                    selected_claim_state = quality_components["selected_claim_state"]
+                    claim_detail_state = quality_components["claim_detail_state"]
+                    recent_quality_state = quality_components["recent_quality_state"]
+                    evidence_items_state = quality_components["evidence_items_state"]
+                    quality_active_check = quality_components["quality_active_check"]
+                    quality_claims = quality_components["quality_claims"]
+                    quality_claim_prev_button = quality_components["quality_claim_prev_button"]
+                    quality_claim_next_button = quality_components["quality_claim_next_button"]
+                    quality_claim_page_info = quality_components["quality_claim_page_info"]
+                    claim_detail_view = quality_components["claim_detail_view"]
+                    quality_review_claim_detail = quality_components["quality_review_claim_detail"]
+                    claim_evidence_table = quality_components["claim_evidence_table"]
+                    quality_evidence_prev_button = quality_components["quality_evidence_prev_button"]
+                    quality_evidence_next_button = quality_components["quality_evidence_next_button"]
+                    quality_evidence_page_info = quality_components["quality_evidence_page_info"]
+                    claim_evidence_detail = quality_components["claim_evidence_detail"]
+                    recent_quality_scope_filter = quality_components["recent_quality_scope_filter"]
+                    recent_quality_checks = quality_components["recent_quality_checks"]
+                    recent_quality_prev_button = quality_components["recent_quality_prev_button"]
+                    recent_quality_next_button = quality_components["recent_quality_next_button"]
+                    recent_quality_page_info = quality_components["recent_quality_page_info"]
+                    quality_export_button = quality_components["quality_export_button"]
+                    quality_export_result = quality_components["quality_export_result"]
+                    quality_evaluation_cases = quality_components["quality_evaluation_cases"]
+                    quality_evaluation_button = quality_components["quality_evaluation_button"]
+                    quality_evaluation_export_button = quality_components["quality_evaluation_export_button"]
+                    quality_evaluation_export_result = quality_components["quality_evaluation_export_result"]
+                    quality_evaluation_summary = quality_components["quality_evaluation_summary"]
+                    quality_evaluation_result_state = quality_components["quality_evaluation_result_state"]
+                    quality_evaluation_table = quality_components["quality_evaluation_table"]
+                    quality_evaluation_prev_button = quality_components["quality_evaluation_prev_button"]
+                    quality_evaluation_next_button = quality_components["quality_evaluation_next_button"]
+                    quality_evaluation_page_info = quality_components["quality_evaluation_page_info"]
 
                 with gr.Tab("AI 质检优化 Dummy", visible=False):
                     with gr.Row(elem_id="quality-dummy-row-1", equal_height=True):
@@ -5276,157 +4888,55 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     review_processed_page_state = gr.State(initial_review_processed_page)
                     review_evidence_page_state = gr.State(initial_review_evidence_page)
                     review_history_page_state = gr.State(initial_review_history_page)
-                    with gr.Group(elem_id="review-focus-panel"):
-                        # 顶部筛选
-                        with gr.Row(elem_id="review-filter-row"):
-                            review_knowledge_base = gr.Dropdown(
-                                label="当前知识库",
-                                choices=knowledge_base_choices,
-                                value=initial_knowledge_base_choice,
-                                interactive=True,
-                                elem_id="review-knowledge-base",
-                            )
-                            review_scope_filter = gr.Dropdown(
-                                label="列表范围",
-                                choices=review_scope_choices,
-                                value=review_scope_choices[0],
-                                interactive=True,
-                            )
-                            review_risk_filter = gr.Dropdown(
-                                label="风险筛选",
-                                choices=review_risk_choices,
-                                value=review_risk_choices[0],
-                                interactive=True,
-                            )
-                        review_help = gr.HTML(value=format_review_help_html(), elem_id="review-help-panel")
-
-                        # 待处理记录：单栏全宽
-                        with gr.Column(elem_id="review-pending-panel"):
-                            review_pending_candidates = gr.Dataframe(
-                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=0,
-                                column_count=9,
-                                label="待处理记录",
-                                buttons=[],
-                                elem_id="review-pending-table",
-                                value=initial_review_pending_table_rows,
-                            )
-                            with gr.Row(elem_id="review-pending-pagination-row"):
-                                review_pending_prev_button = ui_button("上一页")
-                                review_pending_next_button = ui_button("下一页")
-                            review_pending_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_review_pending_page_info),
-                                elem_id="review-pending-page-info",
-                            )
-
-                        # 已处理 Claim：单栏全宽
-                        with gr.Column(elem_id="review-processed-panel"):
-                            review_processed_candidates = gr.Dataframe(
-                                headers=["序号", "Claim ID", "Claim 摘要", "当前判定", "风险等级", "审核状态", "来源文档", "质检模板", "质检时间"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=0,
-                                column_count=9,
-                                label="已处理 Claim",
-                                buttons=[],
-                                elem_id="review-processed-table",
-                                value=initial_review_processed_table_rows,
-                            )
-                            with gr.Row(elem_id="review-processed-pagination-row"):
-                                review_processed_prev_button = ui_button("上一页")
-                                review_processed_next_button = ui_button("下一页")
-                            review_processed_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_review_processed_page_info),
-                                elem_id="review-processed-page-info",
-                            )
-
-                    # Claim 详情与证据详情：合理双栏
-                    with gr.Row(elem_id="review-summary-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            review_claim_detail_panel = gr.HTML(value=initial_review_claim_view, elem_id="review-claim-detail")
-                        with gr.Column(scale=1):
-                            review_evidence_detail = gr.HTML(
-                                value=initial_review_evidence_detail_html,
-                                elem_id="review-evidence-detail",
-                            )
-
-                    # 证据列表：单栏全宽
-                    with gr.Column(elem_id="review-evidence-list-panel"):
-                        review_evidence_table = gr.Dataframe(
-                            headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="关联证据列表",
-                            buttons=[],
-                            elem_id="review-evidence-table",
-                            value=initial_review_evidence_table_rows,
-                        )
-                        with gr.Row(elem_id="review-evidence-pagination-row"):
-                            review_evidence_prev_button = ui_button("上一页")
-                            review_evidence_next_button = ui_button("下一页")
-                        review_evidence_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_review_evidence_page_info),
-                            elem_id="review-evidence-page-info",
-                        )
-
-                    # 审核动作与反馈
-                    with gr.Group(elem_id="review-action-panel"):
-                        with gr.Group(elem_id="review-action-form"):
-                            review_action_input = gr.Dropdown(
-                                choices=review_action_choices,
-                                value=initial_review_action_value,
-                                label="审核动作",
-                                interactive=True,
-                            )
-                            review_note_input = gr.Textbox(
-                                label="审核备注",
-                                lines=4,
-                                value=initial_review_note_value,
-                            )
-                        with gr.Row(elem_id="review-action-buttons"):
-                            review_button = ui_button("提交审核")
-                            review_history_button = ui_button("刷新审核列表")
-                            review_export_button = ui_button("下载当前审核结果")
-                        with gr.Row(elem_id="review-action-feedback-row"):
-                            with gr.Column(scale=1):
-                                review_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="审核结果"),
-                                    elem_id="review-result-panel",
-                                )
-                            with gr.Column(scale=1):
-                                review_export_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="下载结果"),
-                                    elem_id="review-export-result",
-                                )
-
-                    # 已审核记录：单栏全宽
-                    with gr.Column(elem_id="review-history-panel"):
-                        review_history = gr.Dataframe(
-                            headers=["序号", "审核 ID", "Claim ID", "审核动作", "审核状态", "审核人", "审核时间", "审核备注", "Claim 摘要"],
-                            datatype=["str"] * 9,
-                            interactive=False,
-                            row_count=0,
-                            column_count=9,
-                            label="已审核记录",
-                            buttons=[],
-                            elem_id="review-history-table",
-                            value=initial_review_history_table_rows,
-                        )
-                        with gr.Row(elem_id="review-history-pagination-row"):
-                            review_history_prev_button = ui_button("上一页")
-                            review_history_next_button = ui_button("下一页")
-                        review_history_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_review_history_page_info),
-                            elem_id="review-history-page-info",
-                        )
-                        review_record_detail = gr.HTML(
-                            value=initial_review_record_detail_html,
-                            elem_id="review-record-detail",
-                        )
+                    review_components = build_review_tab(
+                        knowledge_base_choices=knowledge_base_choices,
+                        initial_knowledge_base_choice=initial_knowledge_base_choice,
+                        review_scope_choices=review_scope_choices,
+                        review_risk_choices=review_risk_choices,
+                        review_action_choices=review_action_choices,
+                        initial_review_pending_table_rows=initial_review_pending_table_rows,
+                        initial_review_pending_page_info=initial_review_pending_page_info,
+                        initial_review_processed_table_rows=initial_review_processed_table_rows,
+                        initial_review_processed_page_info=initial_review_processed_page_info,
+                        initial_review_claim_view=initial_review_claim_view,
+                        initial_review_evidence_detail_html=initial_review_evidence_detail_html,
+                        initial_review_evidence_table_rows=initial_review_evidence_table_rows,
+                        initial_review_evidence_page_info=initial_review_evidence_page_info,
+                        initial_review_action_value=initial_review_action_value,
+                        initial_review_note_value=initial_review_note_value,
+                        initial_review_history_table_rows=initial_review_history_table_rows,
+                        initial_review_history_page_info=initial_review_history_page_info,
+                        initial_review_record_detail_html=initial_review_record_detail_html,
+                    )
+                    review_knowledge_base = review_components["review_knowledge_base"]
+                    review_scope_filter = review_components["review_scope_filter"]
+                    review_risk_filter = review_components["review_risk_filter"]
+                    review_pending_candidates = review_components["review_pending_candidates"]
+                    review_pending_prev_button = review_components["review_pending_prev_button"]
+                    review_pending_next_button = review_components["review_pending_next_button"]
+                    review_pending_page_info = review_components["review_pending_page_info"]
+                    review_processed_candidates = review_components["review_processed_candidates"]
+                    review_processed_prev_button = review_components["review_processed_prev_button"]
+                    review_processed_next_button = review_components["review_processed_next_button"]
+                    review_processed_page_info = review_components["review_processed_page_info"]
+                    review_claim_detail_panel = review_components["review_claim_detail_panel"]
+                    review_evidence_detail = review_components["review_evidence_detail"]
+                    review_evidence_table = review_components["review_evidence_table"]
+                    review_evidence_prev_button = review_components["review_evidence_prev_button"]
+                    review_evidence_next_button = review_components["review_evidence_next_button"]
+                    review_evidence_page_info = review_components["review_evidence_page_info"]
+                    review_action_input = review_components["review_action_input"]
+                    review_note_input = review_components["review_note_input"]
+                    review_button = review_components["review_button"]
+                    review_history_button = review_components["review_history_button"]
+                    review_export_button = review_components["review_export_button"]
+                    review_result = review_components["review_result"]
+                    review_export_result = review_components["review_export_result"]
+                    review_history = review_components["review_history"]
+                    review_history_prev_button = review_components["review_history_prev_button"]
+                    review_history_next_button = review_components["review_history_next_button"]
+                    review_history_page_info = review_components["review_history_page_info"]
+                    review_record_detail = review_components["review_record_detail"]
 
                 with gr.Tab("知识库管理") as document_tab:
                     database_page_state = gr.State(initial_database_page)
@@ -5435,367 +4945,140 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     document_quality_chunks_page_state = gr.State(initial_document_quality_chunks_page)
                     document_quality_search_page_state = gr.State(initial_document_quality_search_page)
                     document_quality_batch_page_state = gr.State(initial_document_quality_batch_page)
-                    with gr.Row(elem_id="document-management-top-row"):
-                        with gr.Column(scale=1):
-                            document_management_help = gr.HTML(
-                                value=format_document_management_help_html(),
-                                elem_id="document-management-help-panel",
-                            )
-                        with gr.Column(scale=1):
-                            with gr.Group(elem_id="document-management-selector-panel"):
-                                document_knowledge_base = gr.Dropdown(
-                                    label="当前知识库",
-                                    choices=knowledge_base_choices,
-                                    value=initial_knowledge_base_choice,
-                                    interactive=True,
-                                    elem_id="document-knowledge-base",
-                                )
-                                scan_button = ui_button("刷新文档列表")
-                    with gr.Row(elem_id="document-management-summary-row"):
-                        with gr.Column(scale=1):
-                            with gr.Group(elem_id="document-summary-panel"):
-                                document_summary = gr.HTML(value=initial_document_summary)
-                        with gr.Column(scale=1):
-                            with gr.Group(elem_id="database-summary-panel"):
-                                database_summary = gr.HTML(value=initial_database_summary)
-
-                    # 当前选中文档：去掉冗余 Row 包裹
-                    with gr.Group(elem_id="document-current-panel"):
-                        gr.Markdown("### 当前选中文档", elem_id="document-current-title")
-                        gr.HTML(
-                            value="<p>优先在这里选择目标文档，再执行注册、重建或入库质检。</p>",
-                            elem_id="document-current-note",
-                        )
-                        document_choices = gr.Dropdown(
-                            label="选择文档",
-                            choices=initial_document_state["document_choices"],
-                            value=initial_document_state["active_choice"],
-                            interactive=True,
-                        )
-                        document_detail = gr.HTML(value=initial_document_detail, elem_id="document-current-detail")
-                        document_target_knowledge_base = gr.Dropdown(
-                            label="调整归属到",
-                            choices=knowledge_base_choices,
-                            value=initial_knowledge_base_choice,
-                            interactive=True,
-                            elem_id="document-target-knowledge-base",
-                        )
-                        with gr.Row(elem_id="document-current-actions-row"):
-                            register_button = ui_button("注册当前文档", interactive=initial_document_state["register_interactive"])
-                            rebuild_button = ui_button("重建当前文档索引", interactive=initial_document_state["rebuild_interactive"])
-                            status_button = ui_button("刷新状态")
-                            move_document_button = ui_button("调整文档归属", elem_id="document-move-button")
-
-                    # 数据库统计表格：加 Column 包裹
-                    with gr.Column(elem_id="database-summary-table-panel"):
-                        database_summary_table = gr.Dataframe(
-                            headers=["序号", "指标", "数量"],
-                            datatype=["str", "str", "str"],
-                            interactive=False,
-                            row_count=0,
-                            column_count=3,
-                            label="数据库统计",
-                            buttons=[],
-                            elem_id="database-summary-table",
-                            value=initial_database_table_rows,
-                        )
-                        with gr.Row(elem_id="database-pagination-row"):
-                            database_prev_button = ui_button("上一页")
-                            database_next_button = ui_button("下一页")
-                        database_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_database_page_info),
-                            elem_id="database-page-info",
-                        )
-
-                    # 文档列表：11 列宽表，单栏全宽 + Column 包裹
-                    with gr.Column(elem_id="document-list-panel"):
-                        document_table = gr.Dataframe(
-                            headers=["序号", "文件名", "文档名称", "归属知识库", "大小", "入库时间", "已注册", "索引状态", "需重建", "推荐动作", "错误信息"],
-                            datatype=["str"] * 11,
-                            interactive=False,
-                            row_count=0,
-                            column_count=11,
-                            label="现有文档列表",
-                            buttons=[],
-                            elem_id="document-table",
-                            value=initial_document_table_rows,
-                        )
-                        with gr.Row(elem_id="document-pagination-row"):
-                            document_prev_button = ui_button("上一页")
-                            document_next_button = ui_button("下一页")
-                        document_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_document_page_info),
-                            elem_id="document-page-info",
-                        )
-                    # 注册全部按钮：放在列表下方，与结果区相邻
-                    with gr.Row(elem_id="document-management-actions-row"):
-                        register_all_button = ui_button("注册全部待处理文档")
-                    with gr.Row(elem_id="document-management-result-row"):
-                        with gr.Column(scale=1):
-                            register_result = gr.HTML(
-                                value=format_operation_result_html(None, title="注册结果"),
-                                elem_id="document-register-result",
-                            )
-                        with gr.Column(scale=1):
-                            rebuild_result = gr.HTML(
-                                value=format_operation_result_html(None, title="重建结果"),
-                                elem_id="document-rebuild-result",
-                            )
-                    with gr.Accordion("入库质检", open=False, elem_id="document-quality-accordion"):
-                        with gr.Group(elem_id="document-quality-panel"):
-                            with gr.Row(elem_id="document-quality-top-actions"):
-                                document_quality_run_button = ui_button("执行入库质检")
-                                document_quality_result_export_button = ui_button("下载质检结果")
-                            document_quality_result_export_result = gr.HTML(
-                                value=format_operation_result_html(None, title="下载结果"),
-                                elem_id="document-quality-export-result",
-                            )
-                            with gr.Row(elem_id="document-quality-summary-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    document_quality_report = gr.HTML(
-                                        value=initial_document_quality_report,
-                                        elem_id="document-quality-report",
-                                    )
-                                with gr.Column(scale=1):
-                                    document_quality_checks = gr.HTML(
-                                        value=initial_document_quality_checks,
-                                        elem_id="document-quality-checks",
-                                    )
-                            with gr.Row(elem_id="document-quality-sample-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    document_quality_sections = gr.Dataframe(
-                                        headers=["序号", "定位", "章节标题", "层级", "章节字数", "内容预览"],
-                                        datatype=["str"] * 6,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=6,
-                                        label="章节抽样",
-                                        buttons=[],
-                                        elem_id="document-quality-sections-table",
-                                        value=initial_document_quality_sections_table_rows,
-                                    )
-                                    with gr.Row(elem_id="document-quality-sections-pagination-row"):
-                                        document_quality_sections_prev_button = ui_button("上一页")
-                                        document_quality_sections_next_button = ui_button("下一页")
-                                    document_quality_sections_page_info = gr.HTML(
-                                        value=format_table_pagination_html(initial_document_quality_sections_page_info),
-                                        elem_id="document-quality-sections-page-info",
-                                    )
-                                with gr.Column(scale=1):
-                                    document_quality_chunks = gr.Dataframe(
-                                        headers=["序号", "片段 ID", "序号", "所属章节", "定位", "长度", "内容预览"],
-                                        datatype=["str"] * 7,
-                                        interactive=False,
-                                        row_count=0,
-                                        column_count=7,
-                                        label="分块抽样",
-                                        buttons=[],
-                                        elem_id="document-quality-chunks-table",
-                                        value=initial_document_quality_chunks_table_rows,
-                                    )
-                                    with gr.Row(elem_id="document-quality-chunks-pagination-row"):
-                                        document_quality_chunks_prev_button = ui_button("上一页")
-                                        document_quality_chunks_next_button = ui_button("下一页")
-                                    document_quality_chunks_page_info = gr.HTML(
-                                        value=format_table_pagination_html(initial_document_quality_chunks_page_info),
-                                        elem_id="document-quality-chunks-page-info",
-                                    )
-                            with gr.Row(elem_id="document-quality-search-row"):
-                                with gr.Column(scale=1):
-                                    document_quality_search_query = gr.Textbox(
-                                        label="文档内检索验证",
-                                        lines=2,
-                                        placeholder="输入当前文档中应当命中的标题、专有词或关键句，用于验证索引效果",
-                                    )
-                                    with gr.Row(elem_id="document-quality-search-action-row"):
-                                        document_quality_search_button = ui_button("验证当前文档检索")
-                                        document_quality_search_export_button = ui_button("下载检索结果")
-                                with gr.Column(scale=1):
-                                    document_quality_search_summary = gr.HTML(
-                                        value=initial_document_quality_search_summary,
-                                        elem_id="document-quality-search-summary",
-                                    )
-                            document_quality_search_export_result = gr.HTML(
-                                value=format_operation_result_html(None, title="下载结果"),
-                                elem_id="document-quality-search-export-result",
-                            )
-                            document_quality_search_state = gr.State(initial_document_quality_search_state)
-                            document_quality_search_query_state = gr.State("")
-                            # 文档内检索结果：单栏全宽
-                            with gr.Column(elem_id="document-quality-result-panel"):
-                                document_quality_search_results = gr.Dataframe(
-                                    headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
-                                    datatype=["markdown"] * 6,
-                                    interactive=False,
-                                    row_count=0,
-                                    column_count=6,
-                                    label="文档内检索结果",
-                                    buttons=[],
-                                    elem_id="document-quality-search-results",
-                                    value=initial_document_quality_search_table_rows,
-                                )
-                                with gr.Row(elem_id="document-quality-search-pagination-row"):
-                                    document_quality_search_prev_button = ui_button("上一页")
-                                    document_quality_search_next_button = ui_button("下一页")
-                                document_quality_search_page_info = gr.HTML(
-                                    value=format_table_pagination_html(initial_document_quality_search_page_info),
-                                    elem_id="document-quality-search-page-info",
-                                )
-                            document_quality_search_detail = gr.HTML(
-                                value=initial_document_quality_search_detail,
-                                elem_id="document-quality-search-detail",
-                            )
-                            with gr.Row(elem_id="document-quality-batch-action-row"):
-                                document_quality_batch_button = ui_button("执行全部文档质检")
-                                document_quality_csv_export_button = ui_button("导出质检 CSV")
-                                document_quality_batch_export_button = ui_button("下载批量结果")
-                            # 批量质检结果：10列宽表改为单栏全宽
-                            with gr.Column(elem_id="document-quality-batch-panel"):
-                                document_quality_batch_summary = gr.HTML(
-                                    value=initial_document_quality_batch_summary,
-                                    elem_id="document-quality-batch-summary",
-                                )
-                                document_quality_csv_export_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="导出结果"),
-                                    elem_id="document-quality-csv-export-result",
-                                )
-                                document_quality_batch_export_result = gr.HTML(
-                                    value=format_operation_result_html(None, title="下载结果"),
-                                    elem_id="document-quality-batch-export-result",
-                                )
-                                document_quality_batch_table = gr.Dataframe(
-                                    headers=["序号", "文档名称", "文档 UID", "索引状态", "章节数", "分块数", "全文索引", "向量数", "质检等级", "风险摘要"],
-                                    datatype=["str"] * 10,
-                                    interactive=False,
-                                    row_count=0,
-                                    column_count=10,
-                                    label="批量质检结果",
-                                    buttons=[],
-                                    elem_id="document-quality-batch-table",
-                                    value=initial_document_quality_batch_table_rows,
-                                )
-                                with gr.Row(elem_id="document-quality-batch-pagination-row"):
-                                    document_quality_batch_prev_button = ui_button("上一页")
-                                    document_quality_batch_next_button = ui_button("下一页")
-                                document_quality_batch_page_info = gr.HTML(
-                                    value=format_table_pagination_html(initial_document_quality_batch_page_info),
-                                    elem_id="document-quality-batch-page-info",
-                                )
-                            # 质检配置：单栏全宽
-                            with gr.Column(elem_id="document-quality-config-panel"):
-                                document_quality_config_panel = gr.HTML(
-                                    value=initial_document_quality_config_html,
-                                    elem_id="document-quality-config-panel-html",
-                                )
-                                document_quality_config_result = gr.HTML(
-                                    value=initial_document_quality_config_result,
-                                    elem_id="document-quality-config-result",
-                                )
-                                with gr.Group(elem_id="document-quality-config-form"):
-                                    gr.Markdown("### 质检阈值配置")
-                                    with gr.Row(elem_id="document-quality-config-form-row-1"):
-                                        document_quality_sample_limit = gr.Number(
-                                            label="抽样数量",
-                                            value=initial_quality_sample_limit,
-                                            precision=0,
-                                        )
-                                        document_quality_long_document_char_threshold = gr.Number(
-                                            label="长文字数阈值",
-                                            value=initial_quality_long_document_char_threshold,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-2"):
-                                        document_quality_min_sections_for_long_doc = gr.Number(
-                                            label="长文最少章节",
-                                            value=initial_quality_min_sections_for_long_doc,
-                                            precision=0,
-                                        )
-                                        document_quality_max_avg_chunks_per_section = gr.Number(
-                                            label="每章分块上限",
-                                            value=initial_quality_max_avg_chunks_per_section,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-3"):
-                                        document_quality_max_chunk_chars = gr.Number(
-                                            label="超长分块阈值",
-                                            value=initial_quality_max_chunk_chars,
-                                            precision=0,
-                                        )
-                                        document_quality_short_chunk_chars = gr.Number(
-                                            label="过短分块阈值",
-                                            value=initial_quality_short_chunk_chars,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-form-row-4"):
-                                        document_quality_short_chunk_warn_min_chunk_count = gr.Number(
-                                            label="过短分块告警起点",
-                                            value=initial_quality_short_chunk_warn_min_chunk_count,
-                                            precision=0,
-                                        )
-                                    with gr.Row(elem_id="document-quality-config-action-row"):
-                                        document_quality_config_save_button = ui_button("保存质检阈值", variant="primary")
-                                        document_quality_config_export_button = ui_button("下载当前配置")
-                                    document_quality_config_export_result = gr.HTML(
-                                        value=format_operation_result_html(None, title="下载结果"),
-                                        elem_id="document-quality-config-export-result",
-                                    )
+                    document_quality_search_state = gr.State(initial_document_quality_search_state)
+                    document_quality_search_query_state = gr.State("")
+                    document_components = build_document_tab(
+                        initial_values={
+                            "knowledge_base_choices": knowledge_base_choices,
+                            "initial_knowledge_base_choice": initial_knowledge_base_choice,
+                            "document_summary": initial_document_summary,
+                            "database_summary": initial_database_summary,
+                            "document_choices": initial_document_state["document_choices"],
+                            "active_choice": initial_document_state["active_choice"],
+                            "document_detail": initial_document_detail,
+                            "register_interactive": initial_document_state["register_interactive"],
+                            "rebuild_interactive": initial_document_state["rebuild_interactive"],
+                            "database_table_rows": initial_database_table_rows,
+                            "database_page_info": initial_database_page_info,
+                            "document_table_rows": initial_document_table_rows,
+                            "document_page_info": initial_document_page_info,
+                            "document_quality_report": initial_document_quality_report,
+                            "document_quality_checks": initial_document_quality_checks,
+                            "document_quality_sections_table_rows": initial_document_quality_sections_table_rows,
+                            "document_quality_sections_page_info": initial_document_quality_sections_page_info,
+                            "document_quality_chunks_table_rows": initial_document_quality_chunks_table_rows,
+                            "document_quality_chunks_page_info": initial_document_quality_chunks_page_info,
+                            "document_quality_search_summary": initial_document_quality_search_summary,
+                            "document_quality_search_table_rows": initial_document_quality_search_table_rows,
+                            "document_quality_search_page_info": initial_document_quality_search_page_info,
+                            "document_quality_search_detail": initial_document_quality_search_detail,
+                            "document_quality_batch_summary": initial_document_quality_batch_summary,
+                            "document_quality_batch_table_rows": initial_document_quality_batch_table_rows,
+                            "document_quality_batch_page_info": initial_document_quality_batch_page_info,
+                            "document_quality_config_html": initial_document_quality_config_html,
+                            "document_quality_config_result": initial_document_quality_config_result,
+                            "quality_sample_limit": initial_quality_sample_limit,
+                            "quality_long_document_char_threshold": initial_quality_long_document_char_threshold,
+                            "quality_min_sections_for_long_doc": initial_quality_min_sections_for_long_doc,
+                            "quality_max_avg_chunks_per_section": initial_quality_max_avg_chunks_per_section,
+                            "quality_max_chunk_chars": initial_quality_max_chunk_chars,
+                            "quality_short_chunk_chars": initial_quality_short_chunk_chars,
+                            "quality_short_chunk_warn_min_chunk_count": initial_quality_short_chunk_warn_min_chunk_count,
+                        }
+                    )
+                    document_management_help = document_components["document_management_help"]
+                    document_knowledge_base = document_components["document_knowledge_base"]
+                    scan_button = document_components["scan_button"]
+                    document_summary = document_components["document_summary"]
+                    database_summary = document_components["database_summary"]
+                    document_choices = document_components["document_choices"]
+                    document_detail = document_components["document_detail"]
+                    document_target_knowledge_base = document_components["document_target_knowledge_base"]
+                    register_button = document_components["register_button"]
+                    rebuild_button = document_components["rebuild_button"]
+                    status_button = document_components["status_button"]
+                    move_document_button = document_components["move_document_button"]
+                    database_summary_table = document_components["database_summary_table"]
+                    database_prev_button = document_components["database_prev_button"]
+                    database_next_button = document_components["database_next_button"]
+                    database_page_info = document_components["database_page_info"]
+                    document_table = document_components["document_table"]
+                    document_prev_button = document_components["document_prev_button"]
+                    document_next_button = document_components["document_next_button"]
+                    document_page_info = document_components["document_page_info"]
+                    register_all_button = document_components["register_all_button"]
+                    register_result = document_components["register_result"]
+                    rebuild_result = document_components["rebuild_result"]
+                    document_quality_run_button = document_components["document_quality_run_button"]
+                    document_quality_result_export_button = document_components["document_quality_result_export_button"]
+                    document_quality_result_export_result = document_components["document_quality_result_export_result"]
+                    document_quality_report = document_components["document_quality_report"]
+                    document_quality_checks = document_components["document_quality_checks"]
+                    document_quality_sections = document_components["document_quality_sections"]
+                    document_quality_sections_prev_button = document_components["document_quality_sections_prev_button"]
+                    document_quality_sections_next_button = document_components["document_quality_sections_next_button"]
+                    document_quality_sections_page_info = document_components["document_quality_sections_page_info"]
+                    document_quality_chunks = document_components["document_quality_chunks"]
+                    document_quality_chunks_prev_button = document_components["document_quality_chunks_prev_button"]
+                    document_quality_chunks_next_button = document_components["document_quality_chunks_next_button"]
+                    document_quality_chunks_page_info = document_components["document_quality_chunks_page_info"]
+                    document_quality_search_query = document_components["document_quality_search_query"]
+                    document_quality_search_button = document_components["document_quality_search_button"]
+                    document_quality_search_export_button = document_components["document_quality_search_export_button"]
+                    document_quality_search_summary = document_components["document_quality_search_summary"]
+                    document_quality_search_export_result = document_components["document_quality_search_export_result"]
+                    document_quality_search_results = document_components["document_quality_search_results"]
+                    document_quality_search_prev_button = document_components["document_quality_search_prev_button"]
+                    document_quality_search_next_button = document_components["document_quality_search_next_button"]
+                    document_quality_search_page_info = document_components["document_quality_search_page_info"]
+                    document_quality_search_detail = document_components["document_quality_search_detail"]
+                    document_quality_batch_button = document_components["document_quality_batch_button"]
+                    document_quality_csv_export_button = document_components["document_quality_csv_export_button"]
+                    document_quality_batch_export_button = document_components["document_quality_batch_export_button"]
+                    document_quality_batch_summary = document_components["document_quality_batch_summary"]
+                    document_quality_csv_export_result = document_components["document_quality_csv_export_result"]
+                    document_quality_batch_export_result = document_components["document_quality_batch_export_result"]
+                    document_quality_batch_table = document_components["document_quality_batch_table"]
+                    document_quality_batch_prev_button = document_components["document_quality_batch_prev_button"]
+                    document_quality_batch_next_button = document_components["document_quality_batch_next_button"]
+                    document_quality_batch_page_info = document_components["document_quality_batch_page_info"]
+                    document_quality_config_panel = document_components["document_quality_config_panel"]
+                    document_quality_config_result = document_components["document_quality_config_result"]
+                    document_quality_sample_limit = document_components["document_quality_sample_limit"]
+                    document_quality_long_document_char_threshold = document_components["document_quality_long_document_char_threshold"]
+                    document_quality_min_sections_for_long_doc = document_components["document_quality_min_sections_for_long_doc"]
+                    document_quality_max_avg_chunks_per_section = document_components["document_quality_max_avg_chunks_per_section"]
+                    document_quality_max_chunk_chars = document_components["document_quality_max_chunk_chars"]
+                    document_quality_short_chunk_chars = document_components["document_quality_short_chunk_chars"]
+                    document_quality_short_chunk_warn_min_chunk_count = document_components["document_quality_short_chunk_warn_min_chunk_count"]
+                    document_quality_config_save_button = document_components["document_quality_config_save_button"]
+                    document_quality_config_export_button = document_components["document_quality_config_export_button"]
+                    document_quality_config_export_result = document_components["document_quality_config_export_result"]
 
                 with gr.Tab("知识库检索") as search_tab:
-                    with gr.Row(elem_id="search-top-row"):
-                        with gr.Column(scale=1):
-                            with gr.Group(elem_id="search-input-panel"):
-                                search_query = gr.Textbox(
-                                    label="检索内容",
-                                    lines=3,
-                                    placeholder="可输入关键词、短语、整句，或多组关键词（建议用空格、逗号分隔）",
-                                )
-                                search_knowledge_base = gr.Dropdown(
-                                    label="当前知识库",
-                                    choices=knowledge_base_choices,
-                                    value=initial_knowledge_base_choice,
-                                    interactive=True,
-                                    elem_id="search-knowledge-base",
-                                )
-                                search_top_k = gr.Slider(label="返回数量", minimum=1, maximum=100, step=1, value=10)
-                                search_button = ui_button("执行检索")
-                        with gr.Column(scale=1):
-                            search_help = gr.HTML(value=format_search_help_html(), elem_id="search-help-panel")
-                    with gr.Group(elem_id="search-result-workspace"):
-                        search_result_state = gr.State([])
-                        search_query_state = gr.State("")
-                        search_selected_row_state = gr.State({})
-                        search_page_state = gr.State(initial_search_page)
-                        search_result_summary = gr.HTML(
-                            value=format_search_summary_html(None),
-                            elem_id="search-result-summary",
-                        )
-                        # 检索结果表格：单栏全宽
-                        search_result = gr.Dataframe(
-                            headers=["序号", "文档名称", "定位", "检索来源", "匹配来源", "内容摘要"],
-                            datatype=["markdown"] * 6,
-                            interactive=False,
-                            row_count=0,
-                            column_count=6,
-                            label="检索结果列表",
-                            buttons=[],
-                            elem_id="search-results-table",
-                            value=initial_search_table_rows,
-                        )
-                        with gr.Row(elem_id="search-pagination-row"):
-                            search_prev_button = ui_button("上一页")
-                            search_next_button = ui_button("下一页")
-                        search_page_info = gr.HTML(
-                            value=format_table_pagination_html(initial_search_page_info),
-                            elem_id="search-page-info",
-                        )
-                    search_result_detail = gr.HTML(value=format_search_result_detail_html(None), elem_id="search-result-detail")
-                    with gr.Group(elem_id="search-action-panel"):
-                        with gr.Row(elem_id="search-export-row"):
-                            search_export_button = ui_button("下载结果")
-                        search_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="search-export-result",
-                        )
+                    search_components = build_search_tab(
+                        knowledge_base_choices=knowledge_base_choices,
+                        initial_knowledge_base_choice=initial_knowledge_base_choice,
+                        initial_search_table_rows=initial_search_table_rows,
+                        initial_search_page=initial_search_page,
+                        initial_search_page_info=initial_search_page_info,
+                    )
+                    search_query = search_components["search_query"]
+                    search_knowledge_base = search_components["search_knowledge_base"]
+                    search_top_k = search_components["search_top_k"]
+                    search_button = search_components["search_button"]
+                    search_result_summary = search_components["search_result_summary"]
+                    search_result = search_components["search_result"]
+                    search_result_state = search_components["search_result_state"]
+                    search_query_state = search_components["search_query_state"]
+                    search_selected_row_state = search_components["search_selected_row_state"]
+                    search_page_state = search_components["search_page_state"]
+                    search_prev_button = search_components["search_prev_button"]
+                    search_next_button = search_components["search_next_button"]
+                    search_page_info = search_components["search_page_info"]
+                    search_result_detail = search_components["search_result_detail"]
+                    search_export_button = search_components["search_export_button"]
+                    search_export_result = search_components["search_export_result"]
 
                 with gr.Tab("功能设置") as settings_tab:
                     settings_template_state = gr.State(initial_settings_template_state)
@@ -5804,1579 +5087,210 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     settings_knowledge_base_state = gr.State(initial_settings_knowledge_base_state)
                     settings_selected_knowledge_base_state = gr.State(initial_settings_selected_knowledge_base_id)
                     settings_knowledge_base_page_state = gr.State(initial_settings_knowledge_base_page)
-                    with gr.Group(elem_id="settings-overview-panel"):
-                        settings_help = gr.HTML(value=format_settings_help_html(), elem_id="settings-help-panel")
-                        settings_runtime = gr.HTML(value=initial_settings_runtime_html, elem_id="settings-runtime-panel")
-                    with gr.Group(elem_id="settings-workspace-panel"):
-                        with gr.Group(elem_id="settings-template-list-panel"):
-                            gr.HTML(
-                                value="""
-                                <div class="settings-list-header">
-                                  <div>
-                                    <h3 class="settings-list-header__title">模板列表</h3>
-                                    <p class="settings-list-header__desc">先在这里选模板，再去右侧查看详情和编辑，避免标题贴角和工具栏占位过高。</p>
-                                  </div>
-                                </div>
-                                """,
-                                elem_id="settings-template-list-header",
-                            )
-                            settings_template_table = gr.Dataframe(
-                                headers=["序号", "模板 ID", "模板名称", "来源", "规则标签", "最终返回", "可删除"],
-                                datatype=["str"] * 7,
-                                interactive=False,
-                                row_count=0,
-                                column_count=7,
-                                label="模板列表",
-                                show_label=False,
-                                buttons=[],
-                                elem_id="settings-template-table",
-                                value=initial_settings_template_table_rows,
-                            )
-                            with gr.Row(elem_id="settings-pagination-row"):
-                                settings_template_prev_button = ui_button("上一页")
-                                settings_template_next_button = ui_button("下一页")
-                            settings_template_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_settings_template_page_info),
-                                elem_id="settings-template-page-info",
-                            )
-                            with gr.Row(elem_id="settings-list-actions"):
-                                settings_new_button = ui_button("新建模板")
-                                settings_refresh_button = ui_button("刷新模板")
-                        # 模板详情与表单：合理双栏
-                        with gr.Row(elem_id="settings-main-row"):
-                            with gr.Column(scale=1):
-                                settings_template_detail = gr.HTML(
-                                    value=initial_settings_template_detail_html,
-                                    elem_id="settings-template-detail",
-                                )
-                            with gr.Column(scale=2):
-                                with gr.Group(elem_id="settings-template-form"):
-                                    gr.Markdown("### 基础信息")
-                                    with gr.Group(elem_id="settings-basic-group"):
-                                        with gr.Row():
-                                            settings_template_id = gr.Textbox(label="模板 ID", value=initial_settings_template_id_value, scale=2)
-                                            settings_template_name = gr.Textbox(label="模板名称", value=initial_settings_template_name_value, scale=3)
-                                        settings_template_description = gr.Textbox(label="模板说明", lines=3, value=initial_settings_description_value)
-                                        settings_rule_tags = gr.Textbox(
-                                            label="规则标签",
-                                            value=initial_settings_rule_tags_value,
-                                            placeholder="多个标签用逗号、顿号或换行分隔",
-                                        )
-                                    gr.Markdown("### 检索策略")
-                                    with gr.Group(elem_id="settings-policy-group"):
-                                        with gr.Row():
-                                            settings_fulltext_top_k = gr.Number(label="全文召回", value=initial_settings_fulltext_top_k, precision=0)
-                                            settings_vector_top_k = gr.Number(label="向量召回", value=initial_settings_vector_top_k, precision=0)
-                                            settings_final_top_k = gr.Number(label="最终返回", value=initial_settings_final_top_k, precision=0)
-                                        with gr.Row():
-                                            settings_neighbor_window = gr.Number(label="邻居窗口", value=initial_settings_neighbor_window, precision=0)
-                                            settings_section_max_chars = gr.Number(label="章节最大字数", value=initial_settings_section_max_chars, precision=0)
-                                        with gr.Row():
-                                            settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_settings_use_rerank)
-                                            settings_include_section_context = gr.Checkbox(label="章节上下文", value=initial_settings_include_section_context)
-                                    gr.Markdown("### Prompt 配置")
-                                    with gr.Group(elem_id="settings-prompt-group"):
-                                        settings_system_prompt = gr.Textbox(label="系统提示词", lines=8, value=initial_settings_system_prompt)
-                                        settings_user_prompt_template = gr.Textbox(label="用户提示模板", lines=8, value=initial_settings_user_prompt_template)
-                                    settings_delete_confirm = gr.Checkbox(
-                                        label="我确认删除当前模板",
-                                        value=initial_settings_delete_confirm,
-                                    )
-                                    with gr.Row(elem_id="settings-form-actions"):
-                                        settings_save_button = ui_button("保存模板", variant="primary")
-                                        settings_delete_button = ui_button("删除模板", variant="stop")
-                    with gr.Group(elem_id="settings-knowledge-base-panel"):
-                        with gr.Group(elem_id="settings-knowledge-base-list-panel"):
-                            gr.HTML(
-                                value="""
-                                <div class="settings-list-header">
-                                  <div>
-                                    <h3 class="settings-list-header__title">知识库列表</h3>
-                                    <p class="settings-list-header__desc">先选中目标知识库，再在右侧维护详情与默认状态，保持操作路径稳定。</p>
-                                  </div>
-                                </div>
-                                """,
-                                elem_id="settings-knowledge-base-list-header",
-                            )
-                            settings_knowledge_base_table = gr.Radio(
-                                label="知识库列表",
-                                elem_id="settings-knowledge-base-table",
-                                choices=initial_settings_knowledge_base_choices,
-                                value=initial_settings_knowledge_base_selected_choice,
-                            )
-                            with gr.Row(elem_id="settings-knowledge-base-pagination-row"):
-                                settings_knowledge_base_prev_button = ui_button("上一页")
-                                settings_knowledge_base_next_button = ui_button("下一页")
-                            settings_knowledge_base_page_info = gr.HTML(
-                                value=format_table_pagination_html(initial_settings_knowledge_base_page_info),
-                                elem_id="settings-knowledge-base-page-info",
-                            )
-                            with gr.Row(elem_id="settings-knowledge-base-list-actions"):
-                                settings_knowledge_base_new_button = ui_button("新建知识库")
-                                settings_knowledge_base_refresh_button = ui_button("刷新知识库")
-                        # 知识库详情与表单：合理双栏
-                        with gr.Row(elem_id="settings-knowledge-base-row"):
-                            with gr.Column(scale=1):
-                                settings_knowledge_base_detail = gr.HTML(
-                                    value=initial_settings_knowledge_base_detail_html,
-                                    elem_id="settings-knowledge-base-detail",
-                                )
-                            with gr.Column(scale=2):
-                                with gr.Group(elem_id="settings-knowledge-base-form"):
-                                    gr.Markdown("### 基础信息")
-                                    with gr.Group(elem_id="settings-knowledge-base-basic-group"):
-                                        with gr.Row():
-                                            settings_knowledge_base_id = gr.Textbox(
-                                                label="知识库 ID",
-                                                value=initial_settings_knowledge_base_id_value,
-                                                scale=2,
-                                            )
-                                            settings_knowledge_base_name = gr.Textbox(
-                                                label="知识库名称",
-                                                value=initial_settings_knowledge_base_name_value,
-                                                scale=3,
-                                            )
-                                        settings_knowledge_base_description = gr.Textbox(
-                                            label="知识库说明",
-                                            lines=3,
-                                            value=initial_settings_knowledge_base_description_value,
-                                        )
-                                    gr.Markdown("### 状态设置")
-                                    with gr.Group(elem_id="settings-knowledge-base-status-group"):
-                                        with gr.Row():
-                                            settings_knowledge_base_status = gr.Dropdown(
-                                                label="状态",
-                                                choices=["active", "disabled"],
-                                                value=initial_settings_knowledge_base_status_value,
-                                                interactive=True,
-                                            )
-                                            settings_knowledge_base_is_default = gr.Checkbox(
-                                                label="设为默认",
-                                                value=initial_settings_knowledge_base_is_default,
-                                            )
-                                    with gr.Row(elem_id="settings-knowledge-base-actions"):
-                                        settings_knowledge_base_save_button = ui_button("保存知识库", variant="primary")
-                                        settings_knowledge_base_delete_button = ui_button("删除知识库", variant="stop")
-                                settings_knowledge_base_result = gr.HTML(
-                                    value=initial_settings_knowledge_base_result_html,
-                                    elem_id="settings-knowledge-base-result",
-                                )
-                    with gr.Group(elem_id="settings-footer-panel"):
-                        settings_result = gr.HTML(
-                            value=initial_settings_result_html,
-                            elem_id="settings-result-panel",
-                        )
-                        with gr.Group(elem_id="settings-export-panel"):
-                            with gr.Row(elem_id="settings-export-row"):
-                                settings_export_button = ui_button("下载当前配置")
-                        settings_export_result = gr.HTML(
-                            value=format_operation_result_html(None, title="下载结果"),
-                            elem_id="settings-export-result",
-                        )
+                    settings_components = build_settings_tab(
+                        initial_values={
+                            "runtime_html": initial_settings_runtime_html,
+                            "template_table_rows": initial_settings_template_table_rows,
+                            "template_page_info": initial_settings_template_page_info,
+                            "template_detail_html": initial_settings_template_detail_html,
+                            "template_id": initial_settings_template_id_value,
+                            "template_name": initial_settings_template_name_value,
+                            "template_description": initial_settings_description_value,
+                            "rule_tags": initial_settings_rule_tags_value,
+                            "fulltext_top_k": initial_settings_fulltext_top_k,
+                            "vector_top_k": initial_settings_vector_top_k,
+                            "final_top_k": initial_settings_final_top_k,
+                            "neighbor_window": initial_settings_neighbor_window,
+                            "section_max_chars": initial_settings_section_max_chars,
+                            "use_rerank": initial_settings_use_rerank,
+                            "include_section_context": initial_settings_include_section_context,
+                            "system_prompt": initial_settings_system_prompt,
+                            "user_prompt_template": initial_settings_user_prompt_template,
+                            "delete_confirm": initial_settings_delete_confirm,
+                            "knowledge_base_choices": initial_settings_knowledge_base_choices,
+                            "knowledge_base_selected_choice": initial_settings_knowledge_base_selected_choice,
+                            "knowledge_base_page_info": initial_settings_knowledge_base_page_info,
+                            "knowledge_base_detail_html": initial_settings_knowledge_base_detail_html,
+                            "knowledge_base_id": initial_settings_knowledge_base_id_value,
+                            "knowledge_base_name": initial_settings_knowledge_base_name_value,
+                            "knowledge_base_description": initial_settings_knowledge_base_description_value,
+                            "knowledge_base_status": initial_settings_knowledge_base_status_value,
+                            "knowledge_base_is_default": initial_settings_knowledge_base_is_default,
+                            "knowledge_base_result_html": initial_settings_knowledge_base_result_html,
+                            "result_html": initial_settings_result_html,
+                        },
+                    )
+                    settings_runtime = settings_components["settings_runtime"]
+                    settings_template_table = settings_components["settings_template_table"]
+                    settings_template_prev_button = settings_components["settings_template_prev_button"]
+                    settings_template_next_button = settings_components["settings_template_next_button"]
+                    settings_template_page_info = settings_components["settings_template_page_info"]
+                    settings_new_button = settings_components["settings_new_button"]
+                    settings_refresh_button = settings_components["settings_refresh_button"]
+                    settings_template_detail = settings_components["settings_template_detail"]
+                    settings_template_id = settings_components["settings_template_id"]
+                    settings_template_name = settings_components["settings_template_name"]
+                    settings_template_description = settings_components["settings_template_description"]
+                    settings_rule_tags = settings_components["settings_rule_tags"]
+                    settings_fulltext_top_k = settings_components["settings_fulltext_top_k"]
+                    settings_vector_top_k = settings_components["settings_vector_top_k"]
+                    settings_final_top_k = settings_components["settings_final_top_k"]
+                    settings_neighbor_window = settings_components["settings_neighbor_window"]
+                    settings_section_max_chars = settings_components["settings_section_max_chars"]
+                    settings_use_rerank = settings_components["settings_use_rerank"]
+                    settings_include_section_context = settings_components["settings_include_section_context"]
+                    settings_system_prompt = settings_components["settings_system_prompt"]
+                    settings_user_prompt_template = settings_components["settings_user_prompt_template"]
+                    settings_delete_confirm = settings_components["settings_delete_confirm"]
+                    settings_save_button = settings_components["settings_save_button"]
+                    settings_delete_button = settings_components["settings_delete_button"]
+                    settings_knowledge_base_table = settings_components["settings_knowledge_base_table"]
+                    settings_knowledge_base_prev_button = settings_components["settings_knowledge_base_prev_button"]
+                    settings_knowledge_base_next_button = settings_components["settings_knowledge_base_next_button"]
+                    settings_knowledge_base_page_info = settings_components["settings_knowledge_base_page_info"]
+                    settings_knowledge_base_new_button = settings_components["settings_knowledge_base_new_button"]
+                    settings_knowledge_base_refresh_button = settings_components["settings_knowledge_base_refresh_button"]
+                    settings_knowledge_base_detail = settings_components["settings_knowledge_base_detail"]
+                    settings_knowledge_base_id = settings_components["settings_knowledge_base_id"]
+                    settings_knowledge_base_name = settings_components["settings_knowledge_base_name"]
+                    settings_knowledge_base_description = settings_components["settings_knowledge_base_description"]
+                    settings_knowledge_base_status = settings_components["settings_knowledge_base_status"]
+                    settings_knowledge_base_is_default = settings_components["settings_knowledge_base_is_default"]
+                    settings_knowledge_base_save_button = settings_components["settings_knowledge_base_save_button"]
+                    settings_knowledge_base_delete_button = settings_components["settings_knowledge_base_delete_button"]
+                    settings_knowledge_base_result = settings_components["settings_knowledge_base_result"]
+                    settings_result = settings_components["settings_result"]
+                    settings_export_button = settings_components["settings_export_button"]
+                    settings_export_result = settings_components["settings_export_result"]
 
-            document_knowledge_base.input(
-                fn=change_document_knowledge_base_ui,
-                inputs=[document_knowledge_base, login_state],
-                outputs=[
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-                queue=False,
-            )
-            document_knowledge_base.input(
-                fn=lambda choice: gr.Dropdown(value=choice),
-                inputs=[document_knowledge_base],
-                outputs=[document_target_knowledge_base],
-                queue=False,
-            )
-            scan_button.click(
-                fn=load_document_management_state_ui,
-                inputs=[document_knowledge_base],
-                outputs=[
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-            )
-            move_document_button.click(
-                fn=reassign_selected_document_ui,
-                inputs=[document_choices, document_target_knowledge_base, document_knowledge_base],
-                outputs=[
-                    register_result,
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-            )
-            document_choices.input(
-                fn=inspect_document_ui,
-                inputs=[document_choices, document_knowledge_base],
-                outputs=[
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-                queue=False,
-            )
-            register_button.click(
-                fn=register_selected_document_ui,
-                inputs=[document_choices, document_knowledge_base],
-                outputs=[
-                    register_result,
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-            )
-            register_all_button.click(
-                fn=register_all_documents_ui,
-                inputs=[document_knowledge_base],
-                outputs=[
-                    register_result,
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-            )
-            status_button.click(
-                fn=query_ingest_status_ui,
-                inputs=[document_knowledge_base],
-                outputs=[
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_csv_export_result,
-                ],
-            )
-            rebuild_button.click(
-                fn=rebuild_selected_document_ui,
-                inputs=[document_choices, document_knowledge_base],
-                outputs=[
-                    rebuild_result,
-                    document_summary,
-                    database_summary,
-                    database_summary_table,
-                    database_page_state,
-                    database_page_info,
-                    document_table,
-                    document_page_state,
-                    document_page_info,
-                    document_choices,
-                    document_detail,
-                    register_button,
-                    rebuild_button,
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                    document_quality_batch_summary,
-                    document_quality_batch_table,
-                    document_quality_batch_page_state,
-                    document_quality_batch_page_info,
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                    document_quality_result_export_result,
-                ],
-            )
-            document_quality_run_button.click(
-                fn=inspect_selected_document_quality_ui,
-                inputs=[document_choices, document_knowledge_base],
-                outputs=[
-                    document_quality_report,
-                    document_quality_checks,
-                    document_quality_sections,
-                    document_quality_sections_page_state,
-                    document_quality_sections_page_info,
-                    document_quality_chunks,
-                    document_quality_chunks_page_state,
-                    document_quality_chunks_page_info,
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_detail,
-                ],
-            )
-            document_quality_search_button.click(
-                fn=run_document_quality_search_ui,
-                inputs=[document_choices, document_quality_search_query, document_knowledge_base],
-                outputs=[
-                    document_quality_search_summary,
-                    document_quality_search_results,
-                    document_quality_search_page_state,
-                    document_quality_search_page_info,
-                    document_quality_search_state,
-                    document_quality_search_query_state,
-                    document_quality_search_detail,
-                ],
-            )
-            document_quality_search_results.select(
-                fn=select_document_quality_search_result,
-                inputs=[document_quality_search_state, document_quality_search_query_state, document_quality_search_results],
-                outputs=[document_quality_search_detail, document_quality_search_results],
-            )
-            document_quality_result_export_button.click(
-                fn=export_document_quality_result,
-                inputs=[document_choices, document_quality_search_state, document_quality_search_query_state, document_knowledge_base],
-                outputs=[document_quality_result_export_result],
-            )
-            document_quality_search_export_button.click(
-                fn=export_document_quality_search_result,
-                inputs=[document_choices, document_quality_search_state, document_quality_search_query_state, document_knowledge_base],
-                outputs=[document_quality_search_export_result],
-            )
-            document_quality_batch_button.click(
-                fn=run_batch_document_quality_ui,
-                inputs=[document_knowledge_base],
-                outputs=[document_quality_batch_summary, document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
-            )
-            document_quality_batch_export_button.click(
-                fn=export_document_quality_batch_result,
-                inputs=[document_knowledge_base],
-                outputs=[document_quality_batch_export_result],
-            )
-            document_quality_csv_export_button.click(
-                fn=export_document_quality_csv,
-                inputs=[document_knowledge_base],
-                outputs=[document_quality_csv_export_result],
-            )
-            document_quality_config_save_button.click(
-                fn=save_document_quality_config,
-                inputs=[
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                ],
-                outputs=[
-                    document_quality_config_panel,
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                    document_quality_config_result,
-                ],
-            )
-            document_quality_config_export_button.click(
-                fn=export_document_quality_config_result,
-                inputs=[
-                    document_quality_sample_limit,
-                    document_quality_long_document_char_threshold,
-                    document_quality_min_sections_for_long_doc,
-                    document_quality_max_avg_chunks_per_section,
-                    document_quality_max_chunk_chars,
-                    document_quality_short_chunk_chars,
-                    document_quality_short_chunk_warn_min_chunk_count,
-                ],
-                outputs=[document_quality_config_export_result],
-            )
-            database_prev_button.click(
-                fn=lambda choice, knowledge_base, page: change_database_summary_page(choice, knowledge_base, page, "prev"),
-                inputs=[document_choices, document_knowledge_base, database_page_state],
-                outputs=[database_summary_table, database_page_state, database_page_info],
-            )
-            database_next_button.click(
-                fn=lambda choice, knowledge_base, page: change_database_summary_page(choice, knowledge_base, page, "next"),
-                inputs=[document_choices, document_knowledge_base, database_page_state],
-                outputs=[database_summary_table, database_page_state, database_page_info],
-            )
-            document_prev_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_list_page(choice, knowledge_base, page, "prev"),
-                inputs=[document_choices, document_knowledge_base, document_page_state],
-                outputs=[document_table, document_page_state, document_page_info],
-            )
-            document_next_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_list_page(choice, knowledge_base, page, "next"),
-                inputs=[document_choices, document_knowledge_base, document_page_state],
-                outputs=[document_table, document_page_state, document_page_info],
-            )
-            document_quality_sections_prev_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_quality_sections_page(choice, knowledge_base, page, "prev"),
-                inputs=[document_choices, document_knowledge_base, document_quality_sections_page_state],
-                outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
-            )
-            document_quality_sections_next_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_quality_sections_page(choice, knowledge_base, page, "next"),
-                inputs=[document_choices, document_knowledge_base, document_quality_sections_page_state],
-                outputs=[document_quality_sections, document_quality_sections_page_state, document_quality_sections_page_info],
-            )
-            document_quality_chunks_prev_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_quality_chunks_page(choice, knowledge_base, page, "prev"),
-                inputs=[document_choices, document_knowledge_base, document_quality_chunks_page_state],
-                outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
-            )
-            document_quality_chunks_next_button.click(
-                fn=lambda choice, knowledge_base, page: change_document_quality_chunks_page(choice, knowledge_base, page, "next"),
-                inputs=[document_choices, document_knowledge_base, document_quality_chunks_page_state],
-                outputs=[document_quality_chunks, document_quality_chunks_page_state, document_quality_chunks_page_info],
-            )
-            document_quality_search_prev_button.click(
-                fn=lambda rows, page: change_document_table_page(rows, page, "prev", prepend_sequence=False),
-                inputs=[document_quality_search_state, document_quality_search_page_state],
-                outputs=[document_quality_search_results, document_quality_search_page_state, document_quality_search_page_info],
-            )
-            document_quality_search_next_button.click(
-                fn=lambda rows, page: change_document_table_page(rows, page, "next", prepend_sequence=False),
-                inputs=[document_quality_search_state, document_quality_search_page_state],
-                outputs=[document_quality_search_results, document_quality_search_page_state, document_quality_search_page_info],
-            )
-            document_quality_batch_prev_button.click(
-                fn=lambda knowledge_base, page: change_document_quality_batch_page(knowledge_base, page, "prev"),
-                inputs=[document_knowledge_base, document_quality_batch_page_state],
-                outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
-            )
-            document_quality_batch_next_button.click(
-                fn=lambda knowledge_base, page: change_document_quality_batch_page(knowledge_base, page, "next"),
-                inputs=[document_knowledge_base, document_quality_batch_page_state],
-                outputs=[document_quality_batch_table, document_quality_batch_page_state, document_quality_batch_page_info],
-            )
-            search_button.click(
-                fn=run_search_ui,
-                inputs=[search_query, search_top_k, search_knowledge_base],
-                outputs=[search_result_summary, search_result, search_result_state, search_query_state, search_result_detail, search_selected_row_state, search_page_state, search_page_info],
-            )
-            search_knowledge_base.input(
-                fn=change_search_knowledge_base_ui,
-                inputs=[search_knowledge_base, login_state],
-                outputs=[
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                    search_result_summary,
-                    search_result,
-                    search_result_state,
-                    search_query_state,
-                    search_result_detail,
-                    search_selected_row_state,
-                    search_page_state,
-                    search_page_info,
-                ],
-                queue=False,
-            )
-            search_result.select(
-                fn=select_search_result,
-                inputs=[search_result, search_result_state, search_query_state],
-                outputs=[search_result_detail, search_result, search_selected_row_state],
-            )
-            search_prev_button.click(
-                fn=lambda rows, page: change_search_page(rows, page, "prev"),
-                inputs=[search_result_state, search_page_state],
-                outputs=[search_result, search_page_state, search_page_info],
-            )
-            search_next_button.click(
-                fn=lambda rows, page: change_search_page(rows, page, "next"),
-                inputs=[search_result_state, search_page_state],
-                outputs=[search_result, search_page_state, search_page_info],
-            )
-            search_export_button.click(
-                fn=export_search_results,
-                inputs=[search_result_state, search_selected_row_state, search_query_state],
-                outputs=[search_export_result],
-            )
-            quality_button.click(
-                fn=run_quality_check_ui,
-                inputs=[quality_input, quality_template, quality_knowledge_base],
-                outputs=[
-                    quality_progress,
-                    quality_result,
-                    quality_active_check,
-                    formatted_quality_result_state,
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    recent_quality_state,
-                    recent_quality_checks,
-                    recent_quality_page_state,
-                    recent_quality_page_info,
-                    quality_evaluation_cases,
-                ],
-            )
-            quality_template.input(
-                fn=render_quality_template,
-                inputs=quality_template,
-                outputs=quality_template_detail,
-                queue=False,
-                show_progress="hidden",
-            )
-            recent_quality_button.click(
-                fn=list_recent_quality_results_ui,
-                inputs=[quality_knowledge_base, recent_quality_scope_filter],
-                outputs=[
-                    quality_progress,
-                    quality_result,
-                    quality_active_check,
-                    formatted_quality_result_state,
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    recent_quality_state,
-                    recent_quality_checks,
-                    recent_quality_page_state,
-                    recent_quality_page_info,
-                    quality_evaluation_cases,
-                ],
-            )
-            quality_knowledge_base.input(
-                fn=change_quality_knowledge_base_ui,
-                inputs=[quality_knowledge_base, recent_quality_scope_filter, login_state],
-                outputs=[
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                    quality_progress,
-                    quality_result,
-                    quality_active_check,
-                    formatted_quality_result_state,
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    recent_quality_state,
-                    recent_quality_checks,
-                    recent_quality_page_state,
-                    recent_quality_page_info,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-                show_progress="hidden",
-            )
-            recent_quality_scope_filter.input(
-                fn=list_recent_quality_results_ui,
-                inputs=[quality_knowledge_base, recent_quality_scope_filter],
-                outputs=[
-                    quality_progress,
-                    quality_result,
-                    quality_active_check,
-                    formatted_quality_result_state,
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    recent_quality_state,
-                    recent_quality_checks,
-                    recent_quality_page_state,
-                    recent_quality_page_info,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-                show_progress="hidden",
-            )
-            recent_quality_checks.select(
-                fn=select_recent_quality_result_ui,
-                inputs=[recent_quality_checks, recent_quality_state, recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter],
-                outputs=[
-                    quality_progress,
-                    quality_result,
-                    quality_active_check,
-                    formatted_quality_result_state,
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    recent_quality_state,
-                    recent_quality_checks,
-                    recent_quality_page_state,
-                    recent_quality_page_info,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-                show_progress="hidden",
-            )
-            quality_claims.input(
-                fn=select_quality_claim_ui,
-                inputs=[quality_claims, claim_detail_state, formatted_quality_result_state],
-                outputs=[
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    selected_claim_state,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-                show_progress="hidden",
-            )
-            claim_evidence_table.select(
-                fn=select_quality_evidence,
-                inputs=[evidence_items_state, claim_evidence_table],
-                outputs=[claim_evidence_detail],
-                queue=False,
-                show_progress="hidden",
-            )
-            quality_claim_prev_button.click(
-                fn=lambda formatted, detail_map, page, selected: change_quality_claim_page(formatted, detail_map, page, "prev", selected),
-                inputs=[formatted_quality_result_state, claim_detail_state, quality_claim_page_state, selected_claim_state],
-                outputs=[
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-            )
-            quality_claim_next_button.click(
-                fn=lambda formatted, detail_map, page, selected: change_quality_claim_page(formatted, detail_map, page, "next", selected),
-                inputs=[formatted_quality_result_state, claim_detail_state, quality_claim_page_state, selected_claim_state],
-                outputs=[
-                    quality_claims,
-                    quality_claim_page_state,
-                    quality_claim_page_info,
-                    selected_claim_state,
-                    claim_detail_view,
-                    claim_evidence_table,
-                    quality_evidence_page_state,
-                    quality_evidence_page_info,
-                    quality_review_claim_detail,
-                    evidence_items_state,
-                    claim_evidence_detail,
-                    quality_evaluation_cases,
-                ],
-                queue=False,
-            )
-            quality_evidence_prev_button.click(
-                fn=lambda items, page: change_quality_evidence_page(items, page, "prev"),
-                inputs=[evidence_items_state, quality_evidence_page_state],
-                outputs=[claim_evidence_table, quality_evidence_page_state, quality_evidence_page_info],
-                queue=False,
-            )
-            quality_evidence_next_button.click(
-                fn=lambda items, page: change_quality_evidence_page(items, page, "next"),
-                inputs=[evidence_items_state, quality_evidence_page_state],
-                outputs=[claim_evidence_table, quality_evidence_page_state, quality_evidence_page_info],
-                queue=False,
-            )
-            recent_quality_prev_button.click(
-                fn=lambda page, knowledge_base, scope, results: change_recent_quality_page(page, "prev", knowledge_base, scope, results),
-                inputs=[recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter, recent_quality_state],
-                outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
-                queue=False,
-            )
-            recent_quality_next_button.click(
-                fn=lambda page, knowledge_base, scope, results: change_recent_quality_page(page, "next", knowledge_base, scope, results),
-                inputs=[recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter, recent_quality_state],
-                outputs=[recent_quality_checks, recent_quality_page_state, recent_quality_page_info],
-                queue=False,
-            )
-            quality_export_button.click(
-                fn=export_quality_results,
-                inputs=[formatted_quality_result_state, selected_claim_state, claim_detail_state, evidence_items_state],
-                outputs=[quality_export_result],
-            )
-            quality_evaluation_button.click(
-                fn=run_quality_evaluation_ui,
-                inputs=[quality_evaluation_cases, quality_template, quality_knowledge_base],
-                outputs=[quality_evaluation_summary, quality_evaluation_table, quality_evaluation_result_state, quality_evaluation_page_state, quality_evaluation_page_info],
-            )
-            quality_evaluation_prev_button.click(
-                fn=lambda result, page: change_quality_evaluation_page(result, page, "prev"),
-                inputs=[quality_evaluation_result_state, quality_evaluation_page_state],
-                outputs=[quality_evaluation_table, quality_evaluation_page_state, quality_evaluation_page_info],
-            )
-            quality_evaluation_next_button.click(
-                fn=lambda result, page: change_quality_evaluation_page(result, page, "next"),
-                inputs=[quality_evaluation_result_state, quality_evaluation_page_state],
-                outputs=[quality_evaluation_table, quality_evaluation_page_state, quality_evaluation_page_info],
-            )
-            quality_evaluation_export_button.click(
-                fn=export_quality_evaluation_results,
-                inputs=[quality_evaluation_result_state],
-                outputs=[quality_evaluation_export_result],
-            )
-            settings_refresh_button.click(
-                fn=refresh_settings_workspace_ui,
-                inputs=[settings_selected_template_state],
-                outputs=[
-                    settings_template_table,
-                    settings_template_page_state,
-                    settings_template_page_info,
-                    settings_template_state,
-                    settings_selected_template_state,
-                    settings_template_detail,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                    settings_result,
-                    settings_runtime,
-                    settings_delete_confirm,
-                ],
-            )
-            settings_template_table.select(
-                fn=select_settings_template,
-                inputs=[settings_template_state, settings_template_table],
-                outputs=[
-                    settings_selected_template_state,
-                    settings_template_detail,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                    settings_result,
-                    settings_delete_confirm,
-                ],
-            )
-            settings_new_button.click(
-                fn=prepare_new_template,
-                outputs=[
-                    settings_selected_template_state,
-                    settings_template_detail,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                    settings_result,
-                    settings_delete_confirm,
-                ],
-            )
-            settings_save_button.click(
-                fn=save_settings_template_ui,
-                inputs=[
-                    settings_selected_template_state,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                ],
-                outputs=[
-                    settings_template_table,
-                    settings_template_page_state,
-                    settings_template_page_info,
-                    settings_template_state,
-                    settings_selected_template_state,
-                    settings_template_detail,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                    settings_result,
-                    settings_runtime,
-                    settings_delete_confirm,
-                    quality_template,
-                    quality_template_detail,
-                ],
-            )
-            settings_delete_button.click(
-                fn=delete_settings_template_ui,
-                inputs=[settings_selected_template_state, settings_template_id, settings_delete_confirm],
-                outputs=[
-                    settings_template_table,
-                    settings_template_page_state,
-                    settings_template_page_info,
-                    settings_template_state,
-                    settings_selected_template_state,
-                    settings_template_detail,
-                    settings_template_id,
-                    settings_template_name,
-                    settings_template_description,
-                    settings_rule_tags,
-                    settings_fulltext_top_k,
-                    settings_vector_top_k,
-                    settings_final_top_k,
-                    settings_use_rerank,
-                    settings_neighbor_window,
-                    settings_include_section_context,
-                    settings_section_max_chars,
-                    settings_system_prompt,
-                    settings_user_prompt_template,
-                    settings_result,
-                    settings_runtime,
-                    settings_delete_confirm,
-                    quality_template,
-                    quality_template_detail,
-                ],
-            )
-            settings_template_prev_button.click(
-                fn=lambda items, page: change_settings_template_page(items, page, "prev"),
-                inputs=[settings_template_state, settings_template_page_state],
-                outputs=[settings_template_table, settings_template_page_state, settings_template_page_info],
-            )
-            settings_template_next_button.click(
-                fn=lambda items, page: change_settings_template_page(items, page, "next"),
-                inputs=[settings_template_state, settings_template_page_state],
-                outputs=[settings_template_table, settings_template_page_state, settings_template_page_info],
-            )
-            settings_export_button.click(
-                fn=export_settings_result,
-                inputs=[settings_selected_template_state],
-                outputs=[settings_export_result],
-            )
-            settings_knowledge_base_refresh_button.click(
-                fn=refresh_settings_knowledge_base_workspace_ui,
-                inputs=[settings_selected_knowledge_base_state, login_state],
-                outputs=[
-                    settings_knowledge_base_table,
-                    settings_knowledge_base_page_state,
-                    settings_knowledge_base_page_info,
-                    settings_knowledge_base_state,
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                ],
-            )
-            settings_knowledge_base_table.input(
-                fn=select_settings_knowledge_base,
-                inputs=[settings_knowledge_base_table, settings_knowledge_base_state, login_state],
-                outputs=[
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                ],
-                queue=False,
-            )
-            settings_knowledge_base_new_button.click(
-                fn=prepare_new_knowledge_base,
-                inputs=[login_state],
-                outputs=[
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                ],
-            )
-            settings_knowledge_base_save_button.click(
-                fn=save_settings_knowledge_base_ui,
-                inputs=[
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    login_state,
-                ],
-                outputs=[
-                    settings_knowledge_base_table,
-                    settings_knowledge_base_page_state,
-                    settings_knowledge_base_page_info,
-                    settings_knowledge_base_state,
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                ],
-            )
-            settings_knowledge_base_delete_button.click(
-                fn=delete_settings_knowledge_base_ui,
-                inputs=[
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_id,
-                    login_state,
-                ],
-                outputs=[
-                    settings_knowledge_base_table,
-                    settings_knowledge_base_page_state,
-                    settings_knowledge_base_page_info,
-                    settings_knowledge_base_state,
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                ],
-            )
-            settings_knowledge_base_prev_button.click(
-                fn=lambda items, page, selected: change_settings_knowledge_base_page(items, page, "prev", selected),
-                inputs=[settings_knowledge_base_state, settings_knowledge_base_page_state, settings_selected_knowledge_base_state],
-                outputs=[
-                    settings_knowledge_base_table,
-                    settings_knowledge_base_page_state,
-                    settings_knowledge_base_page_info,
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                ],
-            )
-            settings_knowledge_base_next_button.click(
-                fn=lambda items, page, selected: change_settings_knowledge_base_page(items, page, "next", selected),
-                inputs=[settings_knowledge_base_state, settings_knowledge_base_page_state, settings_selected_knowledge_base_state],
-                outputs=[
-                    settings_knowledge_base_table,
-                    settings_knowledge_base_page_state,
-                    settings_knowledge_base_page_info,
-                    settings_selected_knowledge_base_state,
-                    settings_knowledge_base_detail,
-                    settings_knowledge_base_id,
-                    settings_knowledge_base_name,
-                    settings_knowledge_base_description,
-                    settings_knowledge_base_status,
-                    settings_knowledge_base_is_default,
-                    settings_knowledge_base_result,
-                ],
-            )
-            review_history_button.click(
-                fn=list_review_workspace_ui,
-                inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base],
-                outputs=[
-                    review_pending_candidates,
-                    review_pending_page_state,
-                    review_pending_page_info,
-                    review_processed_candidates,
-                    review_processed_page_state,
-                    review_processed_page_info,
-                    review_candidate_state,
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_history,
-                    review_history_page_state,
-                    review_history_page_info,
-                    review_history_state,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-            )
-            review_knowledge_base.input(
-                fn=change_review_knowledge_base_ui,
-                inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base, login_state],
-                outputs=[
-                    document_knowledge_base,
-                    search_knowledge_base,
-                    quality_knowledge_base,
-                    review_knowledge_base,
-                    review_pending_candidates,
-                    review_pending_page_state,
-                    review_pending_page_info,
-                    review_processed_candidates,
-                    review_processed_page_state,
-                    review_processed_page_info,
-                    review_candidate_state,
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_history,
-                    review_history_page_state,
-                    review_history_page_info,
-                    review_history_state,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-                queue=False,
-            )
-            review_export_button.click(
-                fn=export_review_result,
-                inputs=[
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_evidence_items_state,
-                    review_selected_record_state,
-                    review_history_state,
-                ],
-                outputs=[review_export_result],
-            )
-            review_scope_filter.input(
-                fn=change_review_filters_ui,
-                inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
-                outputs=[
-                    review_pending_candidates,
-                    review_pending_page_state,
-                    review_pending_page_info,
-                    review_processed_candidates,
-                    review_processed_page_state,
-                    review_processed_page_info,
-                    review_candidate_state,
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_history,
-                    review_history_page_state,
-                    review_history_page_info,
-                    review_history_state,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-                queue=False,
-            )
-            review_risk_filter.input(
-                fn=change_review_filters_ui,
-                inputs=[review_candidate_state, review_history_state, review_selected_claim_state, review_scope_filter, review_risk_filter],
-                outputs=[
-                    review_pending_candidates,
-                    review_pending_page_state,
-                    review_pending_page_info,
-                    review_processed_candidates,
-                    review_processed_page_state,
-                    review_processed_page_info,
-                    review_candidate_state,
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_history,
-                    review_history_page_state,
-                    review_history_page_info,
-                    review_history_state,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-                queue=False,
-            )
-            review_pending_candidates.select(
-                fn=select_review_candidate_ui,
-                inputs=[review_pending_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
-                outputs=[
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-            )
-            review_processed_candidates.select(
-                fn=select_review_candidate_ui,
-                inputs=[review_processed_candidates, review_candidate_state, review_history_state, review_scope_filter, review_risk_filter],
-                outputs=[
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-            )
-            review_history.select(
-                fn=select_review_history_record_ui,
-                inputs=[review_history_state, review_candidate_state, review_scope_filter, review_risk_filter, review_history],
-                outputs=[
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-            )
-            review_evidence_table.select(
-                fn=select_quality_evidence,
-                inputs=[review_evidence_items_state, review_evidence_table],
-                outputs=[review_evidence_detail],
-            )
-            review_button.click(
-                fn=submit_review_action_ui,
-                inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter, review_knowledge_base],
-                outputs=[
-                    review_result,
-                    review_pending_candidates,
-                    review_pending_page_state,
-                    review_pending_page_info,
-                    review_processed_candidates,
-                    review_processed_page_state,
-                    review_processed_page_info,
-                    review_candidate_state,
-                    review_selected_claim_state,
-                    review_claim_detail_state,
-                    review_claim_detail_panel,
-                    review_evidence_table,
-                    review_evidence_page_state,
-                    review_evidence_page_info,
-                    review_evidence_items_state,
-                    review_evidence_detail,
-                    review_action_input,
-                    review_note_input,
-                    review_history,
-                    review_history_page_state,
-                    review_history_page_info,
-                    review_history_state,
-                    review_selected_record_state,
-                    review_record_detail,
-                ],
-            )
-            review_pending_prev_button.click(
-                fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "prev", processed=False),
-                inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_pending_page_state],
-                outputs=[review_pending_candidates, review_pending_page_state, review_pending_page_info],
-            )
-            review_pending_next_button.click(
-                fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "next", processed=False),
-                inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_pending_page_state],
-                outputs=[review_pending_candidates, review_pending_page_state, review_pending_page_info],
-            )
-            review_processed_prev_button.click(
-                fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "prev", processed=True),
-                inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_processed_page_state],
-                outputs=[review_processed_candidates, review_processed_page_state, review_processed_page_info],
-            )
-            review_processed_next_button.click(
-                fn=lambda items, scope, risk, page: change_review_candidate_page(items, scope, risk, page, "next", processed=True),
-                inputs=[review_candidate_state, review_scope_filter, review_risk_filter, review_processed_page_state],
-                outputs=[review_processed_candidates, review_processed_page_state, review_processed_page_info],
-            )
-            review_evidence_prev_button.click(
-                fn=lambda items, page: change_review_evidence_page(items, page, "prev"),
-                inputs=[review_evidence_items_state, review_evidence_page_state],
-                outputs=[review_evidence_table, review_evidence_page_state, review_evidence_page_info],
-            )
-            review_evidence_next_button.click(
-                fn=lambda items, page: change_review_evidence_page(items, page, "next"),
-                inputs=[review_evidence_items_state, review_evidence_page_state],
-                outputs=[review_evidence_table, review_evidence_page_state, review_evidence_page_info],
-            )
-            review_history_prev_button.click(
-                fn=lambda items, page: change_review_history_page(items, page, "prev"),
-                inputs=[review_history_state, review_history_page_state],
-                outputs=[review_history, review_history_page_state, review_history_page_info],
-            )
-            review_history_next_button.click(
-                fn=lambda items, page: change_review_history_page(items, page, "next"),
-                inputs=[review_history_state, review_history_page_state],
-                outputs=[review_history, review_history_page_state, review_history_page_info],
+            bind_document_events(
+                components=document_components,
+                login_state=login_state,
+                search_knowledge_base=search_knowledge_base,
+                quality_knowledge_base=quality_knowledge_base,
+                review_knowledge_base=review_knowledge_base,
+                database_page_state=database_page_state,
+                document_page_state=document_page_state,
+                document_quality_sections_page_state=document_quality_sections_page_state,
+                document_quality_chunks_page_state=document_quality_chunks_page_state,
+                document_quality_search_page_state=document_quality_search_page_state,
+                document_quality_batch_page_state=document_quality_batch_page_state,
+                document_quality_search_state=document_quality_search_state,
+                document_quality_search_query_state=document_quality_search_query_state,
+                load_document_management_state_ui=load_document_management_state_ui,
+                change_document_knowledge_base_ui=change_document_knowledge_base_ui,
+                reassign_selected_document_ui=reassign_selected_document_ui,
+                inspect_document_ui=inspect_document_ui,
+                register_selected_document_ui=register_selected_document_ui,
+                register_all_documents_ui=register_all_documents_ui,
+                query_ingest_status_ui=query_ingest_status_ui,
+                rebuild_selected_document_ui=rebuild_selected_document_ui,
+                inspect_selected_document_quality_ui=inspect_selected_document_quality_ui,
+                run_document_quality_search_ui=run_document_quality_search_ui,
+                select_document_quality_search_result=select_document_quality_search_result,
+                export_document_quality_result=export_document_quality_result,
+                export_document_quality_search_result=export_document_quality_search_result,
+                run_batch_document_quality_ui=run_batch_document_quality_ui,
+                export_document_quality_batch_result=export_document_quality_batch_result,
+                export_document_quality_csv=export_document_quality_csv,
+                save_document_quality_config=save_document_quality_config,
+                export_document_quality_config_result=export_document_quality_config_result,
+                change_database_summary_page=change_database_summary_page,
+                change_document_list_page=change_document_list_page,
+                change_document_quality_sections_page=change_document_quality_sections_page,
+                change_document_quality_chunks_page=change_document_quality_chunks_page,
+                change_document_table_page=change_document_table_page,
+                change_document_quality_batch_page=change_document_quality_batch_page,
+            )
+            bind_search_events(
+                components=search_components,
+                login_state=login_state,
+                document_knowledge_base=document_knowledge_base,
+                quality_knowledge_base=quality_knowledge_base,
+                review_knowledge_base=review_knowledge_base,
+                run_search_ui=run_search_ui,
+                change_search_knowledge_base_ui=change_search_knowledge_base_ui,
+                select_search_result=select_search_result,
+                change_search_page=change_search_page,
+                export_search_results=export_search_results,
+            )
+            bind_quality_events(
+                components=quality_components,
+                login_state=login_state,
+                document_knowledge_base=document_knowledge_base,
+                search_knowledge_base=search_knowledge_base,
+                review_knowledge_base=review_knowledge_base,
+                run_quality_check_ui=run_quality_check_ui,
+                render_quality_template=render_quality_template,
+                list_recent_quality_results_ui=list_recent_quality_results_ui,
+                change_quality_knowledge_base_ui=change_quality_knowledge_base_ui,
+                select_recent_quality_result_ui=select_recent_quality_result_ui,
+                select_quality_claim_ui=select_quality_claim_ui,
+                select_quality_evidence=select_quality_evidence,
+                change_quality_claim_page=change_quality_claim_page,
+                change_quality_evidence_page=change_quality_evidence_page,
+                change_recent_quality_page=change_recent_quality_page,
+                export_quality_results=export_quality_results,
+                run_quality_evaluation_ui=run_quality_evaluation_ui,
+                change_quality_evaluation_page=change_quality_evaluation_page,
+                export_quality_evaluation_results=export_quality_evaluation_results,
+            )
+            bind_settings_events(
+                components=settings_components,
+                settings_template_state=settings_template_state,
+                settings_selected_template_state=settings_selected_template_state,
+                settings_template_page_state=settings_template_page_state,
+                settings_knowledge_base_state=settings_knowledge_base_state,
+                settings_selected_knowledge_base_state=settings_selected_knowledge_base_state,
+                settings_knowledge_base_page_state=settings_knowledge_base_page_state,
+                login_state=login_state,
+                quality_template=quality_template,
+                quality_template_detail=quality_template_detail,
+                document_knowledge_base=document_knowledge_base,
+                search_knowledge_base=search_knowledge_base,
+                quality_knowledge_base=quality_knowledge_base,
+                review_knowledge_base=review_knowledge_base,
+                refresh_settings_workspace_ui=refresh_settings_workspace_ui,
+                select_settings_template=select_settings_template,
+                prepare_new_template=prepare_new_template,
+                save_settings_template_ui=save_settings_template_ui,
+                delete_settings_template_ui=delete_settings_template_ui,
+                change_settings_template_page=change_settings_template_page,
+                export_settings_result=export_settings_result,
+                refresh_settings_knowledge_base_workspace_ui=refresh_settings_knowledge_base_workspace_ui,
+                select_settings_knowledge_base=select_settings_knowledge_base,
+                prepare_new_knowledge_base=prepare_new_knowledge_base,
+                save_settings_knowledge_base_ui=save_settings_knowledge_base_ui,
+                delete_settings_knowledge_base_ui=delete_settings_knowledge_base_ui,
+                change_settings_knowledge_base_page=change_settings_knowledge_base_page,
+            )
+            bind_review_events(
+                components=review_components,
+                review_candidate_state=review_candidate_state,
+                review_history_state=review_history_state,
+                review_selected_record_state=review_selected_record_state,
+                review_selected_claim_state=review_selected_claim_state,
+                review_claim_detail_state=review_claim_detail_state,
+                review_evidence_items_state=review_evidence_items_state,
+                review_pending_page_state=review_pending_page_state,
+                review_processed_page_state=review_processed_page_state,
+                review_evidence_page_state=review_evidence_page_state,
+                review_history_page_state=review_history_page_state,
+                login_state=login_state,
+                document_knowledge_base=document_knowledge_base,
+                search_knowledge_base=search_knowledge_base,
+                quality_knowledge_base=quality_knowledge_base,
+                list_review_workspace_ui=list_review_workspace_ui,
+                change_review_knowledge_base_ui=change_review_knowledge_base_ui,
+                export_review_results=export_review_result,
+                change_review_filters_ui=change_review_filters_ui,
+                select_review_candidate_ui=select_review_candidate_ui,
+                select_review_history_record_ui=select_review_history_record_ui,
+                select_quality_evidence=select_quality_evidence,
+                submit_review_action_ui=submit_review_action_ui,
+                change_review_candidate_page=change_review_candidate_page,
+                change_review_evidence_page=change_review_evidence_page,
+                change_review_history_page=change_review_history_page,
             )
             def _do_login(username, password):
                 try:

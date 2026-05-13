@@ -1,6 +1,7 @@
 """程序说明：验证最小 UI 可构建。"""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import gradio as gr
 import pandas as pd
@@ -15,6 +16,8 @@ from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
 from src.ui.app import ConnectionScopedAuthService, create_ui_app
+from src.ui.document_page import build_document_tab
+from src.ui.page_helpers import get_selected_search_item_from_page_rows, paginate_table_rows
 from src.ui.pages import (
     UI_CSS,
     build_visible_knowledge_base_bundle,
@@ -82,6 +85,111 @@ def test_build_visible_knowledge_base_bundle_should_fallback_to_authorized_defau
     assert [item["knowledge_base_id"] for item in visible_items] == ["medical"]
     assert len(visible_choices) == 1
     assert "medical" in str(selected_choice)
+
+
+def test_paginate_table_rows_should_clamp_page_and_prepend_sequence() -> None:
+    """分页 helper 应限制页码范围，并在需要时补自然序号。"""
+
+    rows = [[f"id_{index}", f"value_{index}"] for index in range(1, 14)]
+
+    page_rows, resolved_page, total_pages, page_info = paginate_table_rows(
+        rows,
+        page=99,
+        prepend_sequence=True,
+    )
+
+    assert resolved_page == 2
+    assert total_pages == 2
+    assert len(page_rows) == 3
+    assert page_rows[0] == ["11", "id_11", "value_11"]
+    assert "第 2 / 2 页" in page_info
+
+
+def test_get_selected_search_item_from_page_rows_should_map_sequence_to_raw_row() -> None:
+    """检索结果点击应按当前页序号映射回原始结果行。"""
+
+    page_rows = [
+        ["11", "文档甲", "定位甲", "全文", "标题命中", "摘要甲"],
+        ["12", "文档乙", "定位乙", "向量", "语义命中", "摘要乙"],
+    ]
+    raw_rows = [
+        {"chunk_id": f"chunk_{index}", "doc_title": f"标题{index}"}
+        for index in range(1, 13)
+    ]
+
+    selected_row = get_selected_search_item_from_page_rows(
+        page_rows,
+        raw_rows,
+        SimpleNamespace(index=[1, 0]),
+    )
+
+    assert selected_row == {"chunk_id": "chunk_12", "doc_title": "标题12"}
+
+
+def test_build_document_tab_should_return_expected_component_bundle() -> None:
+    """文档页 builder 应返回后续接线所需的关键组件集合。"""
+
+    with gr.Blocks():
+        components = build_document_tab(
+            initial_values={
+                "knowledge_base_choices": ["default | 默认知识库"],
+                "initial_knowledge_base_choice": "default | 默认知识库",
+                "document_summary": "<div>文档概览</div>",
+                "database_summary": "<div>数据库状态</div>",
+                "document_choices": ["a.md"],
+                "active_choice": "a.md",
+                "document_detail": "<div>当前文档</div>",
+                "register_interactive": True,
+                "rebuild_interactive": False,
+                "database_table_rows": [["1", "文档总数", "1"]],
+                "database_page_info": "第 1 / 1 页，共 1 条，每页最多 10 行",
+                "document_table_rows": [["1", "a.md", "a", "default", "10", "-", "是", "完成", "否", "查看", ""]],
+                "document_page_info": "第 1 / 1 页，共 1 条，每页最多 10 行",
+                "document_quality_report": "<div>未开始</div>",
+                "document_quality_checks": "<div>未开始</div>",
+                "document_quality_sections_table_rows": [],
+                "document_quality_sections_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+                "document_quality_chunks_table_rows": [],
+                "document_quality_chunks_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+                "document_quality_search_summary": "<div>未开始</div>",
+                "document_quality_search_table_rows": [],
+                "document_quality_search_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+                "document_quality_search_detail": "<div>未开始</div>",
+                "document_quality_batch_summary": "<div>未开始</div>",
+                "document_quality_batch_table_rows": [],
+                "document_quality_batch_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+                "document_quality_config_html": "<div>配置</div>",
+                "document_quality_config_result": "<div>未开始</div>",
+                "quality_sample_limit": 3,
+                "quality_long_document_char_threshold": 2000,
+                "quality_min_sections_for_long_doc": 5,
+                "quality_max_avg_chunks_per_section": 8,
+                "quality_max_chunk_chars": 1200,
+                "quality_short_chunk_chars": 80,
+                "quality_short_chunk_warn_min_chunk_count": 10,
+            }
+        )
+
+    expected_keys = {
+        "document_knowledge_base",
+        "document_target_knowledge_base",
+        "document_choices",
+        "register_button",
+        "rebuild_button",
+        "document_quality_search_query",
+        "document_quality_search_results",
+        "document_quality_batch_table",
+        "document_quality_config_save_button",
+        "document_quality_config_export_button",
+    }
+
+    assert expected_keys.issubset(components.keys())
+    assert isinstance(components["document_knowledge_base"], gr.Dropdown)
+    assert components["document_knowledge_base"].elem_id == "document-knowledge-base"
+    assert isinstance(components["document_quality_search_results"], gr.Dataframe)
+    assert components["document_quality_search_results"].elem_id == "document-quality-search-results"
+    assert isinstance(components["document_quality_config_save_button"], gr.Button)
+    assert components["document_quality_config_save_button"].value == "保存质检阈值"
 
 
 def test_connection_scoped_auth_service_should_open_and_close_connection_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -766,6 +874,56 @@ def test_input_driven_controls_should_not_use_change_events_on_startup(tmp_path:
         name == "list_recent_quality_results_ui" and any(target[1] == "input" for target in dependency.get("targets", []))
         for name, dependency in dependency_pairs
     )
+
+
+def test_create_ui_app_should_register_document_management_event_handlers(tmp_path: Path) -> None:
+    """文档管理页 builder / binder 接线后，关键交互处理器仍应被注册。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    dependencies = demo.config.get("dependencies", [])
+    dependency_pairs = [
+        (getattr(block_fn.fn, "__name__", ""), dependency)
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    ]
+
+    expected_handlers = {
+        "change_document_knowledge_base_ui": "input",
+        "load_document_management_state_ui": "click",
+        "reassign_selected_document_ui": "click",
+        "inspect_document_ui": "input",
+        "register_selected_document_ui": "click",
+        "register_all_documents_ui": "click",
+        "query_ingest_status_ui": "click",
+        "rebuild_selected_document_ui": "click",
+        "inspect_selected_document_quality_ui": "click",
+        "run_document_quality_search_ui": "click",
+        "select_document_quality_search_result": "select",
+        "export_document_quality_result": "click",
+        "export_document_quality_search_result": "click",
+        "run_batch_document_quality_ui": "click",
+        "export_document_quality_batch_result": "click",
+        "export_document_quality_csv": "click",
+        "save_document_quality_config": "click",
+        "export_document_quality_config_result": "click",
+    }
+
+    for handler_name, event_name in expected_handlers.items():
+        assert any(
+            name == handler_name and any(target[1] == event_name for target in dependency.get("targets", []))
+            for name, dependency in dependency_pairs
+        ), handler_name
 
 
 def test_create_ui_app_should_include_document_quality_workspace(tmp_path: Path) -> None:
