@@ -4419,7 +4419,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     initial_recent_quality_scope_value = recent_quality_scope_choices[0]
     initial_quality_evaluation_rows: list[list[str]] = []
     initial_quality_evaluation_result: dict = {}
-    initial_recent_results: list[dict] = []
+    try:
+        initial_recent_results = quality_service.list_recent_results(
+            limit=RECENT_QUALITY_FETCH_LIMIT,
+            knowledge_base_id=initial_knowledge_base_id,
+        ) or []
+    except AppError:
+        initial_recent_results = []
     (
         initial_progress_html,
         initial_result_html,
@@ -7226,23 +7232,27 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
             def _restore_login_session(stored_session):
                 """从浏览器持久化状态恢复登录态，刷新页面后仍保持登录。"""
-                if not isinstance(stored_session, dict):
+                try:
+                    if not isinstance(stored_session, dict):
+                        empty_session = _empty_login_session()
+                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                    user_id = str(stored_session.get("user_id") or "").strip()
+                    if not user_id:
+                        empty_session = _empty_login_session()
+                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                    restored_session = _build_login_session(user_id)
+                    if not restored_session.get("user_id"):
+                        empty_session = _empty_login_session()
+                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                    return (
+                        restored_session,
+                        _render_auth_user(str(restored_session.get("username") or "")),
+                        gr.update(visible=False),
+                        gr.update(visible=True),
+                    )
+                except Exception:
                     empty_session = _empty_login_session()
                     return empty_session, "", gr.update(visible=True), gr.update(visible=False)
-                user_id = str(stored_session.get("user_id") or "").strip()
-                if not user_id:
-                    empty_session = _empty_login_session()
-                    return empty_session, "", gr.update(visible=True), gr.update(visible=False)
-                restored_session = _build_login_session(user_id)
-                if not restored_session.get("user_id"):
-                    empty_session = _empty_login_session()
-                    return empty_session, "", gr.update(visible=True), gr.update(visible=False)
-                return (
-                    restored_session,
-                    _render_auth_user(str(restored_session.get("username") or "")),
-                    gr.update(visible=False),
-                    gr.update(visible=True),
-                )
 
             def _reset_auth_forms():
                 return (

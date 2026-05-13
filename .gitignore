@@ -5,6 +5,7 @@ __pycache__/
 **/__pycache__/
 .env
 .trae_ui_*.log
+*.log
 
 # 数据库与本地索引文件不再同步到 GitHub
 index/*.db

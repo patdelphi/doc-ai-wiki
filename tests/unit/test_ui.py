@@ -895,8 +895,8 @@ def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp
     assert "阿胶源于驴皮熬制" in str(claim_details[0].get("value", ""))
 
 
-def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path) -> None:
-    """AI 质检页首次进入时不应自动回填上一次质检记录。"""
+def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> None:
+    """AI 质检页首次进入时应预加载历史质检记录列表供用户回看。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -955,9 +955,8 @@ def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path)
     assert recent_tables
     assert claim_selectors
     assert recent_tables[0].get("value")
-    assert recent_tables[0]["value"]["data"] == []
-    assert claim_selectors[0].get("value") in (None, "")
-    assert claim_selectors[0].get("choices", []) == []
+    assert len(recent_tables[0]["value"]["data"]) >= 1
+    assert claim_selectors[0].get("choices", [])
 
 
 def test_create_ui_app_should_paginate_more_than_ten_recent_quality_records(tmp_path: Path) -> None:
@@ -2414,3 +2413,74 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "#review-claim-detail" in UI_CSS
     assert "font-weight:700" in UI_CSS.replace(" ", "")
     assert "overflow-wrap:anywhere" in UI_CSS.replace(" ", "")
+
+
+def test_restore_login_session_should_handle_invalid_stored_session(tmp_path: Path) -> None:
+    """测试_restore_login_session应能处理非字典类型异常输入。"""
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    result_session, result_label, result_login, result_menu = restore_fn("invalid_string")
+    assert result_session.get("user_id") is None
+    assert result_label == ""
+    assert result_login.get("visible") is True
+    assert result_menu.get("visible") is False
+
+
+def test_restore_login_session_should_handle_empty_user_id(tmp_path: Path) -> None:
+    """测试_restore_login_session应能处理空user_id情况。"""
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    stored = {"user_id": None, "username": None}
+    result_session, result_label, result_login, result_menu = restore_fn(stored)
+    assert result_session.get("user_id") is None
+    assert result_label == ""
+    assert result_login.get("visible") is True
+    assert result_menu.get("visible") is False
+
+
+def test_restore_login_session_should_handle_deleted_user(tmp_path: Path) -> None:
+    """测试_restore_login_session应能处理用户已被删除的情况（数据库不存在该用户时应返回空session并显示登录页）。"""
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    stored = {"user_id": "deleted_user_001", "username": "deleted_user"}
+    result_session, result_label, result_login, result_menu = restore_fn(stored)
+    assert result_session.get("user_id") is None
+    assert result_label == ""
+    assert result_login.get("visible") is True
+    assert result_menu.get("visible") is False
