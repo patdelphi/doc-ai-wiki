@@ -251,3 +251,32 @@ def test_create_app_should_allow_startup_when_legacy_collection_exists_but_sqlit
 
     assert app is not None
     assert collection.peek(limit=1)["ids"] == []
+
+
+def test_create_app_should_initialize_database_before_creating_vector_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """create_app() 应先完成数据库初始化，再构造 VectorStore。"""
+
+    settings = build_test_settings(tmp_path)
+    app_module = import_app_module_with_mismatch(monkeypatch, StubClient(StubCollection()), settings)
+    call_order: list[str] = []
+    original_initialize_database = app_module.initialize_database
+
+    def record_initialize_database(database_path: Path) -> None:
+        call_order.append("initialize_database")
+        original_initialize_database(database_path)
+
+    class RecordingVectorStore:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+            call_order.append("vector_store")
+
+    monkeypatch.setattr(app_module, "initialize_database", record_initialize_database)
+    monkeypatch.setattr(app_module, "VectorStore", RecordingVectorStore)
+
+    app = app_module.create_app(settings)
+
+    assert app is not None
+    assert call_order[:2] == ["initialize_database", "vector_store"]

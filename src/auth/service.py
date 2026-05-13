@@ -1,8 +1,30 @@
 """程序说明：用户认证与权限管理服务（适配现有数据库结构）。"""
 
+import hmac
 import hashlib
+import os
 import time
 from dataclasses import dataclass, field
+
+AUTH_TAB_NAMES = [
+    "AI 质检",
+    "人工审核",
+    "知识库管理",
+    "知识库检索",
+    "功能设置",
+]
+
+LEGACY_TAB_NAME_MAP = {
+    "文档管理": "知识库管理",
+    "文档检索": "知识库检索",
+}
+
+
+def normalize_auth_tab_name(tab_name: str) -> str:
+    """兼容历史权限表中的旧页签名称。"""
+
+    normalized = str(tab_name or "").strip()
+    return LEGACY_TAB_NAME_MAP.get(normalized, normalized)
 
 
 @dataclass
@@ -27,42 +49,32 @@ class AuthService:
     """用户认证与权限管理服务。
 
     适配现有数据库结构：
-    - users 表：user_id (TEXT UUID), password_hash (bcrypt/SHA256), is_admin (INTEGER)
+    - users 表：user_id (TEXT UUID), password_hash (PBKDF2/bcrypt/SHA256), is_admin (INTEGER)
     - user_tab_access 表：user_id (TEXT), tab_name (TEXT)
     - user_kb_access 表：user_id (TEXT), knowledge_base_id (TEXT)
     """
 
+    PASSWORD_SCHEME = "pbkdf2_sha256"
+    PASSWORD_ITERATIONS = 390000
+
     def __init__(self, db):
         self._db = db
-        self._ensure_default_admin()
-
-    def _ensure_default_admin(self):
-        """确保默认 admin 用户存在。"""
-        existing = self._db.execute("SELECT COUNT(*) FROM users WHERE username = ?", ("admin",)).fetchone()[0]
-        if existing == 0:
-            import uuid
-            user_id = str(uuid.uuid4())
-            password_hash = hashlib.sha256("admin".encode("utf-8")).hexdigest()
-            created_at = time.strftime("%Y-%m-%d %H:%M:%S")
-            self._db.execute(
-                "INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at) VALUES (?, ?, ?, 1, 1, ?, ?)",
-                (user_id, "admin", password_hash, created_at, created_at)
-            )
-            tabs = ["文档管理", "文档检索", "AI 质检", "人工审核", "功能设置"]
-            for tab in tabs:
-                self._db.execute(
-                    "INSERT OR IGNORE INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
-                    (user_id, tab)
-                )
-            kbs = self._db.execute("SELECT knowledge_base_id FROM knowledge_bases").fetchall()
-            for kb in kbs:
-                self._db.execute(
-                    "INSERT OR IGNORE INTO user_kb_access (user_id, knowledge_base_id) VALUES (?, ?)",
-                    (user_id, kb[0])
-                )
-            self._db.commit()
 
     def _hash_password(self, password: str) -> str:
+        """使用带盐 PBKDF2-SHA256 生成新密码哈希。"""
+
+        salt = os.urandom(16).hex()
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            self.PASSWORD_ITERATIONS,
+        ).hex()
+        return f"{self.PASSWORD_SCHEME}${self.PASSWORD_ITERATIONS}${salt}${password_hash}"
+
+    def _hash_legacy_password(self, password: str) -> str:
+        """兼容旧库中的 SHA256 密码格式。"""
+
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
     def _verify_password(self, stored_hash: str, password: str) -> bool:
@@ -71,16 +83,27 @@ class AuthService:
                 import bcrypt
                 return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
             except ImportError:
-                return self._hash_password(password) == stored_hash
-        return self._hash_password(password) == stored_hash
+                return self._hash_legacy_password(password) == stored_hash
+        if stored_hash.startswith(f"{self.PASSWORD_SCHEME}$"):
+            _, iterations, salt, password_hash = stored_hash.split("$", 3)
+            candidate_hash = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations),
+            ).hex()
+            return hmac.compare_digest(candidate_hash, password_hash)
+        return self._hash_legacy_password(password) == stored_hash
 
     def authenticate(self, username: str, password: str) -> User | None:
         """验证用户名和密码，返回用户对象或 None。"""
         row = self._db.execute(
-            "SELECT user_id, username, password_hash, is_admin, created_at FROM users WHERE username = ?",
+            "SELECT user_id, username, password_hash, is_active, is_admin, created_at FROM users WHERE username = ?",
             (username,)
         ).fetchone()
         if not row:
+            return None
+        if not bool(row[3]):
             return None
         if not self._verify_password(row[2], password):
             return None
@@ -88,8 +111,8 @@ class AuthService:
             user_id=row[0],
             username=row[1],
             password_hash=row[2],
-            is_admin=bool(row[3]),
-            created_at=row[4],
+            is_admin=bool(row[4]),
+            created_at=row[5],
         )
 
     def get_user_by_id(self, user_id: str) -> User | None:
@@ -129,6 +152,8 @@ class AuthService:
                 "INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at) VALUES (?, ?, ?, 1, 0, ?, ?)",
                 (user_id, username.strip(), password_hash, created_at, created_at)
             )
+            self._grant_default_permissions(user_id)
+            self._upsert_permission_marker(user_id)
             self._db.commit()
             return True, "注册成功"
         except Exception as e:
@@ -179,9 +204,15 @@ class AuthService:
 
     def get_user_permissions(self, user_id: str) -> UserPermission | None:
         """获取用户权限。"""
-        user = self._db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        user = self._db.execute("SELECT user_id, is_admin FROM users WHERE user_id = ?", (user_id,)).fetchone()
         if not user:
             return None
+        if bool(user[1]):
+            return UserPermission(
+                user_id=user_id,
+                tab_names=list(AUTH_TAB_NAMES),
+                kb_ids=self._list_knowledge_base_ids(),
+            )
         tab_rows = self._db.execute(
             "SELECT tab_name FROM user_tab_access WHERE user_id = ?",
             (user_id,)
@@ -190,10 +221,20 @@ class AuthService:
             "SELECT knowledge_base_id FROM user_kb_access WHERE user_id = ?",
             (user_id,)
         ).fetchall()
+        marker_row = self._db.execute(
+            "SELECT 1 FROM user_permissions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        tab_names = [normalize_auth_tab_name(r[0]) for r in tab_rows]
+        kb_ids = [r[0] for r in kb_rows]
+        if not tab_names and not marker_row:
+            tab_names = list(AUTH_TAB_NAMES)
+        if not kb_ids and not marker_row:
+            kb_ids = self._list_knowledge_base_ids()
         return UserPermission(
             user_id=user_id,
-            tab_names=[r[0] for r in tab_rows],
-            kb_ids=[r[0] for r in kb_rows],
+            tab_names=tab_names,
+            kb_ids=kb_ids,
         )
 
     def update_user_permissions(self, user_id: str, tab_names: list[str], kb_ids: list[str]) -> tuple[bool, str]:
@@ -206,7 +247,7 @@ class AuthService:
             for tab in tab_names:
                 self._db.execute(
                     "INSERT INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
-                    (user_id, tab)
+                    (user_id, normalize_auth_tab_name(tab))
                 )
             self._db.execute("DELETE FROM user_kb_access WHERE user_id = ?", (user_id,))
             for kb in kb_ids:
@@ -214,8 +255,44 @@ class AuthService:
                     "INSERT INTO user_kb_access (user_id, knowledge_base_id) VALUES (?, ?)",
                     (user_id, kb)
                 )
+            self._upsert_permission_marker(user_id)
             self._db.commit()
             return True, "权限已更新"
         except Exception as e:
             self._db.rollback()
             return False, f"权限更新失败: {e}"
+
+    def _grant_default_permissions(self, user_id: str) -> None:
+        """为新用户授予当前 UI 所需的最小默认权限。"""
+
+        for tab_name in AUTH_TAB_NAMES:
+            self._db.execute(
+                "INSERT OR IGNORE INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
+                (user_id, tab_name),
+            )
+        for knowledge_base_id in self._list_knowledge_base_ids():
+            self._db.execute(
+                "INSERT OR IGNORE INTO user_kb_access (user_id, knowledge_base_id) VALUES (?, ?)",
+                (user_id, knowledge_base_id),
+            )
+
+    def _list_knowledge_base_ids(self) -> list[str]:
+        """读取当前所有知识库 ID。"""
+
+        rows = self._db.execute("SELECT knowledge_base_id FROM knowledge_bases ORDER BY knowledge_base_id").fetchall()
+        return [str(row[0]) for row in rows]
+
+    def _upsert_permission_marker(self, user_id: str) -> None:
+        """标记用户权限已显式初始化，避免旧数据回退逻辑误判。"""
+
+        updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._db.execute(
+            """
+            INSERT INTO user_permissions (user_id, permissions_json, updated_at)
+            VALUES (?, '{}', ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                permissions_json = excluded.permissions_json,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, updated_at),
+        )

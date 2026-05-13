@@ -60,6 +60,19 @@ class StubCollection:
         _ = where
 
 
+class CountStubCollection(StubCollection):
+    """测试 count_by_doc_uid() 时使用的集合桩。"""
+
+    def __init__(self, ids_result) -> None:
+        super().__init__()
+        self.ids_result = ids_result
+
+    def get(self, *, where: dict, include: list[str]) -> dict:
+        assert where == {"doc_uid": "doc_1"}
+        assert include == []
+        return {"ids": self.ids_result}
+
+
 class StubClient:
     """测试用 Chroma 客户端。"""
 
@@ -297,3 +310,20 @@ def test_vector_store_should_rebuild_from_sqlite_when_legacy_collection_config_i
     assert store.last_repair_summary["repaired_docs"] == 1
     assert store.last_repair_summary["repaired_chunks"] == 1
     assert store.last_repair_summary["legacy_backup_path"].endswith("chroma_legacy_backup")
+
+
+def test_vector_store_count_by_doc_uid_should_support_nested_id_sequences(monkeypatch, tmp_path: Path) -> None:
+    """统计向量数量时应兼容部分客户端返回的嵌套 ids 结构。"""
+
+    collection = CountStubCollection(ids_result=[["chunk_1", "chunk_2"]])
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: StubClient(collection),
+    )
+
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=8),
+    )
+
+    assert store.count_by_doc_uid("doc_1") == 2

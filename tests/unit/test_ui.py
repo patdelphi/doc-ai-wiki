@@ -4,6 +4,7 @@ from pathlib import Path
 
 import gradio as gr
 import pandas as pd
+import pytest
 
 from src.common.config import AppSettings
 from src.db.connection import initialize_database
@@ -13,8 +14,13 @@ from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
-from src.ui.app import create_ui_app
-from src.ui.pages import UI_CSS
+from src.ui.app import ConnectionScopedAuthService, create_ui_app
+from src.ui.pages import (
+    UI_CSS,
+    build_visible_knowledge_base_bundle,
+    filter_visible_knowledge_base_items,
+    normalize_auth_tab_name,
+)
 
 
 def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
@@ -33,6 +39,82 @@ def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
     demo = create_ui_app(settings)
 
     assert isinstance(demo, gr.Blocks)
+
+
+def test_normalize_auth_tab_name_should_compat_legacy_tab_labels() -> None:
+    """旧权限表中的历史页签名称应映射到当前 UI 名称。"""
+
+    assert normalize_auth_tab_name("文档管理") == "知识库管理"
+    assert normalize_auth_tab_name("文档检索") == "知识库检索"
+    assert normalize_auth_tab_name("AI 质检") == "AI 质检"
+
+
+def test_filter_visible_knowledge_base_items_should_only_keep_authorized_items() -> None:
+    """知识库下拉选项应按授权范围过滤。"""
+
+    items = [
+        {"knowledge_base_id": "default", "knowledge_base_name": "默认知识库"},
+        {"knowledge_base_id": "medical", "knowledge_base_name": "医学知识库"},
+    ]
+
+    filtered_items = filter_visible_knowledge_base_items(items, {"medical"}, is_admin=False)
+    admin_items = filter_visible_knowledge_base_items(items, {"medical"}, is_admin=True)
+
+    assert [item["knowledge_base_id"] for item in filtered_items] == ["medical"]
+    assert [item["knowledge_base_id"] for item in admin_items] == ["default", "medical"]
+
+
+def test_build_visible_knowledge_base_bundle_should_fallback_to_authorized_default() -> None:
+    """选中未授权知识库时，应回退到权限范围内的默认选项。"""
+
+    items = [
+        {"knowledge_base_id": "default", "knowledge_base_name": "默认知识库", "is_default": True},
+        {"knowledge_base_id": "medical", "knowledge_base_name": "医学知识库", "is_default": False},
+    ]
+
+    visible_items, visible_choices, selected_choice = build_visible_knowledge_base_bundle(
+        items,
+        {"medical"},
+        is_admin=False,
+        selected_knowledge_base_id="default",
+    )
+
+    assert [item["knowledge_base_id"] for item in visible_items] == ["medical"]
+    assert len(visible_choices) == 1
+    assert "medical" in str(selected_choice)
+
+
+def test_connection_scoped_auth_service_should_open_and_close_connection_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """认证包装层应按调用粒度创建并关闭数据库连接。"""
+
+    lifecycle: list[str] = []
+
+    class DummyConnection:
+        def __enter__(self):
+            lifecycle.append("enter")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            lifecycle.append("exit")
+            return False
+
+    class DummyAuthService:
+        def __init__(self, connection) -> None:
+            assert isinstance(connection, DummyConnection)
+            lifecycle.append("auth_init")
+
+        def authenticate(self, username: str, password: str):
+            lifecycle.append(f"authenticate:{username}")
+            return {"username": username, "password": password}
+
+    monkeypatch.setattr("src.ui.app.create_connection", lambda database_path: DummyConnection())
+    monkeypatch.setattr("src.ui.app.AuthService", DummyAuthService)
+
+    service = ConnectionScopedAuthService("test.db")
+    result = service.authenticate("tester", "secret")
+
+    assert result == {"username": "tester", "password": "secret"}
+    assert lifecycle == ["enter", "auth_init", "authenticate:tester", "exit"]
 
 
 def test_create_ui_app_should_not_register_startup_load_event(tmp_path: Path) -> None:
@@ -2431,7 +2513,7 @@ def test_restore_login_session_should_handle_invalid_stored_session(tmp_path: Pa
     restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
     assert restore_fn is not None
 
-    result_session, result_label, result_login, result_menu = restore_fn("invalid_string")
+    result_session, result_label, result_login, result_menu, *_extra_outputs = restore_fn("invalid_string")
     assert result_session.get("user_id") is None
     assert result_label == ""
     assert result_login.get("visible") is True
@@ -2455,7 +2537,7 @@ def test_restore_login_session_should_handle_empty_user_id(tmp_path: Path) -> No
     assert restore_fn is not None
 
     stored = {"user_id": None, "username": None}
-    result_session, result_label, result_login, result_menu = restore_fn(stored)
+    result_session, result_label, result_login, result_menu, *_extra_outputs = restore_fn(stored)
     assert result_session.get("user_id") is None
     assert result_label == ""
     assert result_login.get("visible") is True
@@ -2479,7 +2561,7 @@ def test_restore_login_session_should_handle_deleted_user(tmp_path: Path) -> Non
     assert restore_fn is not None
 
     stored = {"user_id": "deleted_user_001", "username": "deleted_user"}
-    result_session, result_label, result_login, result_menu = restore_fn(stored)
+    result_session, result_label, result_login, result_menu, *_extra_outputs = restore_fn(stored)
     assert result_session.get("user_id") is None
     assert result_label == ""
     assert result_login.get("visible") is True

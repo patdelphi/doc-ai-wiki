@@ -69,11 +69,16 @@ class KnowledgeBaseService:
         item = self.get_knowledge_base(knowledge_base_id)
         if item.get("is_default"):
             raise ValidationAppError("默认知识库不能删除")
-        document_count = self.repository.count_documents(knowledge_base_id)
-        if document_count > 0:
+        related_counts = self.repository.get_related_record_counts(knowledge_base_id)
+        if related_counts["document_count"] > 0:
             raise ValidationAppError(
                 "当前知识库下仍有归属文档，不能删除",
-                details={"knowledge_base_id": knowledge_base_id, "document_count": document_count},
+                details={"knowledge_base_id": knowledge_base_id, **related_counts},
+            )
+        if related_counts["quality_check_count"] > 0 or related_counts["claim_count"] > 0 or related_counts["review_count"] > 0:
+            raise ValidationAppError(
+                "当前知识库下仍有关联质检或审核记录，不能删除",
+                details={"knowledge_base_id": knowledge_base_id, **related_counts},
             )
         self.repository.delete_knowledge_base(knowledge_base_id)
         input_dir = self.get_input_directory(knowledge_base_id)

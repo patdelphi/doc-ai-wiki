@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 import gradio as gr
 
 from src.ai.embedding import build_embedding_client
@@ -11,7 +9,7 @@ from src.ai.llm import DisabledLLMClient, build_llm_client
 from src.ai.rerank import build_reranker
 from src.auth.service import AuthService
 from src.common.config import AppSettings, get_settings
-from src.db.connection import initialize_database
+from src.db.connection import create_connection, initialize_database
 from src.ingest.service import IngestService
 from src.quality.service import QualityService
 from src.review.service import ReviewService
@@ -22,6 +20,32 @@ from src.ui.pages import build_ui
 from src.ui.css import UI_CSS
 
 
+class ConnectionScopedAuthService:
+    """按调用粒度创建认证连接，避免 UI 长期持有 SQLite 连接。"""
+
+    def __init__(self, database_path) -> None:
+        self.database_path = database_path
+
+    def _call(self, method_name: str, *args, **kwargs):
+        """为每次认证调用创建独立连接，用后立即关闭。"""
+
+        with create_connection(self.database_path) as connection:
+            method = getattr(AuthService(connection), method_name)
+            return method(*args, **kwargs)
+
+    def authenticate(self, username: str, password: str):
+        return self._call("authenticate", username, password)
+
+    def register_user(self, username: str, password: str):
+        return self._call("register_user", username, password)
+
+    def get_user_by_id(self, user_id: str):
+        return self._call("get_user_by_id", user_id)
+
+    def get_user_permissions(self, user_id: str):
+        return self._call("get_user_permissions", user_id)
+
+
 def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     """创建 Gradio UI 实例。"""
 
@@ -29,9 +53,7 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     settings.ensure_runtime_directories()
     initialize_database(settings.sqlite_db_path)
 
-    conn = sqlite3.connect(str(settings.sqlite_db_path), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    auth_service = AuthService(conn)
+    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
 
     embedding_client = build_embedding_client(settings)
     llm_client = build_llm_client(settings)

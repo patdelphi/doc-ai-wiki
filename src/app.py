@@ -5,12 +5,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import JSONResponse
 
 from src.ai.embedding import build_embedding_client
 from src.ai.llm import DisabledLLMClient, build_llm_client
 from src.ai.rerank import build_reranker
+from src.auth.service import AuthService, User, normalize_auth_tab_name
 from src.common.config import AppSettings, get_settings
 from src.common.errors import AppError, NotFoundAppError, ValidationAppError
 from src.common.logger import configure_logging, get_logger
@@ -22,7 +24,7 @@ from src.common.models import (
     QualityCheckRequest,
     ReviewSubmitRequest,
 )
-from src.db.connection import initialize_database
+from src.db.connection import create_connection, initialize_database
 from src.ingest.service import IngestService
 from src.quality.service import QualityService
 from src.review.service import ReviewService
@@ -36,14 +38,14 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     settings = settings_override or get_settings()
     configure_logging(config_path=Path("config/logging.yaml"), default_level=settings.log_level)
     logger = get_logger(__name__)
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+    logger.info("数据库初始化完成")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         """应用启动时初始化数据库。"""
 
-        settings.ensure_runtime_directories()
-        initialize_database(settings.sqlite_db_path)
-        logger.info("数据库初始化完成")
         yield
 
     app = FastAPI(title="中文知识库系统 MVP", version="0.5", lifespan=lifespan)
@@ -69,6 +71,98 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         llm_client=None if isinstance(llm_client, DisabledLLMClient) else llm_client,
     )
     review_service = ReviewService(settings.sqlite_db_path)
+    security = HTTPBasic(auto_error=False)
+
+    def _raise_auth_error(detail: str) -> None:
+        """统一抛出 Basic Auth 认证异常。"""
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    def _get_user_permissions(user_id: str):
+        """按需读取用户权限，避免共享长连接。"""
+
+        connection = create_connection(settings.sqlite_db_path)
+        try:
+            return AuthService(connection).get_user_permissions(user_id)
+        finally:
+            connection.close()
+
+    def require_authenticated_user(
+        credentials: HTTPBasicCredentials | None = Depends(security),
+    ) -> User:
+        """校验 HTTP Basic 凭证并返回当前用户。"""
+
+        if credentials is None:
+            _raise_auth_error("请先登录")
+        connection = create_connection(settings.sqlite_db_path)
+        try:
+            user = AuthService(connection).authenticate(credentials.username, credentials.password)
+        finally:
+            connection.close()
+        if not user:
+            _raise_auth_error("用户名或密码错误")
+        return user
+
+    def require_tab_access(tab_name: str):
+        """构建按业务页签控制的权限依赖。"""
+
+        normalized_tab_name = normalize_auth_tab_name(tab_name)
+
+        def dependency(current_user: User = Depends(require_authenticated_user)) -> User:
+            if current_user.is_admin:
+                return current_user
+            permissions = _get_user_permissions(current_user.user_id)
+            allowed_tabs = {
+                normalize_auth_tab_name(name)
+                for name in (permissions.tab_names if permissions else [])
+            }
+            if normalized_tab_name not in allowed_tabs:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="无权限访问当前接口",
+                )
+            return current_user
+
+        return dependency
+
+    def _ensure_knowledge_base_access(current_user: User, knowledge_base_id: str | None) -> None:
+        """校验当前用户是否有权访问指定知识库。"""
+
+        normalized_kb_id = str(knowledge_base_id or "").strip()
+        if current_user.is_admin or not normalized_kb_id:
+            return
+        permissions = _get_user_permissions(current_user.user_id)
+        allowed_kb_ids = {
+            str(item_id or "").strip()
+            for item_id in (permissions.kb_ids if permissions else [])
+            if str(item_id or "").strip()
+        }
+        if normalized_kb_id not in allowed_kb_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权限访问当前知识库",
+            )
+
+    def _filter_knowledge_base_items_for_user(items: list[dict], current_user: User) -> list[dict]:
+        """按当前用户的知识库权限过滤返回项。"""
+
+        if current_user.is_admin:
+            return items
+        permissions = _get_user_permissions(current_user.user_id)
+        allowed_kb_ids = {
+            str(item_id or "").strip()
+            for item_id in (permissions.kb_ids if permissions else [])
+            if str(item_id or "").strip()
+        }
+        return [
+            item
+            for item in items
+            if str(item.get("knowledge_base_id") or "").strip() in allowed_kb_ids
+        ]
 
     @app.exception_handler(AppError)
     async def handle_app_error(_, exc: AppError) -> JSONResponse:
@@ -89,7 +183,10 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         return ApiResponse(success=True, message="ok", data={"status": "healthy"})
 
     @app.post("/ingest/register", response_model=ApiResponse)
-    def register_documents(request: DocumentRegisterRequest) -> ApiResponse:
+    def register_documents(
+        request: DocumentRegisterRequest,
+        _current_user: User = Depends(require_tab_access("知识库管理")),
+    ) -> ApiResponse:
         """注册 Markdown 文档。"""
 
         jobs = ingest_service.register_documents(
@@ -99,7 +196,10 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         return ApiResponse(success=True, message="documents registered", data={"jobs": jobs})
 
     @app.post("/ingest/rebuild", response_model=ApiResponse)
-    def rebuild_documents(request: IngestRebuildRequest) -> ApiResponse:
+    def rebuild_documents(
+        request: IngestRebuildRequest,
+        _current_user: User = Depends(require_tab_access("知识库管理")),
+    ) -> ApiResponse:
         """接受文档重建请求。"""
 
         accepted = ingest_service.rebuild_documents(
@@ -116,9 +216,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         status: str | None = None,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
+        current_user: User = Depends(require_tab_access("知识库管理")),
     ) -> ApiResponse:
         """查询入库状态。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items, total = ingest_service.list_status(
             doc_uid=doc_uid,
             knowledge_base_id=knowledge_base_id,
@@ -140,9 +242,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=10, ge=1, le=100),
         knowledge_base_id: str | None = None,
+        current_user: User = Depends(require_tab_access("知识库检索")),
     ) -> ApiResponse:
         """执行全文检索。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items = retrieval_service.fulltext_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
         return ApiResponse(success=True, message="ok", data={"items": items})
 
@@ -151,9 +255,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         query: str = Query(..., min_length=1),
         top_k: int = Query(default=10, ge=1, le=100),
         knowledge_base_id: str | None = None,
+        current_user: User = Depends(require_tab_access("知识库检索")),
     ) -> ApiResponse:
         """执行向量检索占位实现。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items = retrieval_service.vector_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
         return ApiResponse(success=True, message="ok", data={"items": items})
 
@@ -163,9 +269,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         top_k: int = Query(default=10, ge=1, le=100),
         use_rerank: bool = Query(default=True),
         knowledge_base_id: str | None = None,
+        current_user: User = Depends(require_tab_access("知识库检索")),
     ) -> ApiResponse:
         """执行混合检索。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items = retrieval_service.hybrid_search(
             query,
             top_k=top_k,
@@ -175,9 +283,13 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.post("/quality/check", response_model=ApiResponse)
-    def quality_check(request: QualityCheckRequest) -> ApiResponse:
+    def quality_check(
+        request: QualityCheckRequest,
+        current_user: User = Depends(require_tab_access("AI 质检")),
+    ) -> ApiResponse:
         """执行最小质检。"""
 
+        _ensure_knowledge_base_access(current_user, request.knowledge_base_id)
         if not request.input_text.strip():
             raise ValidationAppError("input_text 不能为空")
         if len(request.input_text) > 2000:
@@ -191,33 +303,46 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         return ApiResponse(success=True, message="ok", data=result)
 
     @app.get("/knowledge-bases", response_model=ApiResponse)
-    def list_knowledge_bases() -> ApiResponse:
+    def list_knowledge_bases(current_user: User = Depends(require_authenticated_user)) -> ApiResponse:
         """列出可用知识库。"""
 
-        return ApiResponse(success=True, message="ok", data={"items": ingest_service.list_knowledge_bases()})
+        items = _filter_knowledge_base_items_for_user(ingest_service.list_knowledge_bases(), current_user)
+        return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.post("/knowledge-bases", response_model=ApiResponse)
-    def save_knowledge_base(request: KnowledgeBaseUpsertRequest) -> ApiResponse:
+    def save_knowledge_base(
+        request: KnowledgeBaseUpsertRequest,
+        _current_user: User = Depends(require_tab_access("知识库管理")),
+    ) -> ApiResponse:
         """新增或更新知识库。"""
 
         item = ingest_service.save_knowledge_base(request.model_dump())
         return ApiResponse(success=True, message="ok", data={"item": item})
 
     @app.delete("/knowledge-bases/{knowledge_base_id}", response_model=ApiResponse)
-    def delete_knowledge_base(knowledge_base_id: str) -> ApiResponse:
+    def delete_knowledge_base(
+        knowledge_base_id: str,
+        current_user: User = Depends(require_tab_access("知识库管理")),
+    ) -> ApiResponse:
         """删除知识库。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         item = ingest_service.delete_knowledge_base(knowledge_base_id)
         return ApiResponse(success=True, message="ok", data={"item": item})
 
     @app.get("/quality/templates", response_model=ApiResponse)
-    def list_quality_templates() -> ApiResponse:
+    def list_quality_templates(
+        _current_user: User = Depends(require_tab_access("AI 质检")),
+    ) -> ApiResponse:
         """列出可用的质检模板。"""
 
         return ApiResponse(success=True, message="ok", data={"items": quality_service.list_templates()})
 
     @app.get("/quality/result/{check_id}", response_model=ApiResponse)
-    def get_quality_result(check_id: str) -> ApiResponse:
+    def get_quality_result(
+        check_id: str,
+        _current_user: User = Depends(require_tab_access("AI 质检")),
+    ) -> ApiResponse:
         """查询质检结果。"""
 
         result = quality_service.get_result(check_id)
@@ -226,7 +351,10 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         return ApiResponse(success=True, message="ok", data=result)
 
     @app.post("/review/submit", response_model=ApiResponse)
-    def submit_review(request: ReviewSubmitRequest) -> ApiResponse:
+    def submit_review(
+        request: ReviewSubmitRequest,
+        _current_user: User = Depends(require_tab_access("人工审核")),
+    ) -> ApiResponse:
         """提交审核动作。"""
 
         result = review_service.submit_review(
@@ -243,9 +371,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
         knowledge_base_id: str | None = None,
+        current_user: User = Depends(require_tab_access("人工审核")),
     ) -> ApiResponse:
         """分页查询审核记录。"""
 
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items, total = review_service.list_reviews(
             page=page,
             page_size=page_size,

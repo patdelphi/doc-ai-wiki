@@ -176,6 +176,89 @@ def test_initialize_database_should_upgrade_legacy_tables_before_creating_indexe
     assert "knowledge_base_id" in quality_check_columns
 
 
+def test_initialize_database_should_upgrade_legacy_review_records_with_claim_foreign_key(tmp_path: Path) -> None:
+    """旧库中的 review_records 应升级为带 claim 级联外键的结构。"""
+
+    database_path = tmp_path / "legacy_review.db"
+    with create_connection(database_path) as connection:
+        connection.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE quality_checks (
+                check_id TEXT PRIMARY KEY,
+                knowledge_base_id TEXT NOT NULL DEFAULT 'default',
+                input_text TEXT NOT NULL,
+                overall_verdict TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE quality_claims (
+                claim_id TEXT PRIMARY KEY,
+                check_id TEXT NOT NULL,
+                claim_text TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                risk_level TEXT NOT NULL DEFAULT 'medium',
+                confidence REAL NOT NULL,
+                evidence TEXT NOT NULL,
+                evidence_details_json TEXT NOT NULL DEFAULT '[]',
+                source_doc TEXT,
+                source_span TEXT,
+                review_status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE review_records (
+                review_id TEXT PRIMARY KEY,
+                claim_id TEXT NOT NULL,
+                review_action TEXT NOT NULL,
+                reviewed_verdict TEXT,
+                review_note TEXT,
+                reviewer TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            INSERT INTO quality_checks (
+                check_id, knowledge_base_id, input_text, overall_verdict, risk_level, summary, created_at, updated_at
+            ) VALUES (
+                'check_legacy', 'default', '旧库测试输入', 'needs_review', 'medium', 'legacy', '2026-05-03T00:00:00+00:00', '2026-05-03T00:00:00+00:00'
+            );
+
+            INSERT INTO quality_claims (
+                claim_id, check_id, claim_text, verdict, risk_level, confidence, evidence,
+                evidence_details_json, source_doc, source_span, review_status, created_at, updated_at
+            ) VALUES (
+                'claim_legacy', 'check_legacy', '旧 Claim', 'needs_review', 'medium', 0.8, 'legacy evidence',
+                '[]', 'doc_legacy', 's1', 'pending', '2026-05-03T00:00:00+00:00', '2026-05-03T00:00:00+00:00'
+            );
+
+            INSERT INTO review_records (
+                review_id, claim_id, review_action, reviewed_verdict, review_note, reviewer, created_at
+            ) VALUES (
+                'review_legacy', 'claim_legacy', 'approved', NULL, 'legacy review', 'tester', '2026-05-03T01:00:00+00:00'
+            );
+            """
+        )
+
+    initialize_database(database_path)
+
+    with create_connection(database_path) as connection:
+        foreign_keys = connection.execute("PRAGMA foreign_key_list(review_records)").fetchall()
+        connection.execute("DELETE FROM quality_claims WHERE claim_id = ?", ("claim_legacy",))
+        connection.commit()
+        review_count = connection.execute("SELECT COUNT(1) FROM review_records WHERE claim_id = ?", ("claim_legacy",)).fetchone()[0]
+
+    assert any(
+        row["from"] == "claim_id" and row["table"] == "quality_claims"
+        for row in foreign_keys
+    )
+    assert review_count == 0
+
+
 def test_knowledge_base_service_should_block_delete_when_documents_exist(tmp_path: Path) -> None:
     """已有归属文档的知识库不允许删除。"""
 
@@ -210,6 +293,45 @@ def test_knowledge_base_service_should_block_delete_when_documents_exist(tmp_pat
     assert (input_root / "test_kb").exists()
 
     with pytest.raises(ValidationAppError):
+        service.delete_knowledge_base("test_kb")
+
+
+def test_knowledge_base_service_should_block_delete_when_quality_history_exists(tmp_path: Path) -> None:
+    """即使没有文档，只要仍有关联质检与审核数据，也不允许删除知识库。"""
+
+    database_path = tmp_path / "app.db"
+    input_root = tmp_path / "Input"
+    initialize_database(database_path)
+    service = KnowledgeBaseService(database_path, input_root)
+    repository = QualityRepository(database_path)
+
+    service.save_knowledge_base(
+        {
+            "knowledge_base_id": "test_kb",
+            "knowledge_base_name": "测试知识库",
+            "description": "用于删除前校验",
+        }
+    )
+    _create_quality_result(
+        repository,
+        check_id="check_test_kb",
+        knowledge_base_id="test_kb",
+        claim_id="claim_test_kb",
+        created_at="2026-05-03T10:00:00+00:00",
+    )
+    repository.insert_review_record(
+        {
+            "review_id": "rev_test_kb_1",
+            "claim_id": "claim_test_kb",
+            "review_action": "approved",
+            "reviewed_verdict": None,
+            "review_note": "用于删除阻断测试",
+            "reviewer": "tester",
+            "created_at": "2026-05-03T11:00:00+00:00",
+        }
+    )
+
+    with pytest.raises(ValidationAppError, match="质检|审核"):
         service.delete_knowledge_base("test_kb")
 
 

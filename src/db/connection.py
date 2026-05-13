@@ -49,6 +49,7 @@ def initialize_database(database_path: Path) -> None:
         _ensure_document_columns(connection)
         _ensure_quality_check_columns(connection)
         _ensure_quality_claim_columns(connection)
+        _ensure_review_record_foreign_key(connection)
         _backfill_knowledge_base_columns(connection)
 
 
@@ -158,6 +159,54 @@ def _backfill_knowledge_base_columns(connection: sqlite3.Connection) -> None:
         UPDATE documents
         SET knowledge_base_id = 'default'
         WHERE knowledge_base_id IS NULL OR TRIM(knowledge_base_id) = ''
+        """
+    )
+
+
+def _ensure_review_record_foreign_key(connection: sqlite3.Connection) -> None:
+    """将审核记录表升级为带 claim 级联外键的结构。"""
+
+    table_rows = connection.execute("PRAGMA table_info(review_records)").fetchall()
+    if not table_rows:
+        return
+
+    foreign_keys = connection.execute("PRAGMA foreign_key_list(review_records)").fetchall()
+    has_claim_foreign_key = any(
+        str(row["from"]).strip() == "claim_id" and str(row["table"]).strip() == "quality_claims"
+        for row in foreign_keys
+    )
+    if has_claim_foreign_key:
+        return
+
+    connection.executescript(
+        """
+        CREATE TABLE review_records__new (
+            review_id TEXT PRIMARY KEY,
+            claim_id TEXT NOT NULL,
+            review_action TEXT NOT NULL,
+            reviewed_verdict TEXT,
+            review_note TEXT,
+            reviewer TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (claim_id) REFERENCES quality_claims (claim_id) ON DELETE CASCADE
+        );
+
+        INSERT INTO review_records__new (
+            review_id, claim_id, review_action, reviewed_verdict, review_note, reviewer, created_at
+        )
+        SELECT
+            rr.review_id,
+            rr.claim_id,
+            rr.review_action,
+            rr.reviewed_verdict,
+            rr.review_note,
+            rr.reviewer,
+            rr.created_at
+        FROM review_records rr
+        JOIN quality_claims qc ON qc.claim_id = rr.claim_id;
+
+        DROP TABLE review_records;
+        ALTER TABLE review_records__new RENAME TO review_records;
         """
     )
     connection.execute(

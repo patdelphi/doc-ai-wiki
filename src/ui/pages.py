@@ -7,6 +7,7 @@ import re
 
 import gradio as gr
 
+from src.auth.service import AUTH_TAB_NAMES, normalize_auth_tab_name
 from src.common.errors import AppError
 from src.ui.css import UI_CSS
 from src.ui.exporters import build_download_url, save_markdown_export
@@ -99,6 +100,90 @@ TABLE_PAGE_SIZE = 10
 RECENT_QUALITY_FETCH_LIMIT = 200
 AUTH_SESSION_STORAGE_KEY = "wiki-donge-auth-session"
 AUTH_SESSION_SECRET = "wiki_donge_auth_session_v1"
+MAIN_TAB_NAMES = list(AUTH_TAB_NAMES)
+
+
+def filter_visible_knowledge_base_items(
+    knowledge_base_items: list[dict],
+    allowed_kb_ids: set[str] | None,
+    *,
+    is_admin: bool,
+) -> list[dict]:
+    """按权限过滤知识库列表；管理员保持全量可见。"""
+
+    if is_admin or allowed_kb_ids is None:
+        return list(knowledge_base_items)
+    normalized_kb_ids = {str(item_id or "").strip() for item_id in allowed_kb_ids if str(item_id or "").strip()}
+    return [
+        item
+        for item in knowledge_base_items
+        if str(item.get("knowledge_base_id") or "").strip() in normalized_kb_ids
+    ]
+
+
+def build_visible_knowledge_base_bundle(
+    knowledge_base_items: list[dict],
+    allowed_kb_ids: set[str] | None,
+    *,
+    is_admin: bool,
+    selected_knowledge_base_id: str | None = None,
+) -> tuple[list[dict], list[str], str | None]:
+    """根据权限构建可见知识库列表、下拉选项与当前选中项。"""
+
+    visible_items = filter_visible_knowledge_base_items(
+        knowledge_base_items,
+        allowed_kb_ids,
+        is_admin=is_admin,
+    )
+    visible_choices = build_knowledge_base_choices(visible_items)
+    default_choice = next(
+        (
+            choice
+            for choice in visible_choices
+            if any(
+                item.get("is_default")
+                and parse_knowledge_base_choice(choice) == item.get("knowledge_base_id")
+                for item in visible_items
+            )
+        ),
+        visible_choices[0] if visible_choices else None,
+    )
+    normalized_selected_id = str(selected_knowledge_base_id or "").strip()
+    available_ids = {str(item.get("knowledge_base_id") or "").strip() for item in visible_items}
+    if normalized_selected_id not in available_ids:
+        normalized_selected_id = parse_knowledge_base_choice(default_choice or "")
+    selected_choice = next(
+        (choice for choice in visible_choices if parse_knowledge_base_choice(choice) == normalized_selected_id),
+        default_choice,
+    )
+    return visible_items, visible_choices, selected_choice
+
+
+def extract_login_session_permissions(
+    session: dict[str, object] | None,
+) -> tuple[bool, set[str] | None, set[str] | None]:
+    """从登录态中提取管理员标记、页签权限和知识库权限。"""
+
+    if session is None:
+        # 兼容直接调用内部回调函数的历史路径：未显式传入登录态时，保持全量可见。
+        return True, None, None
+    if not isinstance(session, dict):
+        return False, set(), set()
+    is_admin = bool(session.get("is_admin", False))
+    permissions = session.get("permissions") if isinstance(session.get("permissions"), dict) else {}
+    if is_admin:
+        return True, None, None
+    tab_names = {
+        normalize_auth_tab_name(str(tab_name or ""))
+        for tab_name in (permissions.get("tab_names") or [])
+        if str(tab_name or "").strip()
+    }
+    kb_ids = {
+        str(knowledge_base_id or "").strip()
+        for knowledge_base_id in (permissions.get("kb_ids") or [])
+        if str(knowledge_base_id or "").strip()
+    }
+    return False, tab_names, kb_ids
 
 
 
@@ -3148,11 +3233,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         return build_settings_workspace_ui_outputs(refresh_settings_workspace(selected_template_id))
 
-    def refresh_settings_knowledge_base_workspace_ui(selected_knowledge_base_id: str | None) -> tuple:
+    def refresh_settings_knowledge_base_workspace_ui(
+        selected_knowledge_base_id: str | None,
+        login_session: dict[str, object] | None = None,
+    ) -> tuple:
         """刷新知识库设置页并返回分页后的知识库列表。"""
 
         return build_settings_knowledge_base_workspace_ui_outputs(
-            refresh_settings_knowledge_base_workspace(selected_knowledge_base_id)
+            refresh_settings_knowledge_base_workspace(selected_knowledge_base_id, login_session)
         )
 
     def save_settings_template_ui(*args) -> tuple:
@@ -3577,59 +3665,72 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     def build_knowledge_base_refresh_outputs(
         selected_knowledge_base_id: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[gr.update, gr.update, gr.update, gr.update]:
         """构建各页面知识库下拉刷新输出。"""
 
-        items, choices, default_choice = refresh_knowledge_base_choices()
-        normalized_id = str(selected_knowledge_base_id or "")
-        available_ids = {str(item.get("knowledge_base_id") or "") for item in items}
-        if normalized_id not in available_ids:
-            normalized_id = parse_knowledge_base_choice(default_choice or "")
-        resolved_choice = next(
-            (choice for choice in choices if parse_knowledge_base_choice(choice) == normalized_id),
-            default_choice,
+        _items, choices, resolved_choice = _build_visible_knowledge_base_bundle(
+            login_session,
+            selected_knowledge_base_id,
         )
         update = gr.update(choices=choices, value=resolved_choice)
         return update, update, update, update
 
     def sync_knowledge_base_selector_outputs(
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[gr.update, gr.update, gr.update, gr.update]:
         """按当前选中的知识库同步四个页面顶部下拉。"""
 
         return build_knowledge_base_refresh_outputs(
             parse_knowledge_base_choice(knowledge_base_choice or ""),
+            login_session,
         )
 
     def change_document_knowledge_base_ui(
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """切换文档管理页知识库时，同步其它页面顶部下拉。"""
 
+        _visible_items, _visible_choices, resolved_choice = _build_visible_knowledge_base_bundle(
+            login_session,
+            parse_knowledge_base_choice(knowledge_base_choice or ""),
+        )
         return (
-            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
-            *load_document_management_state_ui(knowledge_base_choice),
+            *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
+            *load_document_management_state_ui(resolved_choice),
         )
 
     def change_search_knowledge_base_ui(
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """切换检索页知识库时，同步其它页面顶部下拉。"""
 
+        _visible_items, _visible_choices, resolved_choice = _build_visible_knowledge_base_bundle(
+            login_session,
+            parse_knowledge_base_choice(knowledge_base_choice or ""),
+        )
         return (
-            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
-            *reset_search_workspace_ui(knowledge_base_choice),
+            *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
+            *reset_search_workspace_ui(resolved_choice),
         )
 
     def change_quality_knowledge_base_ui(
         knowledge_base_choice: str | None = None,
         recent_quality_scope_value: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """切换 AI 质检页知识库时，同步其它页面顶部下拉。"""
 
+        _visible_items, _visible_choices, resolved_choice = _build_visible_knowledge_base_bundle(
+            login_session,
+            parse_knowledge_base_choice(knowledge_base_choice or ""),
+        )
         return (
-            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
-            *list_recent_quality_results_ui(knowledge_base_choice, recent_quality_scope_value),
+            *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
+            *list_recent_quality_results_ui(resolved_choice, recent_quality_scope_value),
         )
 
     def change_review_knowledge_base_ui(
@@ -3637,16 +3738,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         risk_value: str,
         selected_claim_id: str,
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """切换人工审核页知识库时，同步其它页面顶部下拉。"""
 
+        _visible_items, _visible_choices, resolved_choice = _build_visible_knowledge_base_bundle(
+            login_session,
+            parse_knowledge_base_choice(knowledge_base_choice or ""),
+        )
         return (
-            *sync_knowledge_base_selector_outputs(knowledge_base_choice),
+            *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
             *list_review_workspace_ui(
                 scope_value,
                 risk_value,
                 selected_claim_id,
-                knowledge_base_choice,
+                resolved_choice,
             ),
         )
 
@@ -3655,15 +3761,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         *,
         result_payload: dict | None = None,
         form_override: dict | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, bool, str]:
         """构建设置页知识库工作区数据。"""
 
-        knowledge_bases = ingest_service.list_knowledge_bases()
-        knowledge_base_ids = {str(item.get("knowledge_base_id") or "") for item in knowledge_bases}
-        normalized_knowledge_base_id = str(selected_knowledge_base_id or "")
-        if normalized_knowledge_base_id not in knowledge_base_ids:
-            default_item = next((item for item in knowledge_bases if item.get("is_default")), knowledge_bases[0] if knowledge_bases else None)
-            normalized_knowledge_base_id = str((default_item or {}).get("knowledge_base_id") or "")
+        is_admin, _allowed_tabs, allowed_kb_ids = extract_login_session_permissions(login_session)
+        knowledge_bases, _choices, selected_choice = build_visible_knowledge_base_bundle(
+            ingest_service.list_knowledge_bases(),
+            allowed_kb_ids,
+            is_admin=is_admin,
+            selected_knowledge_base_id=str(selected_knowledge_base_id or ""),
+        )
+        normalized_knowledge_base_id = parse_knowledge_base_choice(selected_choice or "")
         selected_knowledge_base = (
             ingest_service.get_knowledge_base(normalized_knowledge_base_id) if normalized_knowledge_base_id else None
         )
@@ -3686,26 +3795,30 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             format_operation_result_html(result_payload, title="知识库结果"),
         )
 
-    def refresh_settings_knowledge_base_workspace(selected_knowledge_base_id: str | None) -> tuple:
+    def refresh_settings_knowledge_base_workspace(
+        selected_knowledge_base_id: str | None,
+        login_session: dict[str, object] | None = None,
+    ) -> tuple:
         """刷新知识库工作区。"""
 
-        return build_settings_knowledge_base_workspace(selected_knowledge_base_id)
+        return build_settings_knowledge_base_workspace(selected_knowledge_base_id, login_session=login_session)
 
     def select_settings_knowledge_base(
         knowledge_base_choice: str,
         knowledge_base_items: list[dict] | None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[str, str, str, str, str, str, bool, str]:
         """切换知识库选择器后加载对应详情与表单。"""
 
         items = knowledge_base_items or []
         if not items:
-            outputs = build_settings_knowledge_base_workspace("")
+            outputs = build_settings_knowledge_base_workspace("", login_session=login_session)
             return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice)
-        outputs = build_settings_knowledge_base_workspace(knowledge_base_id)
+        outputs = build_settings_knowledge_base_workspace(knowledge_base_id, login_session=login_session)
         return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
 
-    def prepare_new_knowledge_base() -> tuple[str, str, str, str, str, str, bool, str]:
+    def prepare_new_knowledge_base(login_session: dict[str, object] | None = None) -> tuple[str, str, str, str, str, str, bool, str]:
         """清空表单，准备创建新知识库。"""
 
         blank_form = {
@@ -3715,7 +3828,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "status": "active",
             "is_default": False,
         }
-        outputs = build_settings_knowledge_base_workspace("", form_override=blank_form)
+        outputs = build_settings_knowledge_base_workspace("", form_override=blank_form, login_session=login_session)
         return "", outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9]
 
     def save_settings_knowledge_base(
@@ -3725,6 +3838,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         description: str,
         status: str,
         is_default: bool,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """保存知识库并刷新设置页与各页面选择器。"""
 
@@ -3742,19 +3856,22 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 selected_knowledge_base_id,
                 result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
                 form_override=form_payload,
+                login_session=login_session,
             )
-            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id, login_session)
             return (*outputs, *selector_outputs)
         outputs = build_settings_knowledge_base_workspace(
             saved_item.get("knowledge_base_id"),
             result_payload={"success": True, "message": "知识库已保存。"},
+            login_session=login_session,
         )
-        selector_outputs = build_knowledge_base_refresh_outputs(saved_item.get("knowledge_base_id"))
+        selector_outputs = build_knowledge_base_refresh_outputs(saved_item.get("knowledge_base_id"), login_session)
         return (*outputs, *selector_outputs)
 
     def delete_settings_knowledge_base(
         selected_knowledge_base_id: str,
         knowledge_base_id_input: str,
+        login_session: dict[str, object] | None = None,
     ) -> tuple:
         """删除知识库并刷新设置页与各页面选择器。"""
 
@@ -3763,8 +3880,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs = build_settings_knowledge_base_workspace(
                 selected_knowledge_base_id,
                 result_payload={"success": False, "message": "请先选择或输入知识库 ID。"},
+                login_session=login_session,
             )
-            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id, login_session)
             return (*outputs, *selector_outputs)
         try:
             deleted_item = ingest_service.delete_knowledge_base(knowledge_base_id)
@@ -3772,14 +3890,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             outputs = build_settings_knowledge_base_workspace(
                 selected_knowledge_base_id,
                 result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
+                login_session=login_session,
             )
-            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id)
+            selector_outputs = build_knowledge_base_refresh_outputs(selected_knowledge_base_id, login_session)
             return (*outputs, *selector_outputs)
         outputs = build_settings_knowledge_base_workspace(
             "",
             result_payload={"success": True, "message": f'知识库“{deleted_item.get("knowledge_base_name") or knowledge_base_id}”已删除。'},
+            login_session=login_session,
         )
-        selector_outputs = build_knowledge_base_refresh_outputs("")
+        selector_outputs = build_knowledge_base_refresh_outputs("", login_session)
         return (*outputs, *selector_outputs)
 
     def build_settings_workspace(
@@ -4615,6 +4735,59 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return ""
         return f"<span>{username}</span>"
 
+    def _extract_session_permissions(session: dict[str, object] | None) -> tuple[bool, set[str] | None, set[str] | None]:
+        """从登录态中解析管理员标记、页签权限和知识库权限。"""
+
+        return extract_login_session_permissions(session)
+
+    def _build_visible_knowledge_base_bundle(
+        session: dict[str, object] | None,
+        selected_knowledge_base_id: str | None = None,
+    ) -> tuple[list[dict], list[str], str | None]:
+        """按当前登录态构建可见知识库列表、选项和默认值。"""
+
+        is_admin, _allowed_tabs, allowed_kb_ids = _extract_session_permissions(session)
+        return build_visible_knowledge_base_bundle(
+            ingest_service.list_knowledge_bases(),
+            allowed_kb_ids,
+            is_admin=is_admin,
+            selected_knowledge_base_id=selected_knowledge_base_id,
+        )
+
+    def _build_permission_ui_updates(session: dict[str, object] | None) -> tuple:
+        """根据登录态生成页签和知识库组件的可见性更新。"""
+
+        is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
+        visible_items, visible_choices, default_choice = _build_visible_knowledge_base_bundle(session)
+        selected_kb_id = parse_knowledge_base_choice(default_choice or "")
+        (
+            settings_choices,
+            settings_selected_choice,
+            settings_page_value,
+            settings_page_info,
+        ) = build_settings_knowledge_base_selector_page_outputs(
+            visible_items,
+            selected_kb_id,
+        )
+        tab_visibility_updates = tuple(
+            gr.update(visible=is_admin or allowed_tabs is None or tab_name in allowed_tabs)
+            for tab_name in MAIN_TAB_NAMES
+        )
+        knowledge_base_update = gr.update(choices=visible_choices, value=default_choice)
+        settings_table_update = gr.update(choices=settings_choices, value=settings_selected_choice)
+        return (
+            *tab_visibility_updates,
+            knowledge_base_update,
+            knowledge_base_update,
+            knowledge_base_update,
+            knowledge_base_update,
+            knowledge_base_update,
+            visible_items,
+            settings_table_update,
+            settings_page_value,
+            format_table_pagination_html(settings_page_info),
+        )
+
     with gr.Blocks(title="中文知识库系统") as demo:
         login_state = gr.State(_empty_login_session())
         persisted_login_state = gr.BrowserState(
@@ -4651,7 +4824,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 auth_user_display = gr.HTML(value="", elem_id="auth-user-display")
                 auth_logout_btn = gr.Button("退出登录", elem_id="auth-logout-btn", variant="secondary")
             with gr.Tabs(elem_id="main-tabs"):
-                with gr.Tab("AI 质检"):
+                with gr.Tab("AI 质检") as quality_tab:
                     with gr.Row(elem_id="quality-top-row"):
                         with gr.Column(scale=1, elem_id="quality-input-panel"):
                             gr.Markdown("### 1. 输入与执行")
@@ -5092,7 +5265,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="quality-dummy-detail-help",
                             )
 
-                with gr.Tab("人工审核"):
+                with gr.Tab("人工审核") as review_tab:
                     review_candidate_state = gr.State(initial_review_candidate_items_state)
                     review_history_state = gr.State(initial_review_items_state)
                     review_selected_record_state = gr.State(initial_selected_review_id)
@@ -5255,7 +5428,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="review-record-detail",
                         )
 
-                with gr.Tab("知识库管理"):
+                with gr.Tab("知识库管理") as document_tab:
                     database_page_state = gr.State(initial_database_page)
                     document_page_state = gr.State(initial_document_page)
                     document_quality_sections_page_state = gr.State(initial_document_quality_sections_page)
@@ -5567,7 +5740,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                         elem_id="document-quality-config-export-result",
                                     )
 
-                with gr.Tab("知识库检索"):
+                with gr.Tab("知识库检索") as search_tab:
                     with gr.Row(elem_id="search-top-row"):
                         with gr.Column(scale=1):
                             with gr.Group(elem_id="search-input-panel"):
@@ -5624,7 +5797,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             elem_id="search-export-result",
                         )
 
-                with gr.Tab("功能设置"):
+                with gr.Tab("功能设置") as settings_tab:
                     settings_template_state = gr.State(initial_settings_template_state)
                     settings_selected_template_state = gr.State(initial_settings_selected_template_id)
                     settings_template_page_state = gr.State(initial_settings_template_page)
@@ -5803,7 +5976,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
             document_knowledge_base.input(
                 fn=change_document_knowledge_base_ui,
-                inputs=[document_knowledge_base],
+                inputs=[document_knowledge_base, login_state],
                 outputs=[
                     document_knowledge_base,
                     search_knowledge_base,
@@ -6342,7 +6515,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             search_knowledge_base.input(
                 fn=change_search_knowledge_base_ui,
-                inputs=[search_knowledge_base],
+                inputs=[search_knowledge_base, login_state],
                 outputs=[
                     document_knowledge_base,
                     search_knowledge_base,
@@ -6442,7 +6615,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             quality_knowledge_base.input(
                 fn=change_quality_knowledge_base_ui,
-                inputs=[quality_knowledge_base, recent_quality_scope_filter],
+                inputs=[quality_knowledge_base, recent_quality_scope_filter, login_state],
                 outputs=[
                     document_knowledge_base,
                     search_knowledge_base,
@@ -6807,7 +6980,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             settings_knowledge_base_refresh_button.click(
                 fn=refresh_settings_knowledge_base_workspace_ui,
-                inputs=[settings_selected_knowledge_base_state],
+                inputs=[settings_selected_knowledge_base_state, login_state],
                 outputs=[
                     settings_knowledge_base_table,
                     settings_knowledge_base_page_state,
@@ -6825,7 +6998,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             settings_knowledge_base_table.input(
                 fn=select_settings_knowledge_base,
-                inputs=[settings_knowledge_base_table, settings_knowledge_base_state],
+                inputs=[settings_knowledge_base_table, settings_knowledge_base_state, login_state],
                 outputs=[
                     settings_selected_knowledge_base_state,
                     settings_knowledge_base_detail,
@@ -6840,6 +7013,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             settings_knowledge_base_new_button.click(
                 fn=prepare_new_knowledge_base,
+                inputs=[login_state],
                 outputs=[
                     settings_selected_knowledge_base_state,
                     settings_knowledge_base_detail,
@@ -6860,6 +7034,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     settings_knowledge_base_description,
                     settings_knowledge_base_status,
                     settings_knowledge_base_is_default,
+                    login_state,
                 ],
                 outputs=[
                     settings_knowledge_base_table,
@@ -6885,6 +7060,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 inputs=[
                     settings_selected_knowledge_base_state,
                     settings_knowledge_base_id,
+                    login_state,
                 ],
                 outputs=[
                     settings_knowledge_base_table,
@@ -6970,7 +7146,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             review_knowledge_base.input(
                 fn=change_review_knowledge_base_ui,
-                inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base],
+                inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base, login_state],
                 outputs=[
                     document_knowledge_base,
                     search_knowledge_base,
@@ -7206,17 +7382,35 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 try:
                     user = auth_service.authenticate(username, password)
                     if not user:
-                        return (_empty_login_session(), _empty_login_session(), "",
-                                format_operation_result_html({"success": False, "message": "用户名或密码错误"}, title="登录失败"),
-                                gr.update(visible=True), gr.update(visible=False))
+                        return (
+                            _empty_login_session(),
+                            _empty_login_session(),
+                            "",
+                            format_operation_result_html({"success": False, "message": "用户名或密码错误"}, title="登录失败"),
+                            gr.update(visible=True),
+                            gr.update(visible=False),
+                            *_build_permission_ui_updates(_empty_login_session()),
+                        )
                     session = _build_login_session(user.user_id)
-                    return (session, session, _render_auth_user(user.username),
-                            format_operation_result_html({"success": True, "message": "登录成功"}, title="登录成功"),
-                            gr.update(visible=False), gr.update(visible=True))
+                    return (
+                        session,
+                        session,
+                        _render_auth_user(user.username),
+                        format_operation_result_html({"success": True, "message": "登录成功"}, title="登录成功"),
+                        gr.update(visible=False),
+                        gr.update(visible=True),
+                        *_build_permission_ui_updates(session),
+                    )
                 except Exception as e:
-                    return (_empty_login_session(), _empty_login_session(), "",
-                            format_operation_result_html({"success": False, "message": str(e)}, title="错误"),
-                            gr.update(visible=True), gr.update(visible=False))
+                    return (
+                        _empty_login_session(),
+                        _empty_login_session(),
+                        "",
+                        format_operation_result_html({"success": False, "message": str(e)}, title="错误"),
+                        gr.update(visible=True),
+                        gr.update(visible=False),
+                        *_build_permission_ui_updates(_empty_login_session()),
+                    )
 
             def _switch_to_main():
                 return gr.update(visible=False), gr.update(visible=True)
@@ -7235,24 +7429,49 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 try:
                     if not isinstance(stored_session, dict):
                         empty_session = _empty_login_session()
-                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                        return (
+                            empty_session,
+                            "",
+                            gr.update(visible=True),
+                            gr.update(visible=False),
+                            *_build_permission_ui_updates(empty_session),
+                        )
                     user_id = str(stored_session.get("user_id") or "").strip()
                     if not user_id:
                         empty_session = _empty_login_session()
-                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                        return (
+                            empty_session,
+                            "",
+                            gr.update(visible=True),
+                            gr.update(visible=False),
+                            *_build_permission_ui_updates(empty_session),
+                        )
                     restored_session = _build_login_session(user_id)
                     if not restored_session.get("user_id"):
                         empty_session = _empty_login_session()
-                        return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                        return (
+                            empty_session,
+                            "",
+                            gr.update(visible=True),
+                            gr.update(visible=False),
+                            *_build_permission_ui_updates(empty_session),
+                        )
                     return (
                         restored_session,
                         _render_auth_user(str(restored_session.get("username") or "")),
                         gr.update(visible=False),
                         gr.update(visible=True),
+                        *_build_permission_ui_updates(restored_session),
                     )
                 except Exception:
                     empty_session = _empty_login_session()
-                    return empty_session, "", gr.update(visible=True), gr.update(visible=False)
+                    return (
+                        empty_session,
+                        "",
+                        gr.update(visible=True),
+                        gr.update(visible=False),
+                        *_build_permission_ui_updates(empty_session),
+                    )
 
             def _reset_auth_forms():
                 return (
@@ -7282,11 +7501,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 show_progress="hidden",
             )
             auth_login_submit.click(fn=_do_login, inputs=[auth_login_username, auth_login_password],
-                                    outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content],
+                                    outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content,
+                                             quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                                             document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
+                                             review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                                             settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info],
                                     queue=False,
                                     show_progress="hidden")
             auth_login_password.submit(fn=_do_login, inputs=[auth_login_username, auth_login_password],
-                                       outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content],
+                                       outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content,
+                                                quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                                                document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
+                                                review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                                                settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info],
                                        queue=False,
                                        show_progress="hidden")
             auth_register_submit.click(fn=_do_register,
@@ -7321,7 +7548,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             persisted_login_state.change(
                 fn=_restore_login_session,
                 inputs=[persisted_login_state],
-                outputs=[login_state, auth_user_display, auth_page, main_content],
+                outputs=[login_state, auth_user_display, auth_page, main_content,
+                         quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                         document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
+                         review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                         settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info],
                 queue=False,
                 show_progress="hidden",
             )

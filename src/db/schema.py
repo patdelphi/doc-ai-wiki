@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS review_records (
     reviewed_verdict TEXT,
     review_note TEXT,
     reviewer TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (claim_id) REFERENCES quality_claims (claim_id) ON DELETE CASCADE
 );
 """

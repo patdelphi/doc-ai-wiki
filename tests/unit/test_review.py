@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.common.errors import NotFoundAppError
-from src.db.connection import initialize_database
+from src.db.connection import create_connection, initialize_database
 from src.db.repositories import QualityRepository
 from src.review.service import ReviewService
 
@@ -167,6 +167,35 @@ def test_delete_review_should_raise_not_found_for_missing_record(tmp_path: Path)
 
     with pytest.raises(NotFoundAppError, match="审核记录不存在"):
         review_service.delete_review("rev_missing")
+
+
+def test_review_records_should_cascade_when_quality_check_deleted(tmp_path: Path) -> None:
+    """删除上游质检记录后，不应残留孤儿审核记录。"""
+
+    database_path = tmp_path / "app.db"
+    initialize_database(database_path)
+    repository = QualityRepository(database_path)
+    _create_review_target_claim(repository, check_id="check_cascade", claim_id="claim_cascade")
+    repository.insert_review_record(
+        {
+            "review_id": "rev_cascade_1",
+            "claim_id": "claim_cascade",
+            "review_action": "approved",
+            "reviewed_verdict": None,
+            "review_note": "用于级联删除测试",
+            "reviewer": "tester",
+            "created_at": "2026-05-01T12:00:00+00:00",
+        }
+    )
+
+    with create_connection(database_path) as connection:
+        connection.execute("DELETE FROM quality_checks WHERE check_id = ?", ("check_cascade",))
+        connection.commit()
+        review_count = connection.execute("SELECT COUNT(1) FROM review_records WHERE claim_id = ?", ("claim_cascade",)).fetchone()[0]
+        claim_count = connection.execute("SELECT COUNT(1) FROM quality_claims WHERE claim_id = ?", ("claim_cascade",)).fetchone()[0]
+
+    assert claim_count == 0
+    assert review_count == 0
 
 
 def test_list_review_candidates_should_prioritize_recently_updated_processed_claims(tmp_path: Path) -> None:

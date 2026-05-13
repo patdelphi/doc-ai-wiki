@@ -97,6 +97,34 @@ class KnowledgeBaseRepository:
             ).fetchone()
         return int(row["total"] or 0) if row else 0
 
+    def get_related_record_counts(self, knowledge_base_id: str) -> dict[str, int]:
+        """统计知识库下关联的文档、质检、Claim 与审核记录数量。"""
+
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(1) FROM documents WHERE knowledge_base_id = ?) AS document_count,
+                    (SELECT COUNT(1) FROM quality_checks WHERE knowledge_base_id = ?) AS quality_check_count,
+                    (SELECT COUNT(1) FROM quality_claims WHERE check_id IN (
+                        SELECT check_id FROM quality_checks WHERE knowledge_base_id = ?
+                    )) AS claim_count,
+                    (SELECT COUNT(1) FROM review_records WHERE claim_id IN (
+                        SELECT qc.claim_id
+                        FROM quality_claims qc
+                        JOIN quality_checks q ON q.check_id = qc.check_id
+                        WHERE q.knowledge_base_id = ?
+                    )) AS review_count
+                """,
+                (knowledge_base_id, knowledge_base_id, knowledge_base_id, knowledge_base_id),
+            ).fetchone()
+        return {key: int(row[key] or 0) for key in row.keys()} if row else {
+            "document_count": 0,
+            "quality_check_count": 0,
+            "claim_count": 0,
+            "review_count": 0,
+        }
+
     def delete_knowledge_base(self, knowledge_base_id: str) -> None:
         """删除知识库。"""
 

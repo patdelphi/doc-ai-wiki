@@ -54,19 +54,13 @@ def test_server_shell_startup_script_should_bind_to_0000_on_port_80() -> None:
     assert "python -m src.ui.app" in content
 
 
-def test_legacy_powershell_startup_script_should_delegate_to_local_7860_script() -> None:
-    """旧 PowerShell 入口应转发到本地 7860 脚本。"""
+def test_legacy_powershell_startup_script_should_not_exist_anymore() -> None:
+    """旧 PowerShell 入口已废弃，不应继续保留。"""
 
-    content = read_script("start_gradio.ps1")
-
-    assert "start_gradio_local_7860.ps1" in content
-    assert "python -m src.ui.app" not in content
+    assert (PROJECT_ROOT / "start_gradio.ps1").exists() is False
 
 
-def test_legacy_shell_startup_script_should_delegate_to_local_7860_script() -> None:
-    """旧 Shell 入口应转发到本地 7860 脚本。"""
+def test_legacy_shell_startup_script_should_not_exist_anymore() -> None:
+    """旧 Shell 入口已废弃，不应继续保留。"""
 
-    content = read_script("start_gradio.sh")
-
-    assert 'start_gradio_local_7860.sh' in content
-    assert "python -m src.ui.app" not in content
+    assert (PROJECT_ROOT / "start_gradio.sh").exists() is False

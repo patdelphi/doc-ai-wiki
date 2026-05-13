@@ -304,7 +304,10 @@ class VectorStore:
             where={"doc_uid": doc_uid},
             include=[],
         )
-        return len(result.get("ids", []))
+        ids = self._to_sequence(result.get("ids"))
+        if ids and isinstance(ids[0], list):
+            return sum(len(self._to_sequence(item)) for item in ids)
+        return len(ids)
 
     def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
         """执行向量检索。"""
