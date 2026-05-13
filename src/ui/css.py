@@ -2114,6 +2114,18 @@ button.ui-button--pagination {
   text-align: center;
   margin-bottom: 16px;
 }
+#auth-login-form > div:last-child,
+#auth-register-form > div:last-child {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+}
+#auth-login-form > div:last-child button.ui-button,
+#auth-register-form > div:last-child button.ui-button {
+  align-self: center !important;
+}
 
 /* 用户信息区：挂到独立绝对定位容器中，确保与标签栏同高同线 */
 #main-content {
@@ -2140,7 +2152,7 @@ button.ui-button--pagination {
 }
 #auth-header-actions {
   position: absolute !important;
-  top: 0 !important;
+  top: -8px !important;
   right: 0 !important;
   z-index: 35 !important;
   display: inline-flex !important;
@@ -2198,6 +2210,8 @@ button.ui-button--pagination {
   border: none !important;
   box-shadow: none !important;
   padding: 0 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
 }
 #auth-logout-btn > div,
 #auth-logout-btn > .wrap,
@@ -2207,13 +2221,20 @@ button.ui-button--pagination {
   border: none !important;
   box-shadow: none !important;
   padding: 0 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
 }
-#auth-logout-btn button,
-#auth-logout-btn .gradio-button {
+#auth-header-actions #auth-logout-btn button,
+#auth-header-actions #auth-logout-btn .gradio-button,
+#auth-header-actions #auth-logout-btn button.secondary,
+#auth-header-actions #auth-logout-btn .gradio-button.secondary,
+#auth-header-actions #auth-logout-btn .wrap button,
+body #auth-logout-btn button {
   margin: 0 !important;
   padding: 0 !important;
   font-size: 14px !important;
   font-weight: 400 !important;
+  line-height: 1 !important;
   min-height: 52px !important;
   height: 52px !important;
   min-width: 0 !important;
@@ -2225,25 +2246,29 @@ button.ui-button--pagination {
   transform: none !important;
   transition: color 0.18s ease !important;
 }
-#auth-logout-btn button:hover,
-#auth-logout-btn .gradio-button:hover,
-#auth-logout-btn button:focus,
-#auth-logout-btn .gradio-button:focus {
+#auth-header-actions #auth-logout-btn button:hover,
+#auth-header-actions #auth-logout-btn .gradio-button:hover,
+#auth-header-actions #auth-logout-btn button:focus,
+#auth-header-actions #auth-logout-btn .gradio-button:focus {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   transform: none !important;
   color: rgba(37, 99, 235, 0.92) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
 }
-#auth-logout-btn button:focus-visible,
-#auth-logout-btn .gradio-button:focus-visible,
-#auth-logout-btn button:active,
-#auth-logout-btn .gradio-button:active {
+#auth-header-actions #auth-logout-btn button:focus-visible,
+#auth-header-actions #auth-logout-btn .gradio-button:focus-visible,
+#auth-header-actions #auth-logout-btn button:active,
+#auth-header-actions #auth-logout-btn .gradio-button:active {
   outline: none !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   transform: none !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
 }
 @media (max-width: 960px) {
   #main-tabs [role="tablist"] {

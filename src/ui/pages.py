@@ -7275,6 +7275,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content],
                                     queue=False,
                                     show_progress="hidden")
+            auth_login_password.submit(fn=_do_login, inputs=[auth_login_username, auth_login_password],
+                                       outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content],
+                                       queue=False,
+                                       show_progress="hidden")
             auth_register_submit.click(fn=_do_register,
                                        inputs=[auth_register_username, auth_register_password, auth_register_password_confirm],
                                        outputs=[auth_register_result],
