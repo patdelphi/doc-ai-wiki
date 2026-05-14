@@ -220,6 +220,94 @@ def test_restricted_user_should_not_access_unauthorized_knowledge_base(tmp_path:
     assert response.json()["detail"] == "无权限访问当前知识库"
 
 
+def test_save_knowledge_base_endpoint_should_create_input_directory(tmp_path: Path) -> None:
+    """创建知识库接口应同时创建对应 Input 子目录。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as client:
+        response = client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "api_created_kb",
+                "knowledge_base_name": "接口创建知识库",
+                "description": "验证创建接口与目录初始化",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["item"]["knowledge_base_id"] == "api_created_kb"
+    assert (settings.input_root / "api_created_kb").exists() is True
+
+
+def test_ingest_status_endpoint_should_only_return_requested_knowledge_base_items(tmp_path: Path) -> None:
+    """入库状态接口按知识库筛选时，应只返回当前知识库的数据。"""
+
+    settings = build_test_settings(tmp_path)
+    (settings.input_root / "default").mkdir(parents=True, exist_ok=True)
+    app = create_app(settings)
+
+    default_file = settings.input_root / "default" / "default_only.md"
+    default_file.write_text("# 默认文档\n\n只属于默认知识库。", encoding="utf-8")
+
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as client:
+        create_response = client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于状态隔离测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+        assert create_response.status_code == 200
+
+        medical_file = settings.input_root / "medical" / "medical_only.md"
+        medical_file.write_text("# 医学文档\n\n只属于 medical。", encoding="utf-8")
+
+        register_response = client.post(
+            "/ingest/register",
+            json={
+                "documents": [
+                    {
+                        "file_path": str(default_file),
+                        "knowledge_base_id": "default",
+                        "doc_title": "默认文档",
+                    },
+                    {
+                        "file_path": str(medical_file),
+                        "knowledge_base_id": "medical",
+                        "doc_title": "医学文档",
+                    },
+                ],
+                "rebuild_if_exists": False,
+            },
+        )
+        default_status_response = client.get("/ingest/status", params={"knowledge_base_id": "default"})
+        medical_status_response = client.get("/ingest/status", params={"knowledge_base_id": "medical"})
+
+    assert register_response.status_code == 200
+    assert register_response.json()["success"] is True
+
+    assert default_status_response.status_code == 200
+    default_items = default_status_response.json()["data"]["items"]
+    assert len(default_items) == 1
+    assert default_items[0]["knowledge_base_id"] == "default"
+    assert default_items[0]["doc_title"] == "默认文档"
+
+    assert medical_status_response.status_code == 200
+    medical_items = medical_status_response.json()["data"]["items"]
+    assert len(medical_items) == 1
+    assert medical_items[0]["knowledge_base_id"] == "medical"
+    assert medical_items[0]["doc_title"] == "医学文档"
+
+
 def test_gradio_startup_scripts_should_only_launch_ui_entry() -> None:
     """Gradio 启动脚本应仅调用 UI 启动入口。"""
 

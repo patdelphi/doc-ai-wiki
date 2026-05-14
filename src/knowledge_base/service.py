@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from src.common.errors import NotFoundAppError, ValidationAppError
-from src.db.repositories import KnowledgeBaseRepository
+from src.db.repositories import DocumentRepository, KnowledgeBaseRepository
 
 
 class KnowledgeBaseService:
@@ -15,6 +15,7 @@ class KnowledgeBaseService:
 
     def __init__(self, database_path: Path, input_root: Path) -> None:
         self.repository = KnowledgeBaseRepository(database_path)
+        self.document_repository = DocumentRepository(database_path)
         self.input_root = input_root
         self.input_root.mkdir(parents=True, exist_ok=True)
         self.get_input_directory("default").mkdir(parents=True, exist_ok=True)
@@ -91,6 +92,89 @@ class KnowledgeBaseService:
 
         normalized_id = self._normalize_knowledge_base_id(knowledge_base_id)
         return self.input_root / normalized_id
+
+    def normalize_legacy_default_documents(self) -> list[dict]:
+        """将 Input 根目录下的历史文档迁移到默认知识库目录，并同步数据库归属。"""
+
+        default_directory = self.get_input_directory("default")
+        default_directory.mkdir(parents=True, exist_ok=True)
+        moved_items: list[dict] = []
+        for source_path in sorted(self.input_root.iterdir()):
+            if source_path.is_dir():
+                continue
+            if source_path.suffix.lower() not in {".md", ".json"}:
+                continue
+            resolved_source_path = source_path.resolve()
+            target_path = self._build_available_target_path(resolved_source_path, default_directory)
+            shutil.move(str(resolved_source_path), str(target_path))
+            document = self.document_repository.get_by_source_path(str(resolved_source_path))
+            if document:
+                self.document_repository.reassign_document_knowledge_base(
+                    doc_uid=document["doc_uid"],
+                    knowledge_base_id="default",
+                    source_path=str(target_path.resolve()),
+                )
+            moved_items.append(
+                {
+                    "file_name": target_path.name,
+                    "source_path": str(target_path.resolve()),
+                    "knowledge_base_id": "default",
+                }
+            )
+        repaired_items = self._repair_legacy_default_document_paths(default_directory)
+        return [*moved_items, *repaired_items]
+
+    def _repair_legacy_default_document_paths(self, default_directory: Path) -> list[dict]:
+        """修正默认知识库历史文档已迁移但数据库仍保留旧根目录路径的记录。"""
+
+        repaired_items: list[dict] = []
+        resolved_input_root = self.input_root.resolve()
+        resolved_default_directory = default_directory.resolve()
+        page = 1
+        page_size = 200
+
+        while True:
+            documents, total = self.document_repository.list_documents(
+                knowledge_base_id="default",
+                page=page,
+                page_size=page_size,
+            )
+            if not documents:
+                break
+
+            for document in documents:
+                raw_source_path = str(document.get("source_path") or "").strip()
+                if not raw_source_path:
+                    continue
+
+                resolved_source_path = Path(raw_source_path).resolve(strict=False)
+                # 仅修正“原来在 Input 根目录、现在文件已移动到 default 目录”的历史脏数据。
+                if resolved_source_path.exists() or resolved_source_path.parent != resolved_input_root:
+                    continue
+
+                candidate_path = resolved_default_directory / resolved_source_path.name
+                if not candidate_path.exists():
+                    continue
+
+                resolved_candidate_path = candidate_path.resolve()
+                self.document_repository.reassign_document_knowledge_base(
+                    doc_uid=document["doc_uid"],
+                    knowledge_base_id="default",
+                    source_path=str(resolved_candidate_path),
+                )
+                repaired_items.append(
+                    {
+                        "file_name": resolved_candidate_path.name,
+                        "source_path": str(resolved_candidate_path),
+                        "knowledge_base_id": "default",
+                    }
+                )
+
+            if page * page_size >= total:
+                break
+            page += 1
+
+        return repaired_items
 
     def relocate_document_file(self, source_path: Path | str, target_knowledge_base_id: str) -> Path:
         """将输入文档移动到目标知识库目录，并返回最终路径。"""

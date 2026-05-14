@@ -602,6 +602,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> dict:
         """统一构建文档管理页的当前视图状态。"""
 
+        ingest_service.normalize_legacy_default_documents()
         knowledge_base_id = resolve_knowledge_base_choice(knowledge_base_choice)
         documents = scan_input_documents(ingest_service.settings.input_root, knowledge_base_id)
         status_items, _ = ingest_service.list_status(

@@ -87,9 +87,10 @@ def test_scan_input_documents_should_only_return_md_and_json(tmp_path: Path) -> 
     """应只扫描业务输入目录中的 md 和 json 文件。"""
 
     input_root = tmp_path / "Input"
-    input_root.mkdir(parents=True, exist_ok=True)
-    (input_root / "a1.md").write_text("# 文档一", encoding="utf-8")
-    (input_root / "a2.json").write_text("{}", encoding="utf-8")
+    default_dir = input_root / "default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    (default_dir / "a1.md").write_text("# 文档一", encoding="utf-8")
+    (default_dir / "a2.json").write_text("{}", encoding="utf-8")
     (input_root / "ignore.txt").write_text("x", encoding="utf-8")
 
     documents = scan_input_documents(input_root)
@@ -102,8 +103,8 @@ def test_scan_input_documents_should_only_return_md_and_json(tmp_path: Path) -> 
     assert Path(documents[0]["file_path"]).is_absolute()
 
 
-def test_scan_input_documents_should_include_legacy_root_files_for_default_knowledge_base(tmp_path: Path) -> None:
-    """默认知识库应兼容扫描 Input 根目录中的历史文档。"""
+def test_scan_input_documents_should_only_read_matching_subdirectory_for_each_knowledge_base(tmp_path: Path) -> None:
+    """所有知识库都只应扫描各自 Input 子目录中的文档。"""
 
     input_root = tmp_path / "Input"
     default_dir = input_root / "default"
@@ -117,9 +118,9 @@ def test_scan_input_documents_should_include_legacy_root_files_for_default_knowl
     default_documents = scan_input_documents(input_root, "default")
     kb_b_documents = scan_input_documents(input_root, "kb_b")
 
-    assert {item["file_name"] for item in default_documents} == {"legacy.md", "default.json"}
+    assert {item["file_name"] for item in default_documents} == {"default.json"}
     assert all(item["knowledge_base_id"] == "default" for item in default_documents)
-    assert any("兼容旧结构" in str(item.get("storage_label")) for item in default_documents)
+    assert all(str(item.get("storage_label")) == "default 目录" for item in default_documents)
     assert {item["file_name"] for item in kb_b_documents} == {"kb_b.md"}
 
 
@@ -294,7 +295,7 @@ def test_document_html_helpers_should_generate_card_layout() -> None:
             "index_status": "indexed",
             "needs_rebuild_label": "否",
             "action_hint": "已就绪",
-            "storage_label": "Input 根目录（兼容旧结构）",
+            "storage_label": "default 目录",
             "source_path": "C:/Input/a1.md",
         }
     )
@@ -306,7 +307,7 @@ def test_document_html_helpers_should_generate_card_layout() -> None:
     assert "文件名" in detail_html
     assert "阿胶历史文化通典" in detail_html
     assert "归属知识库" in detail_html
-    assert "Input 根目录（兼容旧结构）" in detail_html
+    assert "default 目录" in detail_html
     assert "var(--body-text-color)" in summary_html
     assert "min-height:260px" in summary_html
 

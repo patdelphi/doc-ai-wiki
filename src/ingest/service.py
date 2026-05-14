@@ -479,6 +479,11 @@ class IngestService:
 
         return self.knowledge_base_service.save_knowledge_base(payload)
 
+    def normalize_legacy_default_documents(self) -> list[dict]:
+        """迁移 Input 根目录历史文档到默认知识库目录。"""
+
+        return self.knowledge_base_service.normalize_legacy_default_documents()
+
     def delete_knowledge_base(self, knowledge_base_id: str) -> dict:
         """删除知识库配置。"""
 

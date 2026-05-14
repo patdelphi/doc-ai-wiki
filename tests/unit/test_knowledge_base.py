@@ -265,6 +265,7 @@ def test_knowledge_base_service_should_block_delete_when_documents_exist(tmp_pat
     database_path = tmp_path / "app.db"
     input_root = tmp_path / "Input"
     initialize_database(database_path)
+    _insert_knowledge_base(database_path, "kb_legacy", "历史知识库")
     service = KnowledgeBaseService(database_path, input_root)
     repository = DocumentRepository(database_path)
 
@@ -294,6 +295,90 @@ def test_knowledge_base_service_should_block_delete_when_documents_exist(tmp_pat
 
     with pytest.raises(ValidationAppError):
         service.delete_knowledge_base("test_kb")
+
+
+def test_knowledge_base_service_should_move_legacy_root_documents_into_default_directory(tmp_path: Path) -> None:
+    """历史根目录文档应迁移到 Input/default，并同步数据库归属与路径。"""
+
+    database_path = tmp_path / "app.db"
+    input_root = tmp_path / "Input"
+    initialize_database(database_path)
+    _insert_knowledge_base(database_path, "kb_legacy", "历史知识库")
+    service = KnowledgeBaseService(database_path, input_root)
+    repository = DocumentRepository(database_path)
+
+    legacy_file = input_root / "legacy.md"
+    legacy_file.write_text("# 旧文档\n\n用于默认知识库迁移。", encoding="utf-8")
+    repository.upsert_document(
+        {
+            "doc_uid": "doc_legacy",
+            "knowledge_base_id": "kb_legacy",
+            "doc_id": "legacy",
+            "doc_title": "旧文档",
+            "source_path": str(legacy_file.resolve()),
+            "source_hash": "hash-legacy",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
+
+    moved_items = service.normalize_legacy_default_documents()
+
+    moved_path = input_root / "default" / "legacy.md"
+    updated_document = repository.get_by_doc_uid("doc_legacy")
+
+    assert len(moved_items) == 1
+    assert not legacy_file.exists()
+    assert moved_path.exists()
+    assert moved_items[0]["source_path"] == str(moved_path.resolve())
+    assert moved_items[0]["knowledge_base_id"] == "default"
+    assert updated_document is not None
+    assert updated_document["knowledge_base_id"] == "default"
+    assert Path(updated_document["source_path"]).resolve() == moved_path.resolve()
+
+
+def test_knowledge_base_service_should_repair_legacy_default_document_paths_after_file_migration(tmp_path: Path) -> None:
+    """文件已在 Input/default 时，仍应修正数据库中遗留的默认知识库旧路径。"""
+
+    database_path = tmp_path / "app.db"
+    input_root = tmp_path / "Input"
+    initialize_database(database_path)
+    service = KnowledgeBaseService(database_path, input_root)
+    repository = DocumentRepository(database_path)
+
+    migrated_file = input_root / "default" / "legacy.md"
+    migrated_file.parent.mkdir(parents=True, exist_ok=True)
+    migrated_file.write_text("# 已迁移文档\n\n数据库路径仍是旧路径。", encoding="utf-8")
+
+    legacy_root_path = input_root / "legacy.md"
+    repository.upsert_document(
+        {
+            "doc_uid": "doc_legacy_default",
+            "knowledge_base_id": "default",
+            "doc_id": "legacy_default",
+            "doc_title": "已迁移文档",
+            "source_path": str(legacy_root_path.resolve()),
+            "source_hash": "hash-legacy-default",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
+
+    moved_items = service.normalize_legacy_default_documents()
+    updated_document = repository.get_by_doc_uid("doc_legacy_default")
+
+    assert moved_items == [
+        {
+            "file_name": "legacy.md",
+            "source_path": str(migrated_file.resolve()),
+            "knowledge_base_id": "default",
+        }
+    ]
+    assert updated_document is not None
+    assert updated_document["knowledge_base_id"] == "default"
+    assert Path(updated_document["source_path"]).resolve() == migrated_file.resolve()
 
 
 def test_knowledge_base_service_should_block_delete_when_quality_history_exists(tmp_path: Path) -> None:

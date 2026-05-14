@@ -42,19 +42,15 @@ def scan_input_documents(input_root: Path, knowledge_base_id: str | None = None)
         )
 
     if not normalized_knowledge_base_id:
-        for file_path in sorted(resolved_root.rglob("*")):
-            append_file(file_path, storage_label="Input 根目录")
+        for directory in sorted(path for path in resolved_root.iterdir() if path.is_dir()):
+            for file_path in sorted(directory.rglob("*")):
+                append_file(file_path, storage_label=f"{directory.name} 目录")
         return items
 
     scan_root = resolved_root / normalized_knowledge_base_id
     if scan_root.exists():
         for file_path in sorted(scan_root.rglob("*")):
             append_file(file_path, storage_label=f'{normalized_knowledge_base_id} 目录')
-
-    if normalized_knowledge_base_id == "default":
-        # 兼容旧结构：默认知识库仍应看到 Input 根目录直接放置的文档。
-        for file_path in sorted(resolved_root.glob("*")):
-            append_file(file_path, storage_label="Input 根目录（兼容旧结构）")
     return items
 
 

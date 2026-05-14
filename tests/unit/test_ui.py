@@ -10,7 +10,7 @@ import pytest
 
 from src.common.config import AppSettings
 from src.db.connection import initialize_database
-from src.db.repositories import QualityRepository
+from src.db.repositories import DocumentRepository, QualityRepository
 from src.ingest.service import IngestService
 from src.quality.service import QualityService
 from src.review.service import ReviewService
@@ -1694,6 +1694,302 @@ def test_save_knowledge_base_ui_should_refresh_all_page_dropdown_choices(tmp_pat
     assert search_selector_update["value"].startswith("kb_sync_acceptance | ")
     assert quality_selector_update["value"].startswith("kb_sync_acceptance | ")
     assert review_selector_update["value"].startswith("kb_sync_acceptance | ")
+    assert (settings.input_root / "kb_sync_acceptance").exists()
+
+
+def test_load_document_management_state_ui_should_migrate_legacy_root_files_and_keep_kb_isolated(tmp_path: Path) -> None:
+    """文档管理页加载时，应迁移默认知识库历史文件，并且切换知识库后不串库。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    legacy_root_file = settings.input_root / "a1.md"
+    default_file = settings.input_root / "default" / "a2.md"
+    legacy_root_file.write_text("# 历史文档\n\n默认知识库历史文件。", encoding="utf-8")
+    default_file.write_text("# 默认文档\n\n默认知识库目录文件。", encoding="utf-8")
+
+    ingest_service = IngestService(settings)
+    ingest_service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_isolated",
+            "knowledge_base_name": "隔离知识库",
+            "description": "用于验证知识库切换隔离",
+        }
+    )
+    kb_file = settings.input_root / "kb_isolated" / "kb.md"
+    kb_file.write_text("# 隔离文档\n\n只属于 kb_isolated。", encoding="utf-8")
+
+    demo = create_ui_app(settings)
+    load_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
+    )
+
+    default_outputs = load_handler("default | 默认知识库")
+    isolated_outputs = load_handler("kb_isolated | 隔离知识库")
+
+    migrated_file = settings.input_root / "default" / "a1.md"
+    default_file_names = {row[1] for row in default_outputs[5]}
+    isolated_file_names = {row[1] for row in isolated_outputs[5]}
+
+    assert not legacy_root_file.exists()
+    assert migrated_file.exists()
+    assert default_file_names == {"a1.md", "a2.md"}
+    assert isolated_file_names == {"kb.md"}
+
+
+def test_load_document_management_state_ui_should_deduplicate_default_documents_when_db_uses_legacy_root_paths(
+    tmp_path: Path,
+) -> None:
+    """默认知识库文件已迁移后，页面加载应自动修正旧路径，避免同一文档显示两次。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    first_file = settings.input_root / "default" / "a1.md"
+    second_file = settings.input_root / "default" / "a2.md"
+    first_file.write_text("# 文档一\n\n默认知识库文件一。", encoding="utf-8")
+    second_file.write_text("# 文档二\n\n默认知识库文件二。", encoding="utf-8")
+
+    repository = DocumentRepository(settings.sqlite_db_path)
+    repository.upsert_document(
+        {
+            "doc_uid": "doc_default_1",
+            "knowledge_base_id": "default",
+            "doc_id": "default_1",
+            "doc_title": "阿胶历史文化通典",
+            "source_path": str((settings.input_root / "a1.md").resolve()),
+            "source_hash": "hash-default-1",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
+    repository.upsert_document(
+        {
+            "doc_uid": "doc_default_2",
+            "knowledge_base_id": "default",
+            "doc_id": "default_2",
+            "doc_title": "阿胶学术论文全集",
+            "source_path": str((settings.input_root / "a2.md").resolve()),
+            "source_hash": "hash-default-2",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
+
+    demo = create_ui_app(settings)
+    load_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
+    )
+
+    default_outputs = load_handler("default | 默认知识库")
+    default_rows = default_outputs[5]
+    default_file_names = {row[1] for row in default_rows}
+    registered_labels = {row[1]: row[6] for row in default_rows}
+
+    assert len(default_rows) == 2
+    assert default_file_names == {"a1.md", "a2.md"}
+    assert registered_labels == {"a1.md": "是", "a2.md": "是"}
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        repaired_paths = {
+            row[0]: row[1]
+            for row in connection.execute(
+                "select doc_uid, source_path from documents where knowledge_base_id = 'default'"
+            ).fetchall()
+        }
+
+    assert Path(repaired_paths["doc_default_1"]).resolve() == first_file.resolve()
+    assert Path(repaired_paths["doc_default_2"]).resolve() == second_file.resolve()
+
+
+def test_register_all_documents_ui_should_only_register_current_knowledge_base_files(tmp_path: Path) -> None:
+    """批量注册应只处理当前知识库子目录中的文档。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    ingest_service = IngestService(settings)
+    ingest_service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_batch_only",
+            "knowledge_base_name": "批量隔离知识库",
+            "description": "用于验证批量注册隔离",
+        }
+    )
+    (settings.input_root / "default" / "default_only.md").write_text("# 默认文档\n\n只属于 default。", encoding="utf-8")
+    (settings.input_root / "kb_batch_only" / "batch_only.md").write_text(
+        "# 目标文档\n\n只属于 kb_batch_only。",
+        encoding="utf-8",
+    )
+
+    demo = create_ui_app(settings)
+    register_all_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "register_all_documents_ui"
+    )
+
+    default_outputs = register_all_handler("default | 默认知识库")
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        default_count = connection.execute("select count(*) from documents where knowledge_base_id = 'default'").fetchone()[0]
+        other_count = connection.execute(
+            "select count(*) from documents where knowledge_base_id = 'kb_batch_only'"
+        ).fetchone()[0]
+
+    assert "批量注册结果" in default_outputs[0]
+    assert "成功" in default_outputs[0]
+    assert default_count == 1
+    assert other_count == 0
+
+    other_outputs = register_all_handler("kb_batch_only | 批量隔离知识库")
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        default_count_after = connection.execute("select count(*) from documents where knowledge_base_id = 'default'").fetchone()[0]
+        other_count_after = connection.execute(
+            "select count(*) from documents where knowledge_base_id = 'kb_batch_only'"
+        ).fetchone()[0]
+
+    assert "批量注册结果" in other_outputs[0]
+    assert "成功" in other_outputs[0]
+    assert default_count_after == 1
+    assert other_count_after == 1
+
+
+def test_reassign_selected_document_ui_should_move_file_and_refresh_workspace(tmp_path: Path) -> None:
+    """调整归属后，应移动文件、更新数据库，并刷新当前知识库列表。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    ingest_service = IngestService(settings)
+    ingest_service.save_knowledge_base(
+        {
+            "knowledge_base_id": "kb_reassign_target",
+            "knowledge_base_name": "归属目标知识库",
+            "description": "用于验证归属调整",
+        }
+    )
+    source_file = settings.input_root / "default" / "to_move.md"
+    source_file.write_text("# 待迁移文档\n\n需要调整知识库归属。", encoding="utf-8")
+
+    demo = create_ui_app(settings)
+    load_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
+    )
+    register_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "register_selected_document_ui"
+    )
+    reassign_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "reassign_selected_document_ui"
+    )
+
+    default_workspace = load_handler("default | 默认知识库")
+    selected_choice = default_workspace[8].value
+    register_handler(selected_choice, "default | 默认知识库")
+    reassign_outputs = reassign_handler(
+        selected_choice,
+        "kb_reassign_target | 归属目标知识库",
+        "default | 默认知识库",
+    )
+    target_workspace = load_handler("kb_reassign_target | 归属目标知识库")
+
+    target_file = settings.input_root / "kb_reassign_target" / "to_move.md"
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        moved_document = connection.execute(
+            "select knowledge_base_id, source_path from documents where doc_title = ?",
+            ("待迁移文档",),
+        ).fetchone()
+
+    assert "归属调整结果" in reassign_outputs[0]
+    assert "kb_reassign_target" in reassign_outputs[0]
+    assert not source_file.exists()
+    assert target_file.exists()
+    assert moved_document is not None
+    assert moved_document[0] == "kb_reassign_target"
+    assert Path(moved_document[1]).resolve() == target_file.resolve()
+    assert reassign_outputs[6] == []
+    assert {row[1] for row in target_workspace[5]} == {"to_move.md"}
+
+
+def test_rebuild_selected_document_ui_should_reject_uningested_document(tmp_path: Path) -> None:
+    """未入库文档点击重建时，应返回明确错误而不是静默失败。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+
+    pending_file = settings.input_root / "default" / "pending.md"
+    pending_file.write_text("# 待重建文档\n\n尚未注册。", encoding="utf-8")
+
+    demo = create_ui_app(settings)
+    load_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
+    )
+    rebuild_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "rebuild_selected_document_ui"
+    )
+
+    default_workspace = load_handler("default | 默认知识库")
+    selected_choice = default_workspace[8].value
+    rebuild_outputs = rebuild_handler(selected_choice, "default | 默认知识库")
+
+    assert "重建结果" in rebuild_outputs[0]
+    assert "当前文档尚未入库，无法重建" in rebuild_outputs[0]
+    assert {row[1] for row in rebuild_outputs[6]} == {"pending.md"}
 
 
 def test_change_quality_knowledge_base_ui_should_sync_all_page_dropdown_values(tmp_path: Path) -> None:
