@@ -56,6 +56,7 @@ class AuthService:
 
     PASSWORD_SCHEME = "pbkdf2_sha256"
     PASSWORD_ITERATIONS = 390000
+    PASSWORD_MAX_LENGTH = 20
 
     def __init__(self, db):
         self._db = db
@@ -137,6 +138,8 @@ class AuthService:
             return False, "用户名不能为空"
         if not password:
             return False, "密码不能为空"
+        if len(password) > self.PASSWORD_MAX_LENGTH:
+            return False, f"密码长度不能超过{self.PASSWORD_MAX_LENGTH}个字符"
 
         existing = self._db.execute("SELECT COUNT(*) FROM users WHERE username = ?", (username.strip(),)).fetchone()[0]
         if existing > 0:
@@ -152,7 +155,6 @@ class AuthService:
                 "INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at) VALUES (?, ?, ?, 1, 0, ?, ?)",
                 (user_id, username.strip(), password_hash, created_at, created_at)
             )
-            self._grant_default_permissions(user_id)
             self._upsert_permission_marker(user_id)
             self._db.commit()
             return True, "注册成功"
@@ -164,6 +166,8 @@ class AuthService:
         """修改用户密码。"""
         if not new_password:
             return False, "密码不能为空"
+        if len(new_password) > self.PASSWORD_MAX_LENGTH:
+            return False, f"密码长度不能超过{self.PASSWORD_MAX_LENGTH}个字符"
         password_hash = self._hash_password(new_password)
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
         self._db.execute(
@@ -261,20 +265,6 @@ class AuthService:
         except Exception as e:
             self._db.rollback()
             return False, f"权限更新失败: {e}"
-
-    def _grant_default_permissions(self, user_id: str) -> None:
-        """为新用户授予当前 UI 所需的最小默认权限。"""
-
-        for tab_name in AUTH_TAB_NAMES:
-            self._db.execute(
-                "INSERT OR IGNORE INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
-                (user_id, tab_name),
-            )
-        for knowledge_base_id in self._list_knowledge_base_ids():
-            self._db.execute(
-                "INSERT OR IGNORE INTO user_kb_access (user_id, knowledge_base_id) VALUES (?, ?)",
-                (user_id, knowledge_base_id),
-            )
 
     def _list_knowledge_base_ids(self) -> list[str]:
         """读取当前所有知识库 ID。"""

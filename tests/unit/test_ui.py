@@ -1,5 +1,6 @@
 """程序说明：验证最小 UI 可构建。"""
 
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -646,15 +647,34 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
         if str(component.get("props", {}).get("label", "")) == "AI 质检优化 Dummy"
     ]
 
-    assert any("功能设置" in value for value in html_values)
-    assert visible_tab_labels == ["AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"]
+    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}.issubset(set(visible_tab_labels))
+    assert {"配置管理", "用户管理", "用户权限管理"}.issubset(set(visible_tab_labels))
     assert len(dummy_tabs) == 1
     assert dummy_tabs[0].get("props", {}).get("visible", True) is False
-    assert "settings-overview-panel" in elem_ids
+    assert "settings-subtabs" in elem_ids
+    assert "settings-config-tab" in elem_ids
+    assert "settings-user-tab" in elem_ids
+    assert "settings-permission-tab" in elem_ids
+    assert "settings-config-subtabs" in elem_ids
+    assert "settings-template-tab" in elem_ids
+    assert "settings-knowledge-base-tab" in elem_ids
     assert "settings-workspace-panel" in elem_ids
     assert "settings-knowledge-base-panel" in elem_ids
+    assert "settings-user-management-panel" in elem_ids
+    assert "settings-user-list-panel" in elem_ids
+    assert "settings-user-table" in elem_ids
+    assert "settings-user-detail" in elem_ids
+    assert "settings-user-actions" in elem_ids
+    assert "settings-user-result" in elem_ids
+    assert "settings-permission-management-panel" in elem_ids
+    assert "settings-permission-user-panel" in elem_ids
+    assert "settings-permission-user-table" in elem_ids
+    assert "settings-permission-form-panel" in elem_ids
+    assert "settings-permission-tab-access" in elem_ids
+    assert "settings-permission-kb-access" in elem_ids
+    assert "settings-permission-actions" in elem_ids
+    assert "settings-permission-result" in elem_ids
     assert "settings-footer-panel" in elem_ids
-    assert "settings-help-panel" in elem_ids
     assert "settings-runtime-panel" in elem_ids
     assert "settings-main-row" in elem_ids
     assert "settings-list-actions" in elem_ids
@@ -691,10 +711,17 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     assert "系统提示词" in labels
     assert "用户提示模板" in labels
     assert "我确认删除当前模板" in labels
-    assert elem_ids.index("settings-overview-panel") < elem_ids.index("settings-workspace-panel")
+    assert "用户列表" in labels
+    assert "权限用户" in labels
+    assert "可访问菜单" in labels
+    assert "可访问知识库" in labels
+    assert elem_ids.index("settings-config-tab") < elem_ids.index("settings-user-tab")
+    assert elem_ids.index("settings-user-tab") < elem_ids.index("settings-permission-tab")
+    assert elem_ids.index("settings-config-subtabs") < elem_ids.index("settings-workspace-panel")
     assert elem_ids.index("settings-workspace-panel") < elem_ids.index("settings-knowledge-base-panel")
     assert elem_ids.index("settings-knowledge-base-panel") < elem_ids.index("settings-footer-panel")
-    assert elem_ids.index("settings-help-panel") < elem_ids.index("settings-runtime-panel")
+    assert elem_ids.index("settings-template-tab") < elem_ids.index("settings-knowledge-base-tab")
+    assert elem_ids.index("settings-runtime-panel") < elem_ids.index("settings-workspace-panel")
     assert elem_ids.index("settings-template-table") < elem_ids.index("settings-template-detail")
     assert elem_ids.index("settings-template-detail") < elem_ids.index("settings-template-form")
     assert elem_ids.index("settings-basic-group") < elem_ids.index("settings-policy-group")
@@ -792,6 +819,154 @@ def test_auth_interactions_should_disable_queue_to_avoid_stuck_pending_state(tmp
     assert any(name == "_do_login" and dependency.get("queue") is False for name, dependency in dependency_pairs)
     assert any(name == "_do_register" and dependency.get("queue") is False for name, dependency in dependency_pairs)
     assert any(name == "<lambda>" and dependency.get("queue") is False for name, dependency in dependency_pairs)
+
+
+def test_create_ui_app_should_only_render_three_register_inputs(tmp_path: Path) -> None:
+    """注册区应只保留用户名、密码、重复密码三项输入。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    textbox_components = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("props", {})
+        for component in components
+        if component.get("type") == "textbox"
+    }
+
+    register_input_ids = {
+        "auth-register-username",
+        "auth-register-password",
+        "auth-register-password-confirm",
+    }
+
+    assert register_input_ids.issubset(textbox_components.keys())
+    assert textbox_components["auth-register-username"].get("label") == "用户名"
+    assert textbox_components["auth-register-password"].get("label") == "密码"
+    assert textbox_components["auth-register-password-confirm"].get("label") == "重复密码"
+    assert all(
+        elem_id in register_input_ids
+        for elem_id in textbox_components
+        if elem_id.startswith("auth-register-")
+    )
+
+
+def test_save_settings_user_permissions_ui_should_persist_selected_permissions(tmp_path: Path) -> None:
+    """权限管理子页保存后，应把菜单权限和知识库权限写入数据库。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    success, _message = auth_service.register_user("perm_ui_user", "StrongPass#123")
+    assert success is True
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = ?",
+            ("perm_ui_user",),
+        ).fetchone()[0]
+
+    demo = create_ui_app(settings)
+    save_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "save_settings_user_permissions_ui"
+    )
+
+    _outputs = save_handler(
+        user_id,
+        ["知识库检索", "功能设置"],
+        ["default | 默认知识库"],
+    )
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        tab_names = [
+            row[0]
+            for row in connection.execute(
+                "SELECT tab_name FROM user_tab_access WHERE user_id = ? ORDER BY tab_name",
+                (user_id,),
+            ).fetchall()
+        ]
+        kb_ids = [
+            row[0]
+            for row in connection.execute(
+                "SELECT knowledge_base_id FROM user_kb_access WHERE user_id = ? ORDER BY knowledge_base_id",
+                (user_id,),
+            ).fetchall()
+        ]
+
+    assert tab_names == ["功能设置", "知识库检索"]
+    assert kb_ids == ["default"]
+
+
+def test_save_settings_user_permissions_ui_should_refresh_current_login_session(tmp_path: Path) -> None:
+    """若修改的是当前登录用户，权限保存后应即时刷新登录态和主菜单可见性。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    success, _message = auth_service.register_user("self_perm_user", "StrongPass#123")
+    assert success is True
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = ?",
+            ("self_perm_user",),
+        ).fetchone()[0]
+
+    demo = create_ui_app(settings)
+    save_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "save_settings_user_permissions_ui"
+    )
+    current_session = {
+        "user_id": user_id,
+        "username": "self_perm_user",
+        "is_admin": False,
+        "permissions": {"tab_names": ["功能设置"], "kb_ids": []},
+    }
+
+    outputs = save_handler(
+        user_id,
+        ["知识库检索"],
+        [],
+        current_session,
+    )
+
+    refreshed_session = outputs[10]
+    settings_tab_update = outputs[19]
+    search_tab_update = outputs[18]
+
+    assert refreshed_session["user_id"] == user_id
+    assert refreshed_session["permissions"]["tab_names"] == ["知识库检索"]
+    assert refreshed_session["permissions"]["kb_ids"] == []
+    assert settings_tab_update["visible"] is False
+    assert search_tab_update["visible"] is True
 
 
 def test_login_state_should_use_browser_persistence_and_restore_handler(tmp_path: Path) -> None:

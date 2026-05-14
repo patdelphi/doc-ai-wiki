@@ -45,6 +45,15 @@ class ConnectionScopedAuthService:
     def get_user_permissions(self, user_id: str):
         return self._call("get_user_permissions", user_id)
 
+    def list_users(self):
+        return self._call("list_users")
+
+    def delete_user(self, user_id: str):
+        return self._call("delete_user", user_id)
+
+    def update_user_permissions(self, user_id: str, tab_names: list[str], kb_ids: list[str]):
+        return self._call("update_user_permissions", user_id, tab_names, kb_ids)
+
 
 def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
     """创建 Gradio UI 实例。"""

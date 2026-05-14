@@ -3402,6 +3402,219 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             bool(resolved.get("is_default", False)),
         )
 
+    def build_settings_user_choices(users: list[dict] | None) -> list[str]:
+        """构建设置页用户选择项。"""
+
+        choices: list[str] = []
+        for user in users or []:
+            username = str(user.get("username") or "").strip()
+            user_id = str(user.get("user_id") or "").strip()
+            role_name = "管理员" if bool(user.get("is_admin")) else "普通用户"
+            if username and user_id:
+                choices.append(f"{username} | {role_name} | {user_id}")
+        return choices
+
+    def parse_settings_user_choice(choice: str | None) -> str:
+        """从设置页用户选择项中解析用户 ID。"""
+
+        normalized = str(choice or "").strip()
+        if not normalized:
+            return ""
+        if " | " not in normalized:
+            return normalized
+        return normalized.rsplit(" | ", 1)[-1].strip()
+
+    def format_settings_user_detail_html(user: dict | None) -> str:
+        """格式化用户管理页详情面板。"""
+
+        if not user:
+            return (
+                "<div class='settings-detail-card'>"
+                "<h3>用户详情</h3>"
+                "<p>当前暂无可管理用户，请先注册用户后再在这里维护。</p>"
+                "</div>"
+            )
+        role_name = "管理员" if bool(user.get("is_admin")) else "普通用户"
+        return (
+            "<div class='settings-detail-card'>"
+            "<h3>用户详情</h3>"
+            f"<p><strong>用户名：</strong>{str(user.get('username') or '')}</p>"
+            f"<p><strong>角色：</strong>{role_name}</p>"
+            f"<p><strong>用户 ID：</strong>{str(user.get('user_id') or '')}</p>"
+            f"<p><strong>创建时间：</strong>{str(user.get('created_at') or '')}</p>"
+            "</div>"
+        )
+
+    def format_settings_permission_detail_html(user: dict | None, permissions) -> str:
+        """格式化权限管理页详情面板。"""
+
+        if not user:
+            return (
+                "<div class='settings-detail-card'>"
+                "<h3>权限说明</h3>"
+                "<p>当前暂无可配置用户。</p>"
+                "</div>"
+            )
+        role_name = "管理员" if bool(user.get("is_admin")) else "普通用户"
+        tab_names = "、".join(str(item) for item in (permissions.tab_names if permissions else []) if item) or "无"
+        kb_ids = "、".join(str(item) for item in (permissions.kb_ids if permissions else []) if item) or "无"
+        return (
+            "<div class='settings-detail-card'>"
+            "<h3>权限说明</h3>"
+            f"<p><strong>用户名：</strong>{str(user.get('username') or '')}</p>"
+            f"<p><strong>角色：</strong>{role_name}</p>"
+            f"<p><strong>当前菜单权限：</strong>{tab_names}</p>"
+            f"<p><strong>当前知识库权限：</strong>{kb_ids}</p>"
+            "</div>"
+        )
+
+    def build_settings_user_permission_workspace(
+        selected_user_id: str | None = None,
+        *,
+        user_result_payload: dict | None = None,
+        permission_result_payload: dict | None = None,
+    ) -> tuple[list[dict], str, list[str], str | None, str, str, list[str], list[str], list[str], str, str]:
+        """构建用户管理与权限管理子页面所需的共享数据。"""
+
+        users = auth_service.list_users() or []
+        user_choices = build_settings_user_choices(users)
+        normalized_selected_user_id = str(selected_user_id or "").strip()
+        selected_user = next(
+            (item for item in users if str(item.get("user_id") or "").strip() == normalized_selected_user_id),
+            users[0] if users else None,
+        )
+        resolved_user_id = str(selected_user.get("user_id") or "").strip() if selected_user else ""
+        selected_choice = next(
+            (choice for choice in user_choices if parse_settings_user_choice(choice) == resolved_user_id),
+            user_choices[0] if user_choices else None,
+        )
+        permissions = auth_service.get_user_permissions(resolved_user_id) if resolved_user_id else None
+        knowledge_base_choices = build_knowledge_base_choices(ingest_service.list_knowledge_bases())
+        selected_kb_choices = [
+            choice
+            for choice in knowledge_base_choices
+            if parse_knowledge_base_choice(choice) in set(permissions.kb_ids if permissions else [])
+        ]
+        return (
+            users,
+            resolved_user_id,
+            user_choices,
+            selected_choice,
+            format_settings_user_detail_html(selected_user),
+            format_settings_permission_detail_html(selected_user, permissions),
+            list(permissions.tab_names if permissions else []),
+            knowledge_base_choices,
+            selected_kb_choices,
+            format_operation_result_html(user_result_payload, title="用户结果"),
+            format_operation_result_html(permission_result_payload, title="权限结果"),
+        )
+
+    def build_settings_user_permission_ui_outputs(base_outputs: tuple) -> tuple:
+        """将用户与权限工作区数据转换为设置页组件输出。"""
+
+        return (
+            gr.update(choices=base_outputs[2], value=base_outputs[3]),
+            base_outputs[0],
+            base_outputs[1],
+            base_outputs[4],
+            base_outputs[9],
+            gr.update(choices=base_outputs[2], value=base_outputs[3]),
+            base_outputs[5],
+            gr.update(choices=AUTH_TAB_NAMES, value=base_outputs[6]),
+            gr.update(choices=base_outputs[7], value=base_outputs[8]),
+            base_outputs[10],
+        )
+
+    def refresh_settings_user_workspace_ui(selected_user_id: str | None) -> tuple:
+        """刷新用户管理与权限管理子页面。"""
+
+        return build_settings_user_permission_ui_outputs(
+            build_settings_user_permission_workspace(selected_user_id),
+        )
+
+    def select_settings_user_ui(user_choice: str, _users: list[dict] | None = None) -> tuple:
+        """切换用户管理或权限管理页的选中用户。"""
+
+        return build_settings_user_permission_ui_outputs(
+            build_settings_user_permission_workspace(parse_settings_user_choice(user_choice)),
+        )
+
+    def delete_settings_user_ui(
+        selected_user_id: str | None,
+        current_session: dict[str, object] | None = None,
+    ) -> tuple:
+        """删除普通用户并刷新用户与权限管理子页面。"""
+
+        normalized_user_id = str(selected_user_id or "").strip()
+        if not normalized_user_id:
+            base_outputs = build_settings_user_permission_ui_outputs(
+                build_settings_user_permission_workspace(
+                    None,
+                    user_result_payload={"success": False, "message": "请选择用户"},
+                )
+            )
+            return (*base_outputs, *_build_current_session_permission_updates(current_session))
+        success, message = auth_service.delete_user(normalized_user_id)
+        next_selected_user_id = normalized_user_id if not success else None
+        base_outputs = build_settings_user_permission_ui_outputs(
+            build_settings_user_permission_workspace(
+                next_selected_user_id,
+                user_result_payload={"success": success, "message": message},
+            )
+        )
+        return (
+            *base_outputs,
+            *_build_current_session_permission_updates(
+                current_session,
+                affected_user_id=normalized_user_id,
+                deleted=success,
+            ),
+        )
+
+    def save_settings_user_permissions_ui(
+        selected_user_id: str | None,
+        tab_names: list[str] | None,
+        knowledge_base_choices_selected: list[str] | None,
+        current_session: dict[str, object] | None = None,
+    ) -> tuple:
+        """保存用户菜单与知识库权限，并刷新权限管理子页面。"""
+
+        normalized_user_id = str(selected_user_id or "").strip()
+        if not normalized_user_id:
+            base_outputs = build_settings_user_permission_ui_outputs(
+                build_settings_user_permission_workspace(
+                    None,
+                    permission_result_payload={"success": False, "message": "请选择用户"},
+                )
+            )
+            return (*base_outputs, *_build_current_session_permission_updates(current_session))
+        knowledge_base_ids = [
+            kb_id
+            for kb_id in (
+                parse_knowledge_base_choice(choice)
+                for choice in (knowledge_base_choices_selected or [])
+            )
+            if kb_id
+        ]
+        success, message = auth_service.update_user_permissions(
+            normalized_user_id,
+            [normalize_auth_tab_name(item) for item in (tab_names or [])],
+            knowledge_base_ids,
+        )
+        base_outputs = build_settings_user_permission_ui_outputs(
+            build_settings_user_permission_workspace(
+                normalized_user_id,
+                permission_result_payload={"success": success, "message": message},
+            )
+        )
+        return (
+            *base_outputs,
+            *_build_current_session_permission_updates(
+                current_session,
+                affected_user_id=normalized_user_id if success else None,
+            ),
+        )
+
     def build_knowledge_base_refresh_outputs(
         selected_knowledge_base_id: str | None = None,
         login_session: dict[str, object] | None = None,
@@ -4372,6 +4585,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_settings_knowledge_base_is_default,
         initial_settings_knowledge_base_result_html,
     ) = build_settings_knowledge_base_workspace()
+    (
+        initial_settings_user_state,
+        initial_settings_selected_user_id,
+        initial_settings_user_choices,
+        initial_settings_user_selected_choice,
+        initial_settings_user_detail_html,
+        initial_settings_permission_detail_html,
+        initial_settings_permission_tab_values,
+        initial_settings_permission_kb_choices,
+        initial_settings_permission_kb_values,
+        initial_settings_user_result_html,
+        initial_settings_permission_result_html,
+    ) = build_settings_user_permission_workspace()
     initial_database_table_rows, initial_database_page, initial_database_page_info = reset_table_pagination(
         initial_database_rows,
         prepend_sequence=True,
@@ -4525,6 +4751,55 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             settings_table_update,
             settings_page_value,
             format_table_pagination_html(settings_page_info),
+        )
+
+    def _build_current_session_permission_updates(
+        current_session: dict[str, object] | None,
+        *,
+        affected_user_id: str | None = None,
+        deleted: bool = False,
+    ) -> tuple:
+        """当后台修改用户或权限后，按需即时刷新当前登录态与主界面权限。"""
+
+        session = current_session or _empty_login_session()
+        current_user_id = str(session.get("user_id") or "").strip()
+        normalized_affected_user_id = str(affected_user_id or "").strip()
+        if not current_user_id:
+            return (
+                session,
+                session,
+                _render_auth_user(str(session.get("username") or "")),
+                gr.update(),
+                gr.update(),
+                *_build_permission_ui_updates(session),
+            )
+        if deleted and normalized_affected_user_id == current_user_id:
+            empty_session = _empty_login_session()
+            return (
+                empty_session,
+                empty_session,
+                "",
+                gr.update(visible=True),
+                gr.update(visible=False),
+                *_build_permission_ui_updates(empty_session),
+            )
+        if normalized_affected_user_id and normalized_affected_user_id == current_user_id:
+            refreshed_session = _build_login_session(current_user_id)
+            return (
+                refreshed_session,
+                refreshed_session,
+                _render_auth_user(str(refreshed_session.get("username") or "")),
+                gr.update(),
+                gr.update(),
+                *_build_permission_ui_updates(refreshed_session),
+            )
+        return (
+            session,
+            session,
+            _render_auth_user(str(session.get("username") or "")),
+            gr.update(),
+            gr.update(),
+            *_build_permission_ui_updates(session),
         )
 
     with gr.Blocks(title="中文知识库系统") as demo:
@@ -5087,6 +5362,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     settings_knowledge_base_state = gr.State(initial_settings_knowledge_base_state)
                     settings_selected_knowledge_base_state = gr.State(initial_settings_selected_knowledge_base_id)
                     settings_knowledge_base_page_state = gr.State(initial_settings_knowledge_base_page)
+                    settings_user_state = gr.State(initial_settings_user_state)
+                    settings_selected_user_state = gr.State(initial_settings_selected_user_id)
                     settings_components = build_settings_tab(
                         initial_values={
                             "runtime_html": initial_settings_runtime_html,
@@ -5118,6 +5395,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             "knowledge_base_is_default": initial_settings_knowledge_base_is_default,
                             "knowledge_base_result_html": initial_settings_knowledge_base_result_html,
                             "result_html": initial_settings_result_html,
+                            "user_choices": initial_settings_user_choices,
+                            "user_selected_choice": initial_settings_user_selected_choice,
+                            "user_detail_html": initial_settings_user_detail_html,
+                            "user_result_html": initial_settings_user_result_html,
+                            "permission_user_choices": initial_settings_user_choices,
+                            "permission_user_selected_choice": initial_settings_user_selected_choice,
+                            "permission_detail_html": initial_settings_permission_detail_html,
+                            "permission_tab_choices": AUTH_TAB_NAMES,
+                            "permission_tab_values": initial_settings_permission_tab_values,
+                            "permission_kb_choices": initial_settings_permission_kb_choices,
+                            "permission_kb_values": initial_settings_permission_kb_values,
+                            "permission_result_html": initial_settings_permission_result_html,
                         },
                     )
                     settings_runtime = settings_components["settings_runtime"]
@@ -5243,10 +5532,22 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 settings_knowledge_base_state=settings_knowledge_base_state,
                 settings_selected_knowledge_base_state=settings_selected_knowledge_base_state,
                 settings_knowledge_base_page_state=settings_knowledge_base_page_state,
+                settings_user_state=settings_user_state,
+                settings_selected_user_state=settings_selected_user_state,
                 login_state=login_state,
+                persisted_login_state=persisted_login_state,
+                auth_user_display=auth_user_display,
+                auth_page=auth_page,
+                main_content=main_content,
+                quality_tab=quality_tab,
+                review_tab=review_tab,
+                document_tab=document_tab,
+                search_tab=search_tab,
+                settings_tab=settings_tab,
                 quality_template=quality_template,
                 quality_template_detail=quality_template_detail,
                 document_knowledge_base=document_knowledge_base,
+                document_target_knowledge_base=document_target_knowledge_base,
                 search_knowledge_base=search_knowledge_base,
                 quality_knowledge_base=quality_knowledge_base,
                 review_knowledge_base=review_knowledge_base,
@@ -5263,6 +5564,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 save_settings_knowledge_base_ui=save_settings_knowledge_base_ui,
                 delete_settings_knowledge_base_ui=delete_settings_knowledge_base_ui,
                 change_settings_knowledge_base_page=change_settings_knowledge_base_page,
+                refresh_settings_user_workspace_ui=refresh_settings_user_workspace_ui,
+                select_settings_user_ui=select_settings_user_ui,
+                delete_settings_user_ui=delete_settings_user_ui,
+                save_settings_user_permissions_ui=save_settings_user_permissions_ui,
             )
             bind_review_events(
                 components=review_components,

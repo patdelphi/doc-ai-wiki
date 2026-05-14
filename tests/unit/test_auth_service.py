@@ -45,8 +45,8 @@ def test_authenticate_should_reject_inactive_user(tmp_path: Path) -> None:
     assert user is None
 
 
-def test_register_user_should_grant_default_ui_permissions(tmp_path: Path) -> None:
-    """新注册用户应默认拥有当前 UI 所需的基础页签与知识库权限。"""
+def test_register_user_should_not_grant_any_default_permissions(tmp_path: Path) -> None:
+    """除 admin 外，新注册用户默认不应拥有任何菜单或知识库权限。"""
 
     connection, auth_service = create_auth_service(tmp_path / "app.db")
     success, _message = auth_service.register_user("normal_user", "StrongPass#123")
@@ -57,11 +57,38 @@ def test_register_user_should_grant_default_ui_permissions(tmp_path: Path) -> No
         ("normal_user",),
     ).fetchone()[0]
     permissions = auth_service.get_user_permissions(user_id)
+    tab_access_count = connection.execute(
+        "SELECT COUNT(*) FROM user_tab_access WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()[0]
+    kb_access_count = connection.execute(
+        "SELECT COUNT(*) FROM user_kb_access WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()[0]
     connection.close()
 
     assert permissions is not None
-    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}.issubset(set(permissions.tab_names))
-    assert "default" in permissions.kb_ids
+    assert permissions.tab_names == []
+    assert permissions.kb_ids == []
+    assert tab_access_count == 0
+    assert kb_access_count == 0
+
+
+def test_register_user_should_reject_password_longer_than_20_chars(tmp_path: Path) -> None:
+    """注册密码超过 20 个字符时，应直接返回业务错误。"""
+
+    connection, auth_service = create_auth_service(tmp_path / "app.db")
+
+    success, message = auth_service.register_user("too_long_user", "123456789012345678901")
+    user_count = connection.execute(
+        "SELECT COUNT(*) FROM users WHERE username = ?",
+        ("too_long_user",),
+    ).fetchone()[0]
+    connection.close()
+
+    assert success is False
+    assert message == "密码长度不能超过20个字符"
+    assert user_count == 0
 
 
 def test_register_user_should_store_password_with_pbkdf2_scheme(tmp_path: Path) -> None:
@@ -79,6 +106,47 @@ def test_register_user_should_store_password_with_pbkdf2_scheme(tmp_path: Path) 
 
     assert password_hash.startswith("pbkdf2_sha256$")
     assert auth_service._verify_password(password_hash, "StrongPass#123") is True
+
+
+def test_list_users_should_include_registered_non_admin_users(tmp_path: Path) -> None:
+    """用户列表应能返回已注册普通用户，供后台用户管理页面消费。"""
+
+    connection, auth_service = create_auth_service(tmp_path / "app.db")
+    success, _message = auth_service.register_user("list_user", "StrongPass#123")
+    assert success is True
+
+    users = auth_service.list_users()
+    connection.close()
+
+    target_user = next(item for item in users if item["username"] == "list_user")
+    assert target_user["is_admin"] is False
+    assert str(target_user["user_id"]).strip() != ""
+
+
+def test_update_user_permissions_should_persist_tabs_and_knowledge_bases(tmp_path: Path) -> None:
+    """显式配置后的菜单权限与知识库权限应可正确读回。"""
+
+    connection, auth_service = create_auth_service(tmp_path / "app.db")
+    success, _message = auth_service.register_user("permission_user", "StrongPass#123")
+    assert success is True
+    user_id = connection.execute(
+        "SELECT user_id FROM users WHERE username = ?",
+        ("permission_user",),
+    ).fetchone()[0]
+
+    updated, message = auth_service.update_user_permissions(
+        user_id,
+        ["知识库检索", "文档管理"],
+        ["default"],
+    )
+    permissions = auth_service.get_user_permissions(user_id)
+    connection.close()
+
+    assert updated is True
+    assert message == "权限已更新"
+    assert permissions is not None
+    assert permissions.tab_names == ["知识库检索", "知识库管理"]
+    assert permissions.kb_ids == ["default"]
 
 
 def test_authenticate_should_remain_compatible_with_legacy_sha256_hash(tmp_path: Path) -> None:
