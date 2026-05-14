@@ -636,6 +636,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
     labels = [str(component.get("props", {}).get("label", "")) for component in components]
     button_components = [component for component in components if component.get("type") == "button"]
     tab_components = [component for component in components if component.get("type") == "tabitem"]
+    tab_labels = [str(component.get("props", {}).get("label", "")) for component in tab_components]
     visible_tab_labels = [
         str(component.get("props", {}).get("label", ""))
         for component in tab_components
@@ -646,12 +647,20 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
         for component in tab_components
         if str(component.get("props", {}).get("label", "")) == "AI 质检优化 Dummy"
     ]
+    pending_tabs = [
+        component
+        for component in tab_components
+        if str(component.get("props", {}).get("label", "")) == "待开通"
+    ]
 
-    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}.issubset(set(visible_tab_labels))
+    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}.issubset(set(tab_labels))
     assert {"配置管理", "用户管理", "用户权限管理"}.issubset(set(visible_tab_labels))
     assert len(dummy_tabs) == 1
     assert dummy_tabs[0].get("props", {}).get("visible", True) is False
+    assert len(pending_tabs) == 1
+    assert pending_tabs[0].get("props", {}).get("visible", True) is False
     assert "settings-subtabs" in elem_ids
+    assert "pending-access-view" in elem_ids
     assert "settings-config-tab" in elem_ids
     assert "settings-user-tab" in elem_ids
     assert "settings-permission-tab" in elem_ids
@@ -859,6 +868,173 @@ def test_create_ui_app_should_only_render_three_register_inputs(tmp_path: Path) 
     )
 
 
+def test_create_ui_app_should_hide_register_section_on_auth_page_by_default(tmp_path: Path) -> None:
+    """登录页默认只显示登录区，注册区应先隐藏。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    components = demo.config.get("components", [])
+    component_props = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("props", {})
+        for component in components
+        if component.get("props", {}).get("elem_id")
+    }
+
+    assert component_props["auth-login-form"].get("visible") is True
+    assert component_props["auth-register-form"].get("visible") is False
+
+
+def test_restore_login_session_should_show_pending_access_tab_for_zero_permission_user(tmp_path: Path) -> None:
+    """零权限用户恢复登录态后，应只显示待开通页而不显示业务菜单。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    success, _message = auth_service.register_user("pending_user", "StrongPass#123")
+    assert success is True
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = ?",
+            ("pending_user",),
+        ).fetchone()[0]
+
+    demo = create_ui_app(settings)
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    outputs = restore_fn({"user_id": user_id, "username": "pending_user"})
+    result_session = outputs[0]
+    result_label = outputs[1]
+    result_login = outputs[2]
+    result_menu = outputs[3]
+    pending_tab_update = outputs[4]
+    quality_tab_update = outputs[5]
+    review_tab_update = outputs[6]
+    document_tab_update = outputs[7]
+    search_tab_update = outputs[8]
+    settings_tab_update = outputs[9]
+    pending_access_update = outputs[10]
+
+    assert result_session.get("user_id") == user_id
+    assert result_label == "<span>pending_user</span>"
+    assert result_login.get("visible") is False
+    assert result_menu.get("visible") is True
+    assert pending_tab_update["visible"] is True
+    assert quality_tab_update["visible"] is False
+    assert review_tab_update["visible"] is False
+    assert document_tab_update["visible"] is False
+    assert search_tab_update["visible"] is False
+    assert settings_tab_update["visible"] is False
+    assert "功能待开通" in pending_access_update["value"]
+    assert "pending_user" in pending_access_update["value"]
+
+
+def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Path) -> None:
+    """admin 恢复登录态后应默认落到 AI 质检页，而不是停在隐藏页。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at)
+            VALUES (?, ?, ?, 1, 1, ?, ?)
+            """,
+            (
+                "admin-user-001",
+                "admin",
+                "pbkdf2_sha256$1$test$hash",
+                "2026-05-14 00:00:00",
+                "2026-05-14 00:00:00",
+            ),
+        )
+        connection.commit()
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        admin_user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = ?",
+            ("admin",),
+        ).fetchone()[0]
+
+    demo = create_ui_app(settings)
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    outputs = restore_fn({"user_id": admin_user_id, "username": "admin"})
+    pending_tab_update = outputs[4]
+    quality_tab_update = outputs[5]
+    main_tabs_update = outputs[11]
+
+    assert pending_tab_update["visible"] is False
+    assert quality_tab_update["visible"] is True
+    assert main_tabs_update["selected"] == "main-tab-quality"
+
+
+def test_restore_login_session_should_clear_review_workspace_without_kb_permission(tmp_path: Path) -> None:
+    """只有人工审核菜单权限、没有知识库权限时，恢复登录后不应残留审核历史。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    success, _message = auth_service.register_user("review_no_kb_user", "StrongPass#123")
+    assert success is True
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = ?",
+            ("review_no_kb_user",),
+        ).fetchone()[0]
+        connection.execute(
+            "INSERT INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
+            (user_id, "人工审核"),
+        )
+        connection.commit()
+
+    demo = create_ui_app(settings)
+    restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
+    assert restore_fn is not None
+
+    outputs = restore_fn({"user_id": user_id, "username": "review_no_kb_user"})
+    review_outputs = outputs[-23:]
+
+    assert review_outputs[0] == []
+    assert review_outputs[3] == []
+    assert review_outputs[17] == []
+    assert review_outputs[20] == []
+
+
 def test_save_settings_user_permissions_ui_should_persist_selected_permissions(tmp_path: Path) -> None:
     """权限管理子页保存后，应把菜单权限和知识库权限写入数据库。"""
 
@@ -959,12 +1135,16 @@ def test_save_settings_user_permissions_ui_should_refresh_current_login_session(
     )
 
     refreshed_session = outputs[10]
-    settings_tab_update = outputs[19]
-    search_tab_update = outputs[18]
+    pending_tab_update = outputs[15]
+    main_tabs_update = outputs[22]
+    search_tab_update = outputs[19]
+    settings_tab_update = outputs[20]
 
     assert refreshed_session["user_id"] == user_id
     assert refreshed_session["permissions"]["tab_names"] == ["知识库检索"]
     assert refreshed_session["permissions"]["kb_ids"] == []
+    assert pending_tab_update["visible"] is False
+    assert main_tabs_update["selected"] == "main-tab-search"
     assert settings_tab_update["visible"] is False
     assert search_tab_update["visible"] is True
 
@@ -2360,6 +2540,154 @@ def test_list_recent_quality_results_ui_should_support_pending_history_filter(tm
     assert len(recent_state) == 1
     assert recent_state[0]["check_id"] == "chkres_pending_only"
     assert recent_rows == [["1", "当前", "chkres_pending_only", "模板一", "需复核", "1", "1", "26-05-01 20:00", "待处理任务"]]
+
+
+def test_list_recent_quality_results_ui_should_hide_history_without_kb_permission(tmp_path: Path) -> None:
+    """只有菜单权限但没有知识库权限时，不应看到默认知识库历史质检记录。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    repository = QualityRepository(settings.sqlite_db_path)
+    repository.create_quality_result(
+        quality_check={
+            "check_id": "chkres_default_only",
+            "input_text": "默认知识库历史记录",
+            "template_id": "t1",
+            "template_name": "模板一",
+            "overall_verdict": "needs_review",
+            "risk_level": "medium",
+            "summary": "默认库中存在记录",
+            "created_at": "2026-05-01T12:00:00+00:00",
+            "updated_at": "2026-05-01T12:00:00+00:00",
+            "knowledge_base_id": "default",
+        },
+        claims=[
+            {
+                "claim_id": "claim_default_only",
+                "check_id": "chkres_default_only",
+                "claim_text": "默认库 claim",
+                "verdict": "needs_review",
+                "risk_level": "medium",
+                "confidence": 0.80,
+                "evidence": "默认库证据",
+                "source_doc": "文档一",
+                "source_span": "section-1",
+                "review_status": "pending",
+                "created_at": "2026-05-01T12:00:00+00:00",
+                "updated_at": "2026-05-01T12:00:00+00:00",
+                "knowledge_base_id": "default",
+            }
+        ],
+        rule_hits=[],
+    )
+
+    demo = create_ui_app(settings)
+    list_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "list_recent_quality_results_ui"
+    )
+    restricted_session = {
+        "user_id": "user_test",
+        "username": "test_user",
+        "is_admin": False,
+        "permissions": {"tab_names": ["AI 质检"], "kb_ids": []},
+    }
+
+    outputs = list_handler(None, "全部历史任务", restricted_session)
+    progress_html = outputs[0]
+    result_html = outputs[1]
+    recent_state = outputs[16]
+    recent_rows = outputs[17]
+
+    assert "质检结果" in result_html
+    assert "处理中" not in progress_html
+    assert recent_state == []
+    assert recent_rows == []
+
+
+def test_list_review_workspace_ui_should_hide_review_data_without_kb_permission(tmp_path: Path) -> None:
+    """只有人工审核菜单权限、没有知识库权限时，不应看到待审核或审核历史。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+
+    repository = QualityRepository(settings.sqlite_db_path)
+    repository.create_quality_result(
+        quality_check={
+            "check_id": "review_chk_default_only",
+            "input_text": "默认库待审核记录",
+            "template_id": "t1",
+            "template_name": "模板一",
+            "overall_verdict": "needs_review",
+            "risk_level": "medium",
+            "summary": "默认库审核数据",
+            "created_at": "2026-05-01T12:00:00+00:00",
+            "updated_at": "2026-05-01T12:00:00+00:00",
+            "knowledge_base_id": "default",
+        },
+        claims=[
+            {
+                "claim_id": "review_claim_default_only",
+                "check_id": "review_chk_default_only",
+                "claim_text": "默认库待审核 claim",
+                "verdict": "needs_review",
+                "risk_level": "medium",
+                "confidence": 0.78,
+                "evidence": "默认库证据",
+                "source_doc": "文档一",
+                "source_span": "section-1",
+                "review_status": "pending",
+                "created_at": "2026-05-01T12:00:00+00:00",
+                "updated_at": "2026-05-01T12:00:00+00:00",
+                "knowledge_base_id": "default",
+            }
+        ],
+        rule_hits=[],
+    )
+    ReviewService(settings.sqlite_db_path).submit_review(
+        claim_id="review_claim_default_only",
+        review_action="approve",
+        reviewed_verdict=None,
+        review_note="默认库审核记录",
+        reviewer="reviewer_1",
+    )
+
+    demo = create_ui_app(settings)
+    list_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "list_review_workspace_ui"
+    )
+    restricted_session = {
+        "user_id": "user_review",
+        "username": "review_user",
+        "is_admin": False,
+        "permissions": {"tab_names": ["人工审核"], "kb_ids": []},
+    }
+
+    outputs = list_handler("全部记录", "全部风险", "", None, restricted_session)
+
+    assert outputs[0] == []
+    assert outputs[3] == []
+    assert outputs[6] == []
+    assert outputs[17] == []
+    assert outputs[20] == []
 
 
 

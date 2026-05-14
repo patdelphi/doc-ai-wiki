@@ -149,6 +149,105 @@ def test_update_user_permissions_should_persist_tabs_and_knowledge_bases(tmp_pat
     assert permissions.kb_ids == ["default"]
 
 
+def test_initialize_database_should_upgrade_legacy_user_permissions_table(tmp_path: Path) -> None:
+    """旧 user_permissions 表应自动升级到新结构，并迁移历史权限数据。"""
+
+    database_path = tmp_path / "legacy_auth.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE user_tab_access (
+            user_id TEXT NOT NULL,
+            tab_name TEXT NOT NULL,
+            PRIMARY KEY (user_id, tab_name)
+        );
+
+        CREATE TABLE user_kb_access (
+            user_id TEXT NOT NULL,
+            knowledge_base_id TEXT NOT NULL,
+            PRIMARY KEY (user_id, knowledge_base_id)
+        );
+
+        CREATE TABLE user_permissions (
+            user_id TEXT PRIMARY KEY,
+            tab_names TEXT NOT NULL DEFAULT '[]',
+            kb_ids TEXT NOT NULL DEFAULT '[]'
+        );
+
+        INSERT INTO users (
+            user_id, username, password_hash, is_active, is_admin, created_at, updated_at
+        ) VALUES (
+            'legacy-user-1', 'legacy_permission_user', 'pbkdf2_sha256$1$abc$hash', 1, 0, '2026-05-14 00:00:00', '2026-05-14 00:00:00'
+        );
+
+        INSERT INTO user_permissions (user_id, tab_names, kb_ids)
+        VALUES (
+            'legacy-user-1',
+            '["文档管理", "知识库检索"]',
+            '["default", "kb_demo"]'
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    initialize_database(database_path)
+
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    auth_service = AuthService(connection)
+    permissions = auth_service.get_user_permissions("legacy-user-1")
+    columns = [
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(user_permissions)").fetchall()
+    ]
+    marker_row = connection.execute(
+        "SELECT user_id, permissions_json FROM user_permissions WHERE user_id = ?",
+        ("legacy-user-1",),
+    ).fetchone()
+    connection.close()
+
+    assert "permissions_json" in columns
+    assert "updated_at" in columns
+    assert "tab_names" not in columns
+    assert permissions is not None
+    assert set(permissions.tab_names) == {"知识库管理", "知识库检索"}
+    assert set(permissions.kb_ids) == {"default", "kb_demo"}
+    assert marker_row is not None
+    assert marker_row["permissions_json"] == "{}"
+
+
+def test_get_user_permissions_should_not_fallback_to_full_access_without_marker(tmp_path: Path) -> None:
+    """普通旧用户缺少权限标记时，也不应被回退成全菜单和全知识库。"""
+
+    connection, auth_service = create_auth_service(tmp_path / "app.db")
+    connection.execute(
+        """
+        INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at)
+        VALUES (?, ?, ?, 1, 0, '2026-05-14 00:00:00', '2026-05-14 00:00:00')
+        """,
+        ("legacy-no-marker", "legacy_no_marker", "pbkdf2_sha256$1$abc$hash"),
+    )
+    connection.commit()
+
+    permissions = auth_service.get_user_permissions("legacy-no-marker")
+    connection.close()
+
+    assert permissions is not None
+    assert permissions.tab_names == []
+    assert permissions.kb_ids == []
+
+
 def test_authenticate_should_remain_compatible_with_legacy_sha256_hash(tmp_path: Path) -> None:
     """历史 SHA256 密码哈希仍应可登录，避免旧用户被破坏。"""
 

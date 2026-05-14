@@ -76,8 +76,7 @@ def extract_login_session_permissions(
     """从登录态中提取管理员标记、页签权限和知识库权限。"""
 
     if session is None:
-        # 兼容直接调用内部回调函数的历史路径：未显式传入登录态时，保持全量可见。
-        return True, None, None
+        return False, set(), set()
     if not isinstance(session, dict):
         return False, set(), set()
     is_admin = bool(session.get("is_admin", False))

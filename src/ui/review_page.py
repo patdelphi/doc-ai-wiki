@@ -275,7 +275,7 @@ def bind_review_events(
 
     review_history_button.click(
         fn=list_review_workspace_ui,
-        inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base],
+        inputs=[review_scope_filter, review_risk_filter, review_selected_claim_state, review_knowledge_base, login_state],
         outputs=[
             review_pending_candidates,
             review_pending_page_state,
@@ -462,7 +462,7 @@ def bind_review_events(
     )
     review_button.click(
         fn=submit_review_action_ui,
-        inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter, review_knowledge_base],
+        inputs=[review_selected_claim_state, review_action_input, review_note_input, review_scope_filter, review_risk_filter, review_knowledge_base, login_state],
         outputs=[
             review_result,
             review_pending_candidates,

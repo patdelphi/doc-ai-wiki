@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
+from src.auth.service import normalize_auth_tab_name
 from src.db.schema import SCHEMA_SQL
 
 
@@ -42,6 +45,7 @@ def initialize_database(database_path: Path) -> None:
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with create_connection(database_path) as connection:
         _ensure_auth_tables(connection)
+        _ensure_user_permissions_table(connection)
         # 兼容旧库：先补齐会被 schema 中索引立即引用的关键列，避免 executescript 提前失败。
         _preflight_legacy_columns(connection)
         connection.executescript(SCHEMA_SQL)
@@ -90,6 +94,92 @@ def _ensure_auth_tables(connection: sqlite3.Connection) -> None:
         );
         """
     )
+
+
+def _ensure_user_permissions_table(connection: sqlite3.Connection) -> None:
+    """将历史 user_permissions 表升级为新结构，并迁移旧权限数据。"""
+
+    rows = connection.execute("PRAGMA table_info(user_permissions)").fetchall()
+    if not rows:
+        return
+
+    existing_columns = {str(row["name"]).strip() for row in rows}
+    if "permissions_json" in existing_columns and "updated_at" in existing_columns:
+        return
+
+    legacy_rows = [
+        dict(row)
+        for row in connection.execute("SELECT * FROM user_permissions").fetchall()
+    ]
+    updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    for row in legacy_rows:
+        user_id = str(row.get("user_id") or "").strip()
+        if not user_id:
+            continue
+
+        user_exists = connection.execute(
+            "SELECT 1 FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user_exists:
+            continue
+
+        for tab_name in _load_legacy_permission_list(row.get("tab_names")):
+            normalized_tab_name = normalize_auth_tab_name(tab_name)
+            if not normalized_tab_name:
+                continue
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO user_tab_access (user_id, tab_name)
+                VALUES (?, ?)
+                """,
+                (user_id, normalized_tab_name),
+            )
+
+        for knowledge_base_id in _load_legacy_permission_list(row.get("kb_ids")):
+            normalized_knowledge_base_id = str(knowledge_base_id or "").strip()
+            if not normalized_knowledge_base_id:
+                continue
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO user_kb_access (user_id, knowledge_base_id)
+                VALUES (?, ?)
+                """,
+                (user_id, normalized_knowledge_base_id),
+            )
+
+    connection.executescript(
+        """
+        CREATE TABLE user_permissions__new (
+            user_id TEXT PRIMARY KEY,
+            permissions_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+
+        DROP TABLE user_permissions;
+        ALTER TABLE user_permissions__new RENAME TO user_permissions;
+        """
+    )
+
+    for row in legacy_rows:
+        user_id = str(row.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        user_exists = connection.execute(
+            "SELECT 1 FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user_exists:
+            continue
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO user_permissions (user_id, permissions_json, updated_at)
+            VALUES (?, '{}', ?)
+            """,
+            (user_id, updated_at),
+        )
 
 
 def _preflight_legacy_columns(connection: sqlite3.Connection) -> None:
@@ -149,6 +239,21 @@ def _ensure_table_columns(
         if column_name in existing_columns:
             continue
         connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _load_legacy_permission_list(raw_value: object) -> list[str]:
+    """解析旧权限表中的 JSON 数组文本，兼容空值和脏数据。"""
+
+    text = str(raw_value or "").strip()
+    if not text:
+        return []
+    try:
+        items = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(items, list):
+        return []
+    return [str(item).strip() for item in items if str(item).strip()]
 
 
 def _backfill_knowledge_base_columns(connection: sqlite3.Connection) -> None:

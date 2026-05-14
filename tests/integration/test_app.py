@@ -12,7 +12,7 @@ from src.app import create_app
 from src.auth.service import AuthService
 from src.common.config import AppSettings
 from src.db.connection import initialize_database
-from src.db.repositories import DocumentRepository
+from src.db.repositories import DocumentRepository, QualityRepository
 from src.ingest.service import IngestService
 
 TEST_API_USERNAME = "api_tester"
@@ -97,6 +97,76 @@ def build_authenticated_test_client(app, database_path: Path) -> TestClient:
     """创建带默认认证头的测试客户端。"""
 
     return TestClient(app, headers=build_api_auth_headers(database_path))
+
+
+def seed_quality_result_for_api_permission_test(
+    database_path: Path,
+    *,
+    check_id: str,
+    claim_id: str,
+    knowledge_base_id: str,
+) -> None:
+    """写入最小质检结果，供 API 对象级权限测试复用。"""
+
+    repository = QualityRepository(database_path)
+    created_at = "2026-05-14T10:00:00+00:00"
+    repository.create_quality_result(
+        quality_check={
+            "check_id": check_id,
+            "knowledge_base_id": knowledge_base_id,
+            "input_text": f"{knowledge_base_id} 质检输入",
+            "template_id": "general_fact_check",
+            "template_name": "通用事实核验",
+            "overall_verdict": "needs_review",
+            "risk_level": "medium",
+            "summary": "用于 API 对象级权限测试",
+            "created_at": created_at,
+            "updated_at": created_at,
+        },
+        claims=[
+            {
+                "claim_id": claim_id,
+                "check_id": check_id,
+                "claim_text": f"{knowledge_base_id} Claim",
+                "verdict": "needs_review",
+                "risk_level": "medium",
+                "confidence": 0.88,
+                "evidence": f"{knowledge_base_id} 证据摘要",
+                "evidence_details": [],
+                "source_doc": "测试文档",
+                "source_span": "section-1",
+                "review_status": "pending",
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+        ],
+        rule_hits=[],
+    )
+
+
+def seed_document_for_api_permission_test(
+    database_path: Path,
+    *,
+    doc_uid: str,
+    knowledge_base_id: str,
+    source_path: str,
+) -> None:
+    """写入最小文档记录，供 doc_uid 对象级权限测试复用。"""
+
+    repository = DocumentRepository(database_path)
+    repository.upsert_document(
+        {
+            "doc_uid": doc_uid,
+            "knowledge_base_id": knowledge_base_id,
+            "doc_id": f"{doc_uid}_id",
+            "doc_title": f"{knowledge_base_id} 文档",
+            "source_path": source_path,
+            "source_hash": f"hash_{doc_uid}",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
 
 
 def test_health_endpoint_should_return_ok(tmp_path: Path) -> None:
@@ -214,6 +284,182 @@ def test_restricted_user_should_not_access_unauthorized_knowledge_base(tmp_path:
         response = client.get(
             "/search/fulltext",
             params={"query": "知识库", "knowledge_base_id": "medical"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_should_not_access_unauthorized_quality_result_by_check_id(tmp_path: Path) -> None:
+    """普通用户即使知道跨库 check_id，也不应读取未授权知识库的质检结果。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as admin_client:
+        create_response = admin_client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于对象级权限测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+    assert create_response.status_code == 200
+    seed_quality_result_for_api_permission_test(
+        settings.sqlite_db_path,
+        check_id="chk_api_medical_only",
+        claim_id="claim_api_medical_only",
+        knowledge_base_id="medical",
+    )
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "quality_default_only_user",
+        "QDefault#123",
+        tab_names=["AI 质检"],
+        kb_ids=["default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.get("/quality/result/chk_api_medical_only")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_should_not_submit_review_for_unauthorized_claim(tmp_path: Path) -> None:
+    """普通用户即使知道跨库 claim_id，也不应提交未授权知识库的审核动作。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as admin_client:
+        create_response = admin_client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于对象级权限测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+    assert create_response.status_code == 200
+    seed_quality_result_for_api_permission_test(
+        settings.sqlite_db_path,
+        check_id="chk_api_review_medical_only",
+        claim_id="claim_api_review_medical_only",
+        knowledge_base_id="medical",
+    )
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "review_default_only_user",
+        "RDefault#123",
+        tab_names=["人工审核"],
+        kb_ids=["default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.post(
+            "/review/submit",
+            json={
+                "claim_id": "claim_api_review_medical_only",
+                "review_action": "approved",
+                "reviewed_verdict": "needs_review",
+                "review_note": "越权审核尝试",
+                "reviewer": "tester",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_should_not_query_ingest_status_by_unauthorized_doc_uid(tmp_path: Path) -> None:
+    """普通用户即使不传知识库参数，也不应通过未授权 doc_uid 查看跨库文档状态。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    medical_dir = settings.input_root / "medical"
+    medical_dir.mkdir(parents=True, exist_ok=True)
+    medical_file = medical_dir / "medical_only.md"
+    medical_file.write_text("# 医学文档\n\n用于 doc_uid 权限测试。", encoding="utf-8")
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as admin_client:
+        create_response = admin_client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于对象级权限测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+    assert create_response.status_code == 200
+    seed_document_for_api_permission_test(
+        settings.sqlite_db_path,
+        doc_uid="doc_api_medical_only",
+        knowledge_base_id="medical",
+        source_path=str(medical_file),
+    )
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "ingest_default_only_user",
+        "Ingest#123",
+        tab_names=["知识库管理"],
+        kb_ids=["default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.get("/ingest/status", params={"doc_uid": "doc_api_medical_only"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_should_not_rebuild_unauthorized_doc_uid(tmp_path: Path) -> None:
+    """普通用户即使知道跨库 doc_uid，也不应发起未授权文档重建。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    medical_dir = settings.input_root / "medical"
+    medical_dir.mkdir(parents=True, exist_ok=True)
+    medical_file = medical_dir / "medical_rebuild.md"
+    medical_file.write_text("# 医学文档\n\n用于重建权限测试。", encoding="utf-8")
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as admin_client:
+        create_response = admin_client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于对象级权限测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+    assert create_response.status_code == 200
+    seed_document_for_api_permission_test(
+        settings.sqlite_db_path,
+        doc_uid="doc_api_rebuild_medical_only",
+        knowledge_base_id="medical",
+        source_path=str(medical_file),
+    )
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "rebuild_default_only_user",
+        "Rebuild#123",
+        tab_names=["知识库管理"],
+        kb_ids=["default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.post(
+            "/ingest/rebuild",
+            json={
+                "doc_uids": ["doc_api_rebuild_medical_only"],
+                "rebuild_fulltext": True,
+                "rebuild_vector": False,
+            },
         )
 
     assert response.status_code == 403

@@ -231,10 +231,6 @@ class AuthService:
         ).fetchone()
         tab_names = [normalize_auth_tab_name(r[0]) for r in tab_rows]
         kb_ids = [r[0] for r in kb_rows]
-        if not tab_names and not marker_row:
-            tab_names = list(AUTH_TAB_NAMES)
-        if not kb_ids and not marker_row:
-            kb_ids = self._list_knowledge_base_ids()
         return UserPermission(
             user_id=user_id,
             tab_names=tab_names,

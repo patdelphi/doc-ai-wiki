@@ -387,7 +387,7 @@ def bind_quality_events(
 
     quality_button.click(
         fn=run_quality_check_ui,
-        inputs=[quality_input, quality_template, quality_knowledge_base],
+        inputs=[quality_input, quality_template, quality_knowledge_base, login_state],
         outputs=[
             quality_progress,
             quality_result,
@@ -421,7 +421,7 @@ def bind_quality_events(
     )
     recent_quality_button.click(
         fn=list_recent_quality_results_ui,
-        inputs=[quality_knowledge_base, recent_quality_scope_filter],
+        inputs=[quality_knowledge_base, recent_quality_scope_filter, login_state],
         outputs=[
             quality_progress,
             quality_result,
@@ -481,7 +481,7 @@ def bind_quality_events(
     )
     recent_quality_scope_filter.input(
         fn=list_recent_quality_results_ui,
-        inputs=[quality_knowledge_base, recent_quality_scope_filter],
+        inputs=[quality_knowledge_base, recent_quality_scope_filter, login_state],
         outputs=[
             quality_progress,
             quality_result,
@@ -510,7 +510,7 @@ def bind_quality_events(
     )
     recent_quality_checks.select(
         fn=select_recent_quality_result_ui,
-        inputs=[recent_quality_checks, recent_quality_state, recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter],
+        inputs=[recent_quality_checks, recent_quality_state, recent_quality_page_state, quality_knowledge_base, recent_quality_scope_filter, login_state],
         outputs=[
             quality_progress,
             quality_result,

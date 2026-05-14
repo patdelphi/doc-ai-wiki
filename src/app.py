@@ -164,6 +164,97 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
             if str(item.get("knowledge_base_id") or "").strip() in allowed_kb_ids
         ]
 
+    def _get_document_knowledge_base_id(doc_uid: str) -> str:
+        """按文档标识读取所属知识库。"""
+
+        normalized_doc_uid = str(doc_uid or "").strip()
+        if not normalized_doc_uid:
+            raise ValidationAppError("doc_uid 不能为空")
+        connection = create_connection(settings.sqlite_db_path)
+        try:
+            row = connection.execute(
+                """
+                SELECT knowledge_base_id
+                FROM documents
+                WHERE doc_uid = ?
+                """,
+                (normalized_doc_uid,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if not row:
+            raise NotFoundAppError("文档不存在", details={"doc_uid": normalized_doc_uid})
+        return str(row["knowledge_base_id"] or "").strip()
+
+    def _get_quality_result_knowledge_base_id(check_id: str) -> str:
+        """按质检结果标识读取所属知识库。"""
+
+        normalized_check_id = str(check_id or "").strip()
+        if not normalized_check_id:
+            raise ValidationAppError("check_id 不能为空")
+        connection = create_connection(settings.sqlite_db_path)
+        try:
+            row = connection.execute(
+                """
+                SELECT knowledge_base_id
+                FROM quality_checks
+                WHERE check_id = ?
+                """,
+                (normalized_check_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if not row:
+            raise NotFoundAppError("质检结果不存在", details={"check_id": normalized_check_id})
+        return str(row["knowledge_base_id"] or "").strip()
+
+    def _get_claim_knowledge_base_id(claim_id: str) -> str:
+        """按 Claim 标识读取所属知识库。"""
+
+        normalized_claim_id = str(claim_id or "").strip()
+        if not normalized_claim_id:
+            raise ValidationAppError("claim_id 不能为空")
+        connection = create_connection(settings.sqlite_db_path)
+        try:
+            row = connection.execute(
+                """
+                SELECT q.knowledge_base_id
+                FROM quality_claims qc
+                JOIN quality_checks q ON q.check_id = qc.check_id
+                WHERE qc.claim_id = ?
+                """,
+                (normalized_claim_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if not row:
+            raise NotFoundAppError("Claim 不存在", details={"claim_id": normalized_claim_id})
+        return str(row["knowledge_base_id"] or "").strip()
+
+    def _ensure_document_access(current_user: User, doc_uid: str | None) -> None:
+        """校验当前用户是否有权访问指定文档。"""
+
+        normalized_doc_uid = str(doc_uid or "").strip()
+        if not normalized_doc_uid:
+            return
+        _ensure_knowledge_base_access(current_user, _get_document_knowledge_base_id(normalized_doc_uid))
+
+    def _ensure_documents_access(current_user: User, doc_uids: list[str]) -> None:
+        """校验当前用户是否有权访问一组文档。"""
+
+        for doc_uid in doc_uids:
+            _ensure_document_access(current_user, doc_uid)
+
+    def _ensure_quality_result_access(current_user: User, check_id: str) -> None:
+        """校验当前用户是否有权访问指定质检结果。"""
+
+        _ensure_knowledge_base_access(current_user, _get_quality_result_knowledge_base_id(check_id))
+
+    def _ensure_claim_access(current_user: User, claim_id: str) -> None:
+        """校验当前用户是否有权访问指定 Claim。"""
+
+        _ensure_knowledge_base_access(current_user, _get_claim_knowledge_base_id(claim_id))
+
     @app.exception_handler(AppError)
     async def handle_app_error(_, exc: AppError) -> JSONResponse:
         """统一应用异常响应。"""
@@ -198,10 +289,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.post("/ingest/rebuild", response_model=ApiResponse)
     def rebuild_documents(
         request: IngestRebuildRequest,
-        _current_user: User = Depends(require_tab_access("知识库管理")),
+        current_user: User = Depends(require_tab_access("知识库管理")),
     ) -> ApiResponse:
         """接受文档重建请求。"""
 
+        _ensure_documents_access(current_user, request.doc_uids)
         accepted = ingest_service.rebuild_documents(
             request.doc_uids,
             rebuild_fulltext=request.rebuild_fulltext,
@@ -220,6 +312,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     ) -> ApiResponse:
         """查询入库状态。"""
 
+        _ensure_document_access(current_user, doc_uid)
         _ensure_knowledge_base_access(current_user, knowledge_base_id)
         items, total = ingest_service.list_status(
             doc_uid=doc_uid,
@@ -289,6 +382,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     ) -> ApiResponse:
         """执行最小质检。"""
 
+        _ensure_document_access(current_user, request.doc_uid)
         _ensure_knowledge_base_access(current_user, request.knowledge_base_id)
         if not request.input_text.strip():
             raise ValidationAppError("input_text 不能为空")
@@ -341,10 +435,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.get("/quality/result/{check_id}", response_model=ApiResponse)
     def get_quality_result(
         check_id: str,
-        _current_user: User = Depends(require_tab_access("AI 质检")),
+        current_user: User = Depends(require_tab_access("AI 质检")),
     ) -> ApiResponse:
         """查询质检结果。"""
 
+        _ensure_quality_result_access(current_user, check_id)
         result = quality_service.get_result(check_id)
         if not result:
             raise NotFoundAppError("质检结果不存在", details={"check_id": check_id})
@@ -353,10 +448,11 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     @app.post("/review/submit", response_model=ApiResponse)
     def submit_review(
         request: ReviewSubmitRequest,
-        _current_user: User = Depends(require_tab_access("人工审核")),
+        current_user: User = Depends(require_tab_access("人工审核")),
     ) -> ApiResponse:
         """提交审核动作。"""
 
+        _ensure_claim_access(current_user, request.claim_id)
         result = review_service.submit_review(
             claim_id=request.claim_id,
             review_action=request.review_action,

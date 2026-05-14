@@ -551,17 +551,17 @@ def bind_document_events(
     )
     scan_button.click(
         fn=load_document_management_state_ui,
-        inputs=[document_knowledge_base],
+        inputs=[document_knowledge_base, login_state],
         outputs=document_outputs[4:],
     )
     move_document_button.click(
         fn=reassign_selected_document_ui,
-        inputs=[document_choices, document_target_knowledge_base, document_knowledge_base],
+        inputs=[document_choices, document_target_knowledge_base, document_knowledge_base, login_state],
         outputs=[register_result, *document_outputs[4:]],
     )
     document_choices.input(
         fn=inspect_document_ui,
-        inputs=[document_choices, document_knowledge_base],
+        inputs=[document_choices, document_knowledge_base, login_state],
         outputs=[
             document_detail,
             register_button,
@@ -599,22 +599,22 @@ def bind_document_events(
     )
     register_button.click(
         fn=register_selected_document_ui,
-        inputs=[document_choices, document_knowledge_base],
+        inputs=[document_choices, document_knowledge_base, login_state],
         outputs=[register_result, *document_outputs[4:]],
     )
     register_all_button.click(
         fn=register_all_documents_ui,
-        inputs=[document_knowledge_base],
+        inputs=[document_knowledge_base, login_state],
         outputs=[register_result, *document_outputs[4:]],
     )
     status_button.click(
         fn=query_ingest_status_ui,
-        inputs=[document_knowledge_base],
+        inputs=[document_knowledge_base, login_state],
         outputs=document_outputs[4:],
     )
     rebuild_button.click(
         fn=rebuild_selected_document_ui,
-        inputs=[document_choices, document_knowledge_base],
+        inputs=[document_choices, document_knowledge_base, login_state],
         outputs=[rebuild_result, *document_outputs[4:-1], document_quality_result_export_result],
     )
     document_quality_run_button.click(
