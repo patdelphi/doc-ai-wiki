@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wiki-donge"
+name = "doc-ai-wiki"
 version = "0.5"
-description = "中文知识库系统 MVP"
+description = "基于文档的知识库AI查询系统"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [

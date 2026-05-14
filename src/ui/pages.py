@@ -118,8 +118,8 @@ from src.ui.viewmodels import (
 
 
 RECENT_QUALITY_FETCH_LIMIT = 200
-AUTH_SESSION_STORAGE_KEY = "wiki-donge-auth-session"
-AUTH_SESSION_SECRET = "wiki_donge_auth_session_v1"
+AUTH_SESSION_STORAGE_KEY = "doc-ai-wiki-auth-session"
+AUTH_SESSION_SECRET = "doc_ai_wiki_auth_session_v1"
 MAIN_TAB_NAMES = list(AUTH_TAB_NAMES)
 MAIN_TAB_IDS = {
     "待开通": "main-tab-pending-access",
@@ -5073,7 +5073,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *_build_review_permission_updates(session),
         )
 
-    with gr.Blocks(title="中文知识库系统") as demo:
+    with gr.Blocks(title="基于文档的知识库AI查询系统") as demo:
         login_state = gr.State(_empty_login_session())
         persisted_login_state = gr.BrowserState(
             _empty_login_session(),
@@ -5083,7 +5083,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         # 登录页面
         with gr.Column(elem_id="auth-page", visible=False) as auth_page:
             with gr.Column(elem_id="auth-center-container"):
-                gr.Markdown("# 中文知识库系统")
+                gr.Markdown("# 基于文档的知识库AI查询系统")
                 auth_login_form = gr.Column(elem_id="auth-login-form", visible=True)
                 with auth_login_form:
                     gr.Markdown("### 登录")

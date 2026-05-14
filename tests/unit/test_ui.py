@@ -1169,7 +1169,7 @@ def test_login_state_should_use_browser_persistence_and_restore_handler(tmp_path
 
     browser_state_components = [component for component in components if component.get("type") == "browserstate"]
     assert browser_state_components
-    assert browser_state_components[0].get("props", {}).get("storage_key") == "wiki-donge-auth-session"
+    assert browser_state_components[0].get("props", {}).get("storage_key") == "doc-ai-wiki-auth-session"
 
     dependency_pairs = [
         (getattr(block_fn.fn, "__name__", ""), dependency)

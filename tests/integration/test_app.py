@@ -187,7 +187,7 @@ def test_app_metadata_should_expose_current_version(tmp_path: Path) -> None:
 
     app = create_app(build_test_settings(tmp_path))
 
-    assert app.title == "中文知识库系统 MVP"
+    assert app.title == "基于文档的知识库AI查询系统"
     assert app.version == "0.5"
 
 

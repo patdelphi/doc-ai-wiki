@@ -22,7 +22,7 @@
 
 默认工作目录：
 
-- 项目根目录：`c:\Users\patde\Documents\GitHub\wiki-donge`
+- 项目根目录：`c:\Users\patde\Documents\GitHub\doc-ai-wiki`
 
 建议默认路径：
 

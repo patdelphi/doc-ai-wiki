@@ -71,7 +71,7 @@ FastAPI 服务层
 ## 三、建议目录结构
 
 ```text
-wiki-donge/
+doc-ai-wiki/
 ├── Docs/
 │   ├── tasks.MD
 │   ├── design.MD
