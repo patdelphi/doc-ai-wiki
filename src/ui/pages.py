@@ -2906,14 +2906,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         current_recent_page: int | float,
         knowledge_base_choice: str | None,
         history_scope_value: str | None,
+        evt: gr.SelectData,
         login_session: dict[str, object] | None = None,
-        evt: gr.SelectData | None = None,
     ) -> tuple:
         """点击最近质检记录后，输出分页后的 AI 质检界面状态。"""
 
-        if evt is None and login_session is not None and not isinstance(login_session, dict):
-            evt = login_session
-            login_session = None
         results = load_recent_quality_runtime_results(knowledge_base_choice, login_session) or (recent_results or [])
         filtered_results = filter_recent_quality_results(results, history_scope_value)
         if not filtered_results:

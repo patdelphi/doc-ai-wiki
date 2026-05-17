@@ -1,6 +1,25 @@
 """程序说明：UI 样式常量。"""
 
 UI_CSS = UI_CSS = """
+/* 最近质检记录表格列宽优化 */
+#quality-recent-table table { table-layout: fixed !important; width: 100% !important; }
+#quality-recent-table table th:nth-child(1),
+#quality-recent-table table td:nth-child(1) { width: 4% !important; text-align: center; }
+#quality-recent-table table th:nth-child(2),
+#quality-recent-table table td:nth-child(2) { width: 18% !important; }
+#quality-recent-table table th:nth-child(3),
+#quality-recent-table table td:nth-child(3) { width: 10% !important; }
+#quality-recent-table table th:nth-child(4),
+#quality-recent-table table td:nth-child(4) { width: 8% !important; }
+#quality-recent-table table th:nth-child(5),
+#quality-recent-table table td:nth-child(5) { width: 6% !important; text-align: center; }
+#quality-recent-table table th:nth-child(6),
+#quality-recent-table table td:nth-child(6) { width: 8% !important; text-align: center; }
+#quality-recent-table table th:nth-child(7),
+#quality-recent-table table td:nth-child(7) { width: 14% !important; }
+#quality-recent-table table th:nth-child(8),
+#quality-recent-table table td:nth-child(8) { width: 32% !important; overflow: hidden; text-overflow: ellipsis; }
+
 #search-top-row {
   align-items: stretch !important;
   gap: 12px !important;
