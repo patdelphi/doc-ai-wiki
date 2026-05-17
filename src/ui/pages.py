@@ -4985,7 +4985,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             gr.update(visible=show_pending_access_tab),
             *tab_visibility_updates,
             gr.update(value=_render_pending_access_html(session)),
-            gr.update(selected=_resolve_default_main_tab_id(session)),
+            gr.update(),
             knowledge_base_update,
             knowledge_base_update,
             knowledge_base_update,
@@ -5108,7 +5108,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             with gr.Row(elem_id="auth-header-actions"):
                 auth_user_display = gr.HTML(value="", elem_id="auth-user-display")
                 auth_logout_btn = gr.Button("退出登录", elem_id="auth-logout-btn", variant="secondary")
-            with gr.Tabs(elem_id="main-tabs", selected=MAIN_TAB_IDS["AI 质检"]) as main_tabs:
+            with gr.Tabs(elem_id="main-tabs") as main_tabs:
                 with gr.Tab("待开通", visible=False, id=MAIN_TAB_IDS["待开通"]) as pending_access_tab:
                     pending_access_view = gr.HTML(
                         value=_render_pending_access_html(_empty_login_session()),
