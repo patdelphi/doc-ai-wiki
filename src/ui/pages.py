@@ -165,9 +165,9 @@ def _build_quality_dummy_history_rows() -> list[list[str]]:
     """返回 AI 质检 dummy 的静态历史记录。"""
 
     return [
-        ["当前", "chk_20260504_001", "classical_claim_review", "需复核", "4 条", "2 条", "2026-05-08 15:58", "阿胶可以直接替代所有补血药"],
-        ["-", "chk_20260503_004", "general_fact_check", "部分通过", "6 条", "1 条", "2026-05-07 18:20", "《神农本草经》明确记载阿胶用于延年不老"],
-        ["-", "chk_20260502_002", "risk_first_screening", "低风险", "5 条", "0 条", "2026-05-06 09:12", "阿胶在古籍中常与补血场景关联"],
+        ["chk_20260504_001", "classical_claim_review", "需复核", "4 条", "2 条", "2026-05-08 15:58", "阿胶可以直接替代所有补血药"],
+        ["chk_20260503_004", "general_fact_check", "部分通过", "6 条", "1 条", "2026-05-07 18:20", "《神农本草经》明确记载阿胶用于延年不老"],
+        ["chk_20260502_002", "risk_first_screening", "低风险", "5 条", "0 条", "2026-05-06 09:12", "阿胶在古籍中常与补血场景关联"],
     ]
 
 
@@ -2933,9 +2933,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             selected_row = get_row_from_paged_table(
                 fresh_page_rows or fallback_page_rows,
                 evt,
-                id_column_index=2,
+                id_column_index=1,
             )
-            selected_check_id = str(selected_row[2] if len(selected_row) > 2 else "")
+            selected_check_id = str(selected_row[1] if len(selected_row) > 1 else "")
         selected_index = next(
             (index for index, item in enumerate(filtered_results) if str(item.get("check_id") or "") == selected_check_id),
             -1,
@@ -2974,7 +2974,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         outputs[13] = gr.update(value=outputs[13])
         outputs[15] = gr.update(value=outputs[15])
         outputs[17] = rebuild_readonly_dataframe(
-            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+            headers=["序号", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
             rows=outputs[17],
             label="最近质检记录",
             elem_id="quality-recent-table",
@@ -5340,11 +5340,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                 elem_id="quality-dummy-history-scope",
                             )
                             quality_dummy_history = gr.Dataframe(
-                                headers=["当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
-                                datatype=["str"] * 8,
+                                headers=["质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+                                datatype=["str"] * 7,
                                 interactive=False,
                                 row_count=3,
-                                column_count=8,
+                                column_count=7,
                                 label="最近质检记录",
                                 elem_id="quality-dummy-history-table",
                                 value=quality_dummy_history_rows,

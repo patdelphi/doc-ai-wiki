@@ -2475,7 +2475,6 @@ def build_recent_quality_rows(quality_results: list[dict] | None, *, active_chec
     rows = quality_results or []
     return [
         [
-            "当前" if str(item.get("check_id") or "") == str(active_check_id or "") else "",
             _display_text(item.get("check_id")),
             _display_text(item.get("template_name")),
             _format_verdict_label(item.get("overall_verdict")),

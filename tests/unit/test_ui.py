@@ -446,7 +446,7 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert claim_selectors[0].get("label") == "Claim 列表"
     assert evidence_tables and evidence_tables[0].get("max_height") == 420
     assert recent_tables and recent_tables[0].get("max_height") == 420
-    assert recent_tables[0].get("column_count", [])[0] == 9
+    assert recent_tables[0].get("column_count", [])[0] == 8
     # 验证面板顺序：summary → claim → evidence → history → action → evaluation
     assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
     assert elem_ids.index("quality-claim-row") < elem_ids.index("quality-evidence-list-panel")
@@ -542,7 +542,7 @@ def test_create_ui_app_should_include_quality_dummy_workspace(tmp_path: Path) ->
     assert "效果评测样例 JSON" in labels
     assert evidence_tables and evidence_tables[0].get("column_count", [])[0] == 9
     assert evidence_tables[0].get("max_height") == 420
-    assert history_tables and history_tables[0].get("column_count", [])[0] == 8
+    assert history_tables and history_tables[0].get("column_count", [])[0] == 7
     assert history_tables[0].get("max_height") == 420
     assert evaluation_tables and evaluation_tables[0].get("column_count", [])[0] == 15
     assert elem_ids.index("quality-dummy-row-1") < elem_ids.index("quality-dummy-template-panel")
@@ -991,7 +991,8 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
 
     assert pending_tab_update["visible"] is False
     assert quality_tab_update["visible"] is True
-    assert main_tabs_update["selected"] == "main-tab-quality"
+    # Gradio 6.x workaround: main_tabs 不再设置 selected，避免 Dataframe select 后 Tabs 跳转
+    assert "selected" not in main_tabs_update
 
 
 def test_restore_login_session_should_clear_review_workspace_without_kb_permission(tmp_path: Path) -> None:
@@ -1144,7 +1145,7 @@ def test_save_settings_user_permissions_ui_should_refresh_current_login_session(
     assert refreshed_session["permissions"]["tab_names"] == ["知识库检索"]
     assert refreshed_session["permissions"]["kb_ids"] == []
     assert pending_tab_update["visible"] is False
-    assert main_tabs_update["selected"] == "main-tab-search"
+    assert "selected" not in main_tabs_update
     assert settings_tab_update["visible"] is False
     assert search_tab_update["visible"] is True
 
@@ -2424,11 +2425,9 @@ def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: 
     assert "第 2 / 2 页" in recent_page_info["value"]
     assert recent_state == recent_results
     assert recent_rows.get("__type__") == "update"
-    assert recent_rows.get("value", [])[0][1] == ""
-    assert recent_rows.get("value", [])[0][2] == "chkres_a"
-    assert recent_rows.get("value", [])[1][1] == "当前"
-    assert recent_rows.get("value", [])[1][2] == "chkres_b"
-    assert recent_rows.get("value", [])[1][6] == "4"
+    assert recent_rows.get("value", [])[0][1] == "chkres_a"
+    assert recent_rows.get("value", [])[1][1] == "chkres_b"
+    assert recent_rows.get("value", [])[1][5] == "4"
     assert "已加载历史质检记录" in progress_html["value"]
     assert "模板二" in result_html["value"]
     assert "当前激活质检" in active_check_html["value"]
@@ -2539,7 +2538,7 @@ def test_list_recent_quality_results_ui_should_support_pending_history_filter(tm
 
     assert len(recent_state) == 1
     assert recent_state[0]["check_id"] == "chkres_pending_only"
-    assert recent_rows == [["1", "当前", "chkres_pending_only", "模板一", "需复核", "1", "1", "26-05-01 20:00", "待处理任务"]]
+    assert recent_rows == [["1", "chkres_pending_only", "模板一", "需复核", "1", "1", "26-05-01 20:00", "待处理任务"]]
 
 
 def test_list_recent_quality_results_ui_should_hide_history_without_kb_permission(tmp_path: Path) -> None:

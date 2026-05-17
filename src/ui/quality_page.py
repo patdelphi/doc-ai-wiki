@@ -172,11 +172,11 @@ def build_quality_tab(
             elem_id="quality-history-scope",
         )
         recent_quality_checks = gr.Dataframe(
-            headers=["序号", "当前", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
-            datatype=["str"] * 9,
+            headers=["序号", "质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
+            datatype=["str"] * 8,
             interactive=False,
             row_count=TABLE_PAGE_SIZE,
-            column_count=9,
+            column_count=8,
             label="最近质检记录",
             buttons=[],
             elem_id="quality-recent-table",

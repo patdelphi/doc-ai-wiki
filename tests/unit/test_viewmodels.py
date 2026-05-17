@@ -1044,7 +1044,7 @@ def test_operation_and_history_display_helpers_should_generate_readable_content(
 
     assert "执行状态：成功" in operation_markdown
     assert "最后进度：100%" in operation_markdown
-    assert quality_rows == [["", "check_1", "严格证据核验", "需复核", "2", "1", "26-04-30 20:00", "测试输入"]]
+    assert quality_rows == [["check_1", "严格证据核验", "需复核", "2", "1", "26-04-30 20:00", "测试输入"]]
     assert review_rows == [["rev_1", "claim_1", "通过", "已通过", "tester", "26-04-30 20:30", "通过", "第一条结论"]]
 
 
