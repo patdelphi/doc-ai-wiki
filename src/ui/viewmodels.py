@@ -2469,7 +2469,7 @@ def format_recent_quality_checks(quality_results: list[dict]) -> list[dict]:
     return formatted
 
 
-def build_recent_quality_rows(quality_results: list[dict] | None, *, active_check_id: str | None = None) -> list[list[str]]:
+def build_recent_quality_rows(quality_results: list[dict] | None) -> list[list[str]]:
     """将最近质检记录转换为表格行。"""
 
     rows = quality_results or []

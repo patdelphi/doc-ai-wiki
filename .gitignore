@@ -23,3 +23,6 @@ anthropic_skills_temp/
 skill_install_temp/
 .claude/
 .trae/
+
+# 运行时数据库文件
+data/

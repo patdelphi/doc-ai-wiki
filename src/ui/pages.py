@@ -1937,12 +1937,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def build_recent_quality_table_page_outputs(
         recent_results: list[dict] | None,
         page: int | float | None = 1,
-        active_check_id: str | None = None,
     ) -> tuple[list[list[object]], int, str]:
         """构建最近质检记录分页输出。"""
 
         recent_payload = format_recent_quality_checks(recent_results or [])
-        full_rows = build_recent_quality_rows(recent_payload, active_check_id=active_check_id)
+        full_rows = build_recent_quality_rows(recent_payload)
         page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
             full_rows,
             page,
@@ -2102,7 +2101,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         recent_page_rows, recent_page_value, recent_page_info = build_recent_quality_table_page_outputs(
             recent_results,
             recent_page,
-            active_check_id=str(((formatted_result or {}).get("check") or {}).get("check_id") or ""),
         )
         return (
             progress_html,
@@ -2827,7 +2825,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         recent_payload = format_recent_quality_checks(results)
         recent_rows = build_recent_quality_rows(
             recent_payload,
-            active_check_id=str(selected_result.get("check_id") or ""),
         )
         selected_formatted = format_quality_result(
             {
@@ -3473,7 +3470,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     recent_results=recent_results,
                     recent_rows=build_recent_quality_rows(
                         recent_results,
-                        active_check_id=current_recent_result.get("check_id"),
                     ),
                 )
                 return
@@ -4922,21 +4918,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
-
-    def _resolve_default_main_tab_id(session: dict[str, object] | None) -> str:
-        """根据当前登录态决定主菜单默认落点。"""
-
-        is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
-        logged_in = bool(isinstance(session, dict) and str(session.get("user_id") or "").strip())
-        if logged_in and not is_admin and allowed_tabs is not None and not allowed_tabs:
-            return MAIN_TAB_IDS["待开通"]
-        if is_admin or allowed_tabs is None:
-            return MAIN_TAB_IDS["AI 质检"]
-        for tab_name in MAIN_TAB_NAMES:
-            if tab_name in allowed_tabs:
-                return MAIN_TAB_IDS.get(tab_name, MAIN_TAB_IDS["AI 质检"])
-        return MAIN_TAB_IDS["待开通"] if logged_in else MAIN_TAB_IDS["AI 质检"]
-
     def _build_quality_permission_updates(
         session: dict[str, object] | None,
         history_scope_value: str | None = None,
