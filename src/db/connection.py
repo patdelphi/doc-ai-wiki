@@ -55,6 +55,7 @@ def initialize_database(database_path: Path) -> None:
         _ensure_quality_claim_columns(connection)
         _ensure_review_record_foreign_key(connection)
         _backfill_knowledge_base_columns(connection)
+        _ensure_default_admin(connection)
 
 
 def _ensure_auth_tables(connection: sqlite3.Connection) -> None:
@@ -266,6 +267,81 @@ def _backfill_knowledge_base_columns(connection: sqlite3.Connection) -> None:
         WHERE knowledge_base_id IS NULL OR TRIM(knowledge_base_id) = ''
         """
     )
+
+
+def _ensure_default_admin(connection: sqlite3.Connection) -> None:
+    """确保存在默认 admin 用户（用户名/密码均为 admin），并开通全部权限。"""
+
+    import hashlib
+    import os
+    import time
+    import uuid
+
+    row = connection.execute("SELECT user_id, is_admin FROM users WHERE username = ?", ("admin",)).fetchone()
+    if row:
+        # admin 已存在，确保是管理员且拥有全部权限
+        user_id = row[0]
+        connection.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (user_id,))
+    else:
+        # admin 不存在，创建之
+        user_id = str(uuid.uuid4())
+        salt = os.urandom(16).hex()
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256",
+            b"admin",
+            salt.encode("utf-8"),
+            390000,
+        ).hex()
+        password_hash = f"pbkdf2_sha256$390000${salt}${password_hash}"
+        created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        connection.execute(
+            "INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at) VALUES (?, ?, ?, 1, 1, ?, ?)",
+            (user_id, "admin", password_hash, created_at, created_at)
+        )
+
+    # 确保 admin 拥有所有 tab 和知识库的访问权限
+    user_id_row = connection.execute("SELECT user_id FROM users WHERE username = ?", ("admin",)).fetchone()
+    if not user_id_row:
+        return
+    user_id = user_id_row[0]
+
+    # 赋予所有 tab 权限
+    tab_names = [
+        "AI 质检",
+        "人工审核",
+        "知识库管理",
+        "知识库检索",
+        "功能设置",
+    ]
+    for tab_name in tab_names:
+        connection.execute(
+            "INSERT OR IGNORE INTO user_tab_access (user_id, tab_name) VALUES (?, ?)",
+            (user_id, tab_name)
+        )
+
+    # 赋予所有知识库权限
+    kb_rows = connection.execute("SELECT knowledge_base_id FROM knowledge_bases").fetchall()
+    for kb_row in kb_rows:
+        connection.execute(
+            "INSERT OR IGNORE INTO user_kb_access (user_id, knowledge_base_id) VALUES (?, ?)",
+            (user_id, kb_row[0])
+        )
+
+    # 确保 user_permissions 标记存在
+    updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+    connection.execute(
+        """
+        INSERT INTO user_permissions (user_id, permissions_json, updated_at)
+        VALUES (?, '{}', ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            permissions_json = excluded.permissions_json,
+            updated_at = excluded.updated_at
+        """,
+        (user_id, updated_at),
+    )
+
+    connection.commit()
 
 
 def _ensure_review_record_foreign_key(connection: sqlite3.Connection) -> None:

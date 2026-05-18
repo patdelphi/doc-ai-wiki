@@ -18,16 +18,28 @@ def create_auth_service(database_path: Path) -> tuple[sqlite3.Connection, AuthSe
     return connection, AuthService(connection)
 
 
-def test_auth_service_should_not_create_default_admin_implicitly(tmp_path: Path) -> None:
-    """认证服务初始化时不应再自动创建弱口令管理员。"""
+def test_auth_service_should_create_default_admin_on_initialization(tmp_path: Path) -> None:
+    """数据库初始化时应自动创建 admin/admin 用户并开通全部权限。"""
 
     connection, auth_service = create_auth_service(tmp_path / "app.db")
-    _ = auth_service
 
-    count = connection.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'").fetchone()[0]
+    # admin 用户应存在
+    admin_row = connection.execute("SELECT user_id, is_admin FROM users WHERE username = 'admin'").fetchone()
+    assert admin_row is not None
+    assert admin_row["is_admin"] == 1
+
+    # 应能用 admin/admin 登录
+    user = auth_service.authenticate("admin", "admin")
+    assert user is not None
+    assert user.username == "admin"
+    assert user.is_admin is True
+
+    # admin 应拥有全部 tab 和知识库权限
+    permissions = auth_service.get_user_permissions(admin_row["user_id"])
+    assert permissions is not None
+    assert set(permissions.tab_names) == {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}
+
     connection.close()
-
-    assert count == 0
 
 
 def test_authenticate_should_reject_inactive_user(tmp_path: Path) -> None:
@@ -121,6 +133,9 @@ def test_list_users_should_include_registered_non_admin_users(tmp_path: Path) ->
     target_user = next(item for item in users if item["username"] == "list_user")
     assert target_user["is_admin"] is False
     assert str(target_user["user_id"]).strip() != ""
+    # admin 用户也应存在
+    admin_user = next(item for item in users if item["username"] == "admin")
+    assert admin_user["is_admin"] is True
 
 
 def test_update_user_permissions_should_persist_tabs_and_knowledge_bases(tmp_path: Path) -> None:

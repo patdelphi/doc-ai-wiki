@@ -960,18 +960,10 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
     )
     initialize_database(settings.sqlite_db_path)
     with sqlite3.connect(settings.sqlite_db_path) as connection:
+        # admin 已由 initialize_database 自动创建，只需更新密码
         connection.execute(
-            """
-            INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at)
-            VALUES (?, ?, ?, 1, 1, ?, ?)
-            """,
-            (
-                "admin-user-001",
-                "admin",
-                "pbkdf2_sha256$1$test$hash",
-                "2026-05-14 00:00:00",
-                "2026-05-14 00:00:00",
-            ),
+            "UPDATE users SET password_hash = ?, user_id = ? WHERE username = 'admin'",
+            ("pbkdf2_sha256$1$test$hash", "admin-user-001")
         )
         connection.commit()
     with sqlite3.connect(settings.sqlite_db_path) as connection:
