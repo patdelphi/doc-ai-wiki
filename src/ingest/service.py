@@ -24,13 +24,14 @@ from src.retrieval.vector_store import VectorStore
 class IngestService:
     """文档入库服务。"""
 
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(self, settings: AppSettings, *, vector_store: VectorStore | None = None) -> None:
+        """初始化入库服务。C4 修复：接受外部注入 vector_store 避免重复创建。"""
         self.settings = settings
         self.document_repository = DocumentRepository(settings.sqlite_db_path)
         self.job_repository = IngestJobRepository(settings.sqlite_db_path)
         self.quality_config_service = IngestQualityConfigService(settings.templates_dir)
         self.knowledge_base_service = KnowledgeBaseService(settings.sqlite_db_path, settings.input_root)
-        self.vector_store = VectorStore(
+        self.vector_store = vector_store or VectorStore(
             settings.chroma_persist_dir,
             embedding_client=build_embedding_client(settings),
             sqlite_db_path=settings.sqlite_db_path,
@@ -100,6 +101,14 @@ class IngestService:
         file_path = Path(document["file_path"])
         if not file_path.is_absolute():
             file_path = Path.cwd() / file_path
+        # C5 修复：校验文件路径是否在允许的输入目录内，防止路径遍历
+        resolved_path = file_path.resolve()
+        resolved_input_root = self.settings.input_root.resolve()
+        if not str(resolved_path).startswith(str(resolved_input_root)):
+            raise ValidationAppError(
+                "文件路径不在允许的输入目录内",
+                details={"file_path": str(file_path), "input_root": str(resolved_input_root)},
+            )
         if not file_path.exists():
             raise NotFoundAppError("文档文件不存在", details={"file_path": str(file_path)})
         resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(
@@ -712,6 +721,8 @@ class IngestService:
                         "section_id": section_id,
                         "source_span": source_span,
                         "content": chunk_content,
+                        # H7 修复：写入知识库 ID，供向量检索按知识库过滤
+                        "knowledge_base_id": knowledge_base_id,
                     }
                     chunk_items.append(chunk_item)
                     connection.execute(

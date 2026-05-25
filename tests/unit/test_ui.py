@@ -2653,7 +2653,7 @@ def test_list_review_workspace_ui_should_hide_review_data_without_kb_permission(
     )
     ReviewService(settings.sqlite_db_path).submit_review(
         claim_id="review_claim_default_only",
-        review_action="approve",
+        review_action="approved",
         reviewed_verdict=None,
         review_note="默认库审核记录",
         reviewer="reviewer_1",

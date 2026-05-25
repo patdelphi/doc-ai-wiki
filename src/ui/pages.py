@@ -5942,10 +5942,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 return gr.update(visible=False), gr.update(visible=True)
 
             def _do_register(username, password, password_confirm):
-                if password != password_confirm:
-                    return format_operation_result_html({"success": False, "message": "两次密码不一致"}, title="注册失败")
-                success, msg = auth_service.register_user(username, password)
-                return format_operation_result_html({"success": success, "message": msg}, title="注册成功" if success else "注册失败")
+                # M10 修复：添加异常处理，防止注册失败时泄露内部堆栈信息
+                try:
+                    if password != password_confirm:
+                        return format_operation_result_html({"success": False, "message": "两次密码不一致"}, title="注册失败")
+                    success, msg = auth_service.register_user(username, password)
+                    return format_operation_result_html({"success": success, "message": msg}, title="注册成功" if success else "注册失败")
+                except Exception as e:
+                    return format_operation_result_html({"success": False, "message": f"注册失败: {e}"}, title="注册失败")
 
             def _do_logout():
                 return _empty_login_session()

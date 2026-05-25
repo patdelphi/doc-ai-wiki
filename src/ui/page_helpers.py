@@ -280,9 +280,11 @@ def get_selected_search_item_from_page_rows(
 
 
 def format_table_pagination_html(page_info: str) -> str:
-    """格式化表格分页提示。"""
+    """格式化表格分页提示。M9 修复：对 page_info 做 HTML 转义防止 XSS。"""
 
-    return f"<div style='padding: 6px 2px 0 2px; color: #6b7280; font-size: 12px;'>{page_info}</div>"
+    from html import escape
+    safe_page_info = escape(str(page_info))
+    return f"<div style='padding: 6px 2px 0 2px; color: #6b7280; font-size: 12px;'>{safe_page_info}</div>"
 
 
 def resolve_table_row_count(rows: list[list[object]] | None, *, default_rows: int = TABLE_PAGE_SIZE) -> int:

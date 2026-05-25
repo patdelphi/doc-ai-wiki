@@ -96,10 +96,10 @@ def test_retrieval_service_should_rerank_hybrid_results() -> None:
 
     service = RetrievalService(Path("test.db"))
     service.set_reranker(StubReranker())
-    service.fulltext_search = lambda query, top_k=5, doc_uid=None: [  # type: ignore[method-assign]
+    service.fulltext_search = lambda query, top_k=5, doc_uid=None, knowledge_base_id=None: [  # type: ignore[method-assign]
         {"chunk_id": "c1", "doc_uid": "doc_1", "doc_title": "文档1", "content": "第一段", "retrieval_source": "fulltext"}
     ]
-    service.vector_search = lambda query, top_k=5, doc_uid=None: [  # type: ignore[method-assign]
+    service.vector_search = lambda query, top_k=5, doc_uid=None, knowledge_base_id=None: [  # type: ignore[method-assign]
         {"chunk_id": "c2", "doc_uid": "doc_1", "doc_title": "文档1", "content": "第二段", "retrieval_source": "vector"}
     ]
 

@@ -12,6 +12,9 @@ from src.db.repositories import QualityRepository
 class ReviewService:
     """审核服务。"""
 
+    # H6 修复：合法审核动作白名单
+    VALID_REVIEW_ACTIONS = {"approved", "rejected", "updated"}
+
     def __init__(self, database_path) -> None:
         self.repository = QualityRepository(database_path)
 
@@ -24,8 +27,14 @@ class ReviewService:
         review_note: str,
         reviewer: str,
     ) -> dict:
-        """写入审核记录。"""
+        """写入审核记录。H6 修复：校验 review_action 合法值。"""
 
+        # 服务端二次校验，防止绕过 Pydantic 直接调用
+        if review_action not in self.VALID_REVIEW_ACTIONS:
+            raise ValidationAppError(
+                "review_action 不合法",
+                details={"allowed": list(self.VALID_REVIEW_ACTIONS), "received": review_action},
+            )
         now = utc_now_iso()
         payload = {
             "review_id": f"rev_{uuid4().hex[:12]}",

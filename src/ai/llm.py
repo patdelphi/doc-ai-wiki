@@ -284,26 +284,57 @@ def _build_quality_prompts(
         f'- 规则: {item.get("rule_code")} | 等级: {item.get("hit_level")} | 原因: {item.get("hit_message")}'
         for item in matched_rules
     ] or ["- 无规则命中"]
-    user_prompt = user_prompt_template.format(
-        claim_text=claim_text,
-        evidence_block="\n".join(evidence_lines),
-        claim_logic_block=claim_logic,
-        rule_block="\n".join(rule_lines),
-    )
+    # M5 修复：使用 try/except 防止自定义模板中的花括号导致崩溃
+    try:
+        user_prompt = user_prompt_template.format(
+            claim_text=claim_text,
+            evidence_block="\n".join(evidence_lines),
+            claim_logic_block=claim_logic,
+            rule_block="\n".join(rule_lines),
+        )
+    except (KeyError, ValueError, IndexError):
+        # 模板中包含未转义的花括号时，回退到默认模板
+        user_prompt = DEFAULT_USER_PROMPT_TEMPLATE.format(
+            claim_text=claim_text,
+            evidence_block="\n".join(evidence_lines),
+            claim_logic_block=claim_logic,
+            rule_block="\n".join(rule_lines),
+        )
     return system_prompt, user_prompt
 
 
+# C3 修复：合法枚举白名单，防止 LLM 返回非法值污染数据库
+_VALID_VERDICTS = {"verified", "needs_review", "rejected"}
+_VALID_JUDGEMENTS = {"support", "contradict", "insufficient"}
+_VALID_RISK_LEVELS = {"low", "medium", "high"}
+
+
 def _parse_llm_result(content: str) -> dict:
-    """解析 LLM 返回的 JSON 结果。"""
+    """解析 LLM 返回的 JSON 结果，并校验枚举值和范围约束。"""
 
     payload = json.loads(content)
     if "verdict" not in payload and isinstance(payload.get("interpretation"), dict):
         payload = payload["interpretation"]
+    # 枚举校验：非法值回退到安全默认值
+    verdict = str(payload.get("verdict", "needs_review"))
+    if verdict not in _VALID_VERDICTS:
+        verdict = "needs_review"
+    evidence_judgement = str(payload.get("evidence_judgement", "insufficient"))
+    if evidence_judgement not in _VALID_JUDGEMENTS:
+        evidence_judgement = "insufficient"
+    risk_level = str(payload.get("risk_level", "medium"))
+    if risk_level not in _VALID_RISK_LEVELS:
+        risk_level = "medium"
+    # confidence 范围约束 [0.0, 1.0]
+    try:
+        confidence = max(0.0, min(1.0, float(payload.get("confidence", 0.2))))
+    except (TypeError, ValueError):
+        confidence = 0.2
     return {
-        "verdict": payload.get("verdict", "needs_review"),
-        "evidence_judgement": payload.get("evidence_judgement", "insufficient"),
-        "confidence": float(payload.get("confidence", 0.2)),
-        "risk_level": payload.get("risk_level", "medium"),
+        "verdict": verdict,
+        "evidence_judgement": evidence_judgement,
+        "confidence": confidence,
+        "risk_level": risk_level,
         "reason": str(payload.get("reason", "")),
     }
 
@@ -319,6 +350,9 @@ def _build_claim_logic_block(claim_text: str) -> str:
         logic_labels.append("全称或绝对化表述")
     if any(marker in text for marker in ("不会", "不能", "没有", "不存在", "绝不", "从不")):
         logic_labels.append("否定性表述")
+    # L1 修复：增加比较型检测
+    if any(marker in text for marker in ("高于", "低于", "强于", "弱于", "优于", "不如", "最多", "最少", "超过", "不少于", "不低于")):
+        logic_labels.append("比较型表述")
     if not logic_labels:
         logic_labels.append("普通事实陈述")
 

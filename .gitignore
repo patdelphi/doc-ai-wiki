@@ -26,3 +26,4 @@ skill_install_temp/
 
 # 运行时数据库文件
 data/
+test.db

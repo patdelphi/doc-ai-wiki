@@ -98,11 +98,12 @@ class RetrievalService:
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
     ) -> list[dict]:
-        """当前阶段先以简单相似替代向量检索占位。"""
+        """H7 修复：向量检索支持按 knowledge_base_id 过滤。"""
 
         if self.vector_store is None:
             return []
-        items = self.vector_store.query(query, top_k=top_k, doc_uid=doc_uid)
+        # H7 修复：将 knowledge_base_id 传递到向量存储层做元数据过滤
+        items = self.vector_store.query(query, top_k=top_k, doc_uid=doc_uid, knowledge_base_id=knowledge_base_id)
         return self._attach_document_metadata(
             items,
             retrieval_source="vector",

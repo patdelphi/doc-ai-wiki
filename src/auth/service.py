@@ -84,7 +84,8 @@ class AuthService:
                 import bcrypt
                 return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
             except ImportError:
-                return self._hash_legacy_password(password) == stored_hash
+                # H3 修复：bcrypt 未安装时使用 hmac.compare_digest 防止时序攻击
+                return hmac.compare_digest(self._hash_legacy_password(password), stored_hash)
         if stored_hash.startswith(f"{self.PASSWORD_SCHEME}$"):
             _, iterations, salt, password_hash = stored_hash.split("$", 3)
             candidate_hash = hashlib.pbkdf2_hmac(
@@ -94,7 +95,8 @@ class AuthService:
                 int(iterations),
             ).hex()
             return hmac.compare_digest(candidate_hash, password_hash)
-        return self._hash_legacy_password(password) == stored_hash
+        # H3 修复：SHA256 遗留路径也使用 hmac.compare_digest
+        return hmac.compare_digest(self._hash_legacy_password(password), stored_hash)
 
     def authenticate(self, username: str, password: str) -> User | None:
         """验证用户名和密码，返回用户对象或 None。"""
@@ -117,19 +119,22 @@ class AuthService:
         )
 
     def get_user_by_id(self, user_id: str) -> User | None:
-        """按用户 ID 获取用户对象。"""
+        """按用户 ID 获取用户对象。H2 修复：同时检查 is_active 状态。"""
         row = self._db.execute(
-            "SELECT user_id, username, password_hash, is_admin, created_at FROM users WHERE user_id = ?",
+            "SELECT user_id, username, password_hash, is_active, is_admin, created_at FROM users WHERE user_id = ?",
             (user_id,),
         ).fetchone()
         if not row:
+            return None
+        # H2 修复：被禁用用户不应通过会话恢复获得访问权限
+        if not bool(row[3]):
             return None
         return User(
             user_id=row[0],
             username=row[1],
             password_hash=row[2],
-            is_admin=bool(row[3]),
-            created_at=row[4],
+            is_admin=bool(row[4]),
+            created_at=row[5],
         )
 
     def register_user(self, username: str, password: str) -> tuple[bool, str]:
@@ -162,20 +167,33 @@ class AuthService:
             self._db.rollback()
             return False, f"注册失败: {e}"
 
-    def change_password(self, user_id: str, new_password: str) -> tuple[bool, str]:
-        """修改用户密码。"""
+    def change_password(self, user_id: str, new_password: str, *, old_password: str | None = None) -> tuple[bool, str]:
+        """修改用户密码，需验证旧密码防止 IDOR 攻击。"""
         if not new_password:
             return False, "密码不能为空"
         if len(new_password) > self.PASSWORD_MAX_LENGTH:
             return False, f"密码长度不能超过{self.PASSWORD_MAX_LENGTH}个字符"
+        # C2 修复：验证旧密码，防止任意用户修改他人密码
+        if old_password is not None:
+            user = self._db.execute(
+                "SELECT password_hash FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            if not user:
+                return False, "用户不存在"
+            if not self._verify_password(user[0], old_password):
+                return False, "旧密码错误"
         password_hash = self._hash_password(new_password)
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
-        self._db.execute(
-            "UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
-            (password_hash, updated_at, user_id)
-        )
-        self._db.commit()
-        return True, "密码修改成功"
+        try:
+            self._db.execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
+                (password_hash, updated_at, user_id)
+            )
+            self._db.commit()
+            return True, "密码修改成功"
+        except Exception as e:
+            self._db.rollback()
+            return False, f"密码修改失败: {e}"
 
     def list_users(self) -> list[dict]:
         """列出所有用户。"""
@@ -193,18 +211,22 @@ class AuthService:
         ]
 
     def delete_user(self, user_id: str) -> tuple[bool, str]:
-        """删除用户（不能删除 admin）。"""
+        """删除用户（不能删除 admin）。H1 修复：添加事务保护。"""
         user = self._db.execute("SELECT username, is_admin FROM users WHERE user_id = ?", (user_id,)).fetchone()
         if not user:
             return False, "用户不存在"
         if user[1] == 1:
             return False, "不能删除 admin 用户"
-        self._db.execute("DELETE FROM user_tab_access WHERE user_id = ?", (user_id,))
-        self._db.execute("DELETE FROM user_kb_access WHERE user_id = ?", (user_id,))
-        self._db.execute("DELETE FROM user_permissions WHERE user_id = ?", (user_id,))
-        self._db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
-        self._db.commit()
-        return True, "用户已删除"
+        try:
+            self._db.execute("DELETE FROM user_tab_access WHERE user_id = ?", (user_id,))
+            self._db.execute("DELETE FROM user_kb_access WHERE user_id = ?", (user_id,))
+            self._db.execute("DELETE FROM user_permissions WHERE user_id = ?", (user_id,))
+            self._db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            self._db.commit()
+            return True, "用户已删除"
+        except Exception as e:
+            self._db.rollback()
+            return False, f"删除用户失败: {e}"
 
     def get_user_permissions(self, user_id: str) -> UserPermission | None:
         """获取用户权限。"""

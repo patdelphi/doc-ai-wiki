@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 def build_request_id() -> str:
@@ -82,10 +83,10 @@ class KnowledgeBaseUpsertRequest(BaseModel):
 
 
 class ReviewSubmitRequest(BaseModel):
-    """审核提交请求。"""
+    """审核提交请求。H6 修复：review_action 限定合法枚举值。"""
 
     claim_id: str
-    review_action: str
+    review_action: Literal["approved", "rejected", "updated"]
     reviewed_verdict: str | None = None
     review_note: str = ""
     reviewer: str = "system"

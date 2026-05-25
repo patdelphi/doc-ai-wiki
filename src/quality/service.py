@@ -148,6 +148,10 @@ class QualityService:
     ) -> Iterator[dict]:
         """流式执行质检，逐步返回进度事件和最终结果。"""
 
+        # M3 修复：空输入校验，防止对空文本执行完整质检流程
+        if not input_text or not input_text.strip():
+            raise ValidationAppError("质检输入文本不能为空")
+
         claims = self._split_claims(input_text)
         selected_template = self.template_service.get_template(template_id)
         retrieval_policy = self._build_retrieval_policy(selected_template)
@@ -636,8 +640,10 @@ class QualityService:
 
     @staticmethod
     def _build_overall_verdict(claim_items: list[dict]) -> str:
-        """根据 claim 结果生成总体结论。"""
+        """根据 claim 结果生成总体结论。M3 修复：空列表保护。"""
 
+        if not claim_items:
+            return "needs_review"
         verdicts = {item["verdict"] for item in claim_items}
         if "rejected" in verdicts:
             return "rejected"
@@ -647,8 +653,10 @@ class QualityService:
 
     @staticmethod
     def _build_overall_risk_level(claim_items: list[dict]) -> str:
-        """聚合 claim 风险为整体风险等级。"""
+        """聚合 claim 风险为整体风险等级。M3 修复：空列表保护。"""
 
+        if not claim_items:
+            return "low"
         priority = {"low": 0, "medium": 1, "high": 2}
         max_level = max(
             (item.get("risk_level", "low") for item in claim_items),

@@ -1,6 +1,6 @@
 """程序说明：UI 样式常量。"""
 
-UI_CSS = UI_CSS = """
+UI_CSS = """
 /* 最近质检记录表格列宽优化 */
 #quality-recent-table table { table-layout: fixed !important; width: 100% !important; }
 #quality-recent-table table th:nth-child(1),

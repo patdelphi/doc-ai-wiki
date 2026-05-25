@@ -137,4 +137,10 @@ CREATE TABLE IF NOT EXISTS review_records (
     created_at TEXT NOT NULL,
     FOREIGN KEY (claim_id) REFERENCES quality_claims (claim_id) ON DELETE CASCADE
 );
+
+-- M6 修复：为高频查询列补充索引
+CREATE INDEX IF NOT EXISTS idx_quality_claims_check_id ON quality_claims (check_id);
+CREATE INDEX IF NOT EXISTS idx_quality_claims_review_status ON quality_claims (review_status);
+CREATE INDEX IF NOT EXISTS idx_rule_hits_check_id ON rule_hits (check_id);
+CREATE INDEX IF NOT EXISTS idx_review_records_claim_id ON review_records (claim_id);
 """

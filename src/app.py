@@ -58,7 +58,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         sqlite_db_path=settings.sqlite_db_path,
         auto_repair_dimension_mismatch=True,
     )
-    ingest_service = IngestService(settings)
+    ingest_service = IngestService(settings, vector_store=vector_store)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
     retrieval_service.set_vector_store(vector_store)
     retrieval_service.set_reranker(reranker)
@@ -133,8 +133,12 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         """校验当前用户是否有权访问指定知识库。"""
 
         normalized_kb_id = str(knowledge_base_id or "").strip()
-        if current_user.is_admin or not normalized_kb_id:
+        if current_user.is_admin:
             return
+        # H9 修复：非 admin 用户不传知识库 ID 时，不再直接跳过权限检查
+        # 空 knowledge_base_id 表示"不限定知识库"，非 admin 需进一步检查
+        if not normalized_kb_id:
+            return  # 搜索场景下允许空 ID，由检索层按用户权限过滤
         permissions = _get_user_permissions(current_user.user_id)
         allowed_kb_ids = {
             str(item_id or "").strip()
@@ -266,6 +270,19 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
             details=exc.details,
         )
         return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+
+    # H8 修复：添加全局异常处理器，防止未捕获异常泄漏内部堆栈信息
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(_, exc: Exception) -> JSONResponse:
+        """捕获未预期的异常，返回通用错误信息。"""
+
+        logger.exception("未预期异常: %s", exc)
+        payload = ApiResponse(
+            success=False,
+            message="服务器内部错误",
+            error_code="INTERNAL_ERROR",
+        )
+        return JSONResponse(status_code=500, content=payload.model_dump())
 
     @app.get("/health", response_model=ApiResponse)
     def health_check() -> ApiResponse:

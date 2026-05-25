@@ -258,7 +258,7 @@ class VectorStore:
         return repaired_docs, repaired_chunks
 
     def upsert_chunks(self, items: list[dict], *, batch_size: int = 8, progress_callback=None) -> None:
-        """批量写入 chunk 向量记录。"""
+        """批量写入 chunk 向量记录。H7 修复：metadata 中增加 knowledge_base_id。"""
 
         if not items:
             return
@@ -272,6 +272,8 @@ class VectorStore:
                     "doc_uid": item["doc_uid"],
                     "chunk_id": item["chunk_id"],
                     "source_span": item.get("source_span") or "",
+                    # H7 修复：写入知识库 ID，支持向量检索按知识库过滤
+                    "knowledge_base_id": item.get("knowledge_base_id") or "",
                 }
                 for item in batch
             ]
@@ -309,16 +311,24 @@ class VectorStore:
             return sum(len(self._to_sequence(item)) for item in ids)
         return len(ids)
 
-    def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None) -> list[dict]:
-        """执行向量检索。"""
+    def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None, knowledge_base_id: str | None = None) -> list[dict]:
+        """执行向量检索。H7 修复：支持按 knowledge_base_id 过滤。"""
 
         query_kwargs = {
             "query_embeddings": self.embedding.embed_texts([query_text]),
             "n_results": top_k,
             "include": ["documents", "metadatas", "distances"],
         }
+        # H7 修复：构建复合 where 条件，支持 doc_uid 和 knowledge_base_id 同时过滤
+        where_conditions = {}
         if doc_uid:
-            query_kwargs["where"] = {"doc_uid": doc_uid}
+            where_conditions["doc_uid"] = doc_uid
+        if knowledge_base_id:
+            where_conditions["knowledge_base_id"] = knowledge_base_id
+        if len(where_conditions) == 1:
+            query_kwargs["where"] = where_conditions
+        elif len(where_conditions) > 1:
+            query_kwargs["where"] = {"$and": [{k: v} for k, v in where_conditions.items()]}
 
         result = self.collection.query(
             **query_kwargs,
