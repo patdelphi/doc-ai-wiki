@@ -1,4 +1,4 @@
-# UI 与认证改造 Todo
+﻿# UI 与认证改造 Todo
 
 > 时间：2026-05-12
 > 范围："src/ui"、"src/auth"、"src/db"、"tests/unit"
@@ -328,3 +328,63 @@
 2. 再改认证权限默认回退
 3. 然后修人工审核和知识库管理实际查询/写入入口
 4. 最后补 API 对象级权限与状态刷新
+
+## 2026-06-16 优化计划执行记录
+
+> 范围："tests/unit/test_ui.py"、"tests/unit/test_startup_validation.py"
+> 来源："Docs/optimization-plan-20260616.md"
+> 当前阶段：方案 A - 第 1 步
+
+### 本轮目标
+
+- [x] 修复 `"src.ui.app"` 模块重载导致的 UI 测试顺序依赖
+- [x] 保持修改范围最小，不处理删除类操作
+- [x] 跑聚焦校验，确认 `"test_startup_validation.py"` 与 `"test_ui.py"` 顺序执行稳定
+
+### 当前执行顺序
+
+1. 先定位 `"src.ui.app"` 相关导入是否被旧模块对象污染
+2. 再补最小测试保护或直接修复现有测试导入方式
+3. 最后执行 `"python -m pytest \"tests/unit/test_startup_validation.py\" \"tests/unit/test_ui.py\" -q"`
+
+### 当前结果
+
+- [x] 精确复现组合 `"test_create_ui_app_should_auto_rebuild_vectors_when_embedding_dimension_mismatch_at_startup"` + `"test_connection_scoped_auth_service_should_open_and_close_connection_per_call"` 已通过
+- [x] 已修复 `"src/ui/pages.py"` 中尾部重复定义的 `_has_tab_access()` 覆盖问题，恢复未登录测试场景的默认放行逻辑
+- [x] 聚焦回归 `6` 个失败用例已全部通过
+- [x] 整组 `"tests/unit/test_startup_validation.py"` + `"tests/unit/test_ui.py"` 已通过，结果 `62 passed`
+
+### 下一步待确认
+
+- [x] 已清理 Git 已跟踪的 `__pycache__/*.pyc`
+- [x] 已处理 `"pytest_collect_output.txt"`
+- [x] 当前真实版本以 `"0.6"` 为准
+
+### 版本一致性结果
+
+- [x] 已将 `"pyproject.toml"` 版本从 `"0.5"` 统一为 `"0.6"`
+- [x] 已将 `"src/app.py"` 中 FastAPI 应用版本从 `"0.5"` 统一为 `"0.6"`
+- [x] 已在 `"tests/unit/test_startup_validation.py"` 增加版本一致性测试
+- [x] `python -m pytest "tests/unit/test_startup_validation.py" -q` 结果 `5 passed`
+- [x] `python -m pytest "tests/unit/test_startup_validation.py" "tests/unit/test_ui.py" -q` 结果 `63 passed`
+
+### 集成测试补充结果
+
+- [x] 已将 `"tests/integration/test_app.py"` 中版本断言改为动态读取 `"pyproject.toml"`
+- [x] 已将集成测试 `"build_test_settings()"` 收口为离线模式：`EMBEDDING_PROVIDER="local"`、`LLM_PROVIDER="disabled"`、`RERANK_ENABLED=False`
+- [x] 已同步修正集成测试中 3 处直接构造 `AppSettings(...)` 的离线配置，避免读取本地 `.env` 外联
+- [x] `python -m pytest "tests/integration/test_app.py" -q` 结果 `29 passed`
+- [x] `python -m pytest tests --maxfail=1 -q` 结果 `223 passed`
+
+### 计划剩余项完成情况
+
+- [x] 已为 pytest 增加 `unit` / `integration` markers，并在 `"tests/conftest.py"` 中按目录自动打标
+- [x] 已修正 `"pyproject.toml"` 的 setuptools 包发现配置，覆盖 `"src*"` 子包
+- [x] 已统一 `.env.example`、`"readme.md"`、`"Docs/env.MD"` 的运行时配置语义，并明确 `.env` 为主配置来源
+- [x] 已为 `"config/app_config.yaml"`、`"config/llm_config.yaml"` 增加“历史样例”说明，避免误当成运行时配置
+- [x] 已新增 `"tests/unit/test_config_defaults.py"`，锁定 `.env.example` 与 `AppSettings` 关键默认值一致
+- [x] 已将 `"src/ui/pages.py"` 中 `"AI 质检优化 Dummy"` 页签抽离至 `"src/ui/quality_dummy_page.py"`
+- [x] 已为 `"Docs/migrations/_apply_auth.py"`、`"Docs/migrations/_apply_auth_v2.py"`、`"Docs/debug_plan_review_tab_jump.md"` 增加归档/禁止执行提示
+- [x] 已更新 `"Docs/optimization-plan-20260616.md"`，记录本轮执行结果与最终验证
+- [x] `python -m pytest tests -q` 结果 `224 passed`
+- [x] `python -m build` 已通过

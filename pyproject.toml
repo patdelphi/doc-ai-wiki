@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-ai-wiki"
-version = "0.5"
+version = "0.6"
 description = "基于文档的知识库AI查询系统"
 readme = "readme.md"
 requires-python = ">=3.11"
@@ -25,11 +25,16 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["src"]
+include-package-data = true
 
-[tool.setuptools.package-dir]
-"src" = "src"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "unit: 单元测试",
+    "integration: 集成测试",
+]

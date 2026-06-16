@@ -37,7 +37,11 @@
 
 ## 三、最小环境变量
 
-建议使用 `.env` 或等价配置文件管理。
+运行时主配置以 `.env` / 环境变量为准，统一由 `src/common/config.py` 中的 `AppSettings` 读取。
+例外项只有两类：
+
+- `config/logging.yaml`：日志格式与 handler 配置
+- `templates/settings/ingest_quality.yaml`：入库质检阈值配置
 
 ### 3.1 应用基础配置
 
@@ -89,46 +93,37 @@
 
 | 变量名 | 必填 | 说明 |
 |------|------|------|
-| `DASHSCOPE_API_KEY` | 条件必填 | 使用 DashScope 时必填 |
-| `ANTHROPIC_API_KEY` | 条件必填 | 使用 Claude 时必填 |
-| `OPENAI_API_KEY` | 条件必填 | 使用 OpenAI 兼容服务时必填 |
-| `COHERE_API_KEY` | 条件必填 | 使用 Cohere Rerank 时必填 |
+| `DASHSCOPE_API_KEY` | 条件必填 | 使用 DashScope 重排时必填 |
+| `ANTHROPIC_API_KEY` | 条件必填 | 使用 Anthropic 时可作为 `LLM_API_KEY` 兼容别名 |
+| `OPENAI_API_KEY` | 条件必填 | 使用 OpenAI 兼容服务时可作为 `EMBEDDING_API_KEY` / `LLM_API_KEY` / `RERANK_API_KEY` 兼容别名 |
 
 ---
 
-## 四、推荐配置文件
+## 四、运行时配置来源
 
-建议至少准备以下配置文件：
+当前运行时真正会被加载的配置文件只有：
+
+- `.env`
+- `config/logging.yaml`
+- `templates/settings/ingest_quality.yaml`
+
+其中：
+
+- `.env`：主应用配置，覆盖 `AppSettings` 默认值
+- `config/logging.yaml`：日志格式、handler、日志级别
+- `templates/settings/ingest_quality.yaml`：入库质检阈值
+
+以下文件当前仅保留为历史样例，不是运行时配置源：
 
 - `config/app_config.yaml`
 - `config/llm_config.yaml`
-- `config/logging.yaml`
-- `.env`
 
-### 4.1 app_config.yaml 建议项
+### 4.1 logging.yaml 建议项
 
-- 默认分页大小
-- 默认 `top_k`
-- 是否启用缓存
-- 最大文本长度
-- 默认质检模板
-- 重试次数
-
-### 4.2 llm_config.yaml 建议项
-
-- 主模型
-- 备用模型
-- Embedding 模型
-- 重排模型
-- 超时时间
-- 成本阈值
-
-### 4.3 logging.yaml 建议项
-
-- 控制台日志格式
-- 文件日志路径
-- 错误日志分流
-- 第三方库日志级别
+- 质检维度阈值
+- 默认风险等级
+- 证据数量下限
+- 模板级覆盖项
 
 ---
 
@@ -145,10 +140,10 @@ SQLITE_DB_PATH=index/app.db
 CHROMA_PERSIST_DIR=index/chroma
 RULES_DIR=rules
 TEMPLATES_DIR=templates
-EMBEDDING_PROVIDER=openai
-EMBEDDING_MODEL=text-embedding-3-large
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_API_KEY=your_embedding_api_key
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=deterministic-v1
+EMBEDDING_BASE_URL=
+EMBEDDING_API_KEY=
 EMBEDDING_TIMEOUT_SECONDS=180
 RERANK_ENABLED=true
 RERANK_PROVIDER=dashscope
@@ -156,10 +151,10 @@ RERANK_MODEL=default
 RERANK_BASE_URL=
 RERANK_API_KEY=your_rerank_api_key
 RERANK_TIMEOUT_SECONDS=60
-LLM_PROVIDER=openai
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=your_llm_api_key
-LLM_MODEL=gpt-4.1-mini
+LLM_PROVIDER=disabled
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=disabled
 LLM_TIMEOUT_SECONDS=60
 LLM_MAX_TOKENS=1024
 LLM_TEMPERATURE=0

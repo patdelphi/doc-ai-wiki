@@ -1,4 +1,4 @@
-# 基于文档的知识库AI查询系统
+﻿# 基于文档的知识库AI查询系统
 
 > **版本**：`0.6`
 > **最后更新**：`2026-05-14`
@@ -229,10 +229,12 @@ SQLITE_DB_PATH=index/app.db
 CHROMA_PERSIST_DIR=index/chroma
 RULES_DIR=rules
 TEMPLATES_DIR=templates
-EMBEDDING_PROVIDER=openai
-LLM_PROVIDER=openai
+EMBEDDING_PROVIDER=local
+LLM_PROVIDER=disabled
 RERANK_ENABLED=true
 ```
+
+当前运行时配置以 `.env` 和环境变量为准，主入口统一通过 `AppSettings` 读取；`config/logging.yaml` 仅负责日志格式，`templates/settings/ingest_quality.yaml` 仅负责入库质检阈值。
 
 关键配置说明：
 

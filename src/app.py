@@ -1,4 +1,4 @@
-"""程序说明：应用主入口，注册最小 API 路由并初始化数据库。"""
+"""程序说明：应用主入口，注册最小 API 路由、统一应用版本并初始化数据库。"""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
 
         yield
 
-    app = FastAPI(title="基于文档的知识库AI查询系统", version="0.5", lifespan=lifespan)
+    app = FastAPI(title="基于文档的知识库AI查询系统", version="0.6", lifespan=lifespan)
     embedding_client = build_embedding_client(settings)
     llm_client = build_llm_client(settings)
     reranker = build_reranker(settings)

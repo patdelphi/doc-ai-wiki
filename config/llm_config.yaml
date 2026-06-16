@@ -1,3 +1,5 @@
+# 历史样例：当前运行时不会直接读取本文件。
+# 实际模型配置来源是 ".env" / 环境变量，经 `src/common/config.py` 的 `AppSettings` 加载。
 primary_provider: "qwen"
 primary_model: "qwen-max"
 fallback_provider: ""

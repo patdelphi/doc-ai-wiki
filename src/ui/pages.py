@@ -29,6 +29,7 @@ from src.ui.page_helpers import (
     extract_login_session_permissions as _extract_login_session_permissions,
 )
 from src.ui.document_page import bind_document_events, build_document_tab
+from src.ui.quality_dummy_page import build_quality_dummy_tab
 from src.ui.quality_page import bind_quality_events, build_quality_tab
 from src.ui.review_page import bind_review_events, build_review_tab
 from src.ui.search_page import bind_search_events, build_search_tab
@@ -4915,9 +4916,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     def _has_tab_access(session: dict[str, object] | None, tab_name: str) -> bool:
         """判断当前登录态是否拥有指定主菜单权限。"""
 
+        if session is None:
+            return True
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
+
     def _build_quality_permission_updates(
         session: dict[str, object] | None,
         history_scope_value: str | None = None,
@@ -5181,230 +5185,24 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     quality_evaluation_next_button = quality_components["quality_evaluation_next_button"]
                     quality_evaluation_page_info = quality_components["quality_evaluation_page_info"]
 
-                with gr.Tab("AI 质检优化 Dummy", visible=False):
-                    with gr.Row(elem_id="quality-dummy-row-1", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-dummy-intake-panel"):
-                            gr.Markdown("### 1. 输入与执行")
-                            quality_dummy_input = gr.Textbox(
-                                label="待质检文本",
-                                value="阿胶可以直接替代所有补血药，并且《神农本草经》明确记载它可以延年不老。",
-                                lines=8,
-                            )
-                            with gr.Row():
-                                quality_dummy_kb = gr.Dropdown(
-                                    label="目标知识库",
-                                    choices=["default（默认）", "古籍专题库", "人工校审库"],
-                                    value="古籍专题库",
-                                    interactive=True,
-                                    elem_id="quality-dummy-knowledge-base",
-                                )
-                                quality_dummy_template = gr.Dropdown(
-                                    label="质检模板",
-                                    choices=["general_fact_check", "classical_claim_review", "risk_first_screening"],
-                                    value="classical_claim_review",
-                                    interactive=True,
-                                    elem_id="quality-dummy-template",
-                                )
-                            quality_dummy_mode = gr.Radio(
-                                label="工作模式",
-                                choices=["快速初筛", "证据优先", "人工复核优先"],
-                                value="证据优先",
-                                elem_id="quality-dummy-mode",
-                            )
-                            with gr.Row():
-                                quality_dummy_submit = ui_button("开始模拟质检", variant="primary")
-                                quality_dummy_export = ui_button("导出模拟结果")
-                        with gr.Column(scale=1, elem_id="quality-dummy-help-panel"):
-                            quality_dummy_help_panel = gr.HTML(
-                                value=_build_quality_dummy_top_help_html(),
-                                elem_id="quality-dummy-help-card",
-                            )
-                    with gr.Row(elem_id="quality-dummy-template-row"):
-                        quality_dummy_template_detail = gr.HTML(
-                            value=_build_quality_dummy_template_html(),
-                            elem_id="quality-dummy-template-panel",
-                        )
-                    with gr.Row(elem_id="quality-dummy-summary-row", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-dummy-progress-panel"):
-                            quality_dummy_progress = gr.HTML(
-                                value=_build_quality_dummy_progress_html(),
-                                elem_id="quality-dummy-progress-card",
-                            )
-                        with gr.Column(scale=1, elem_id="quality-dummy-result-panel"):
-                            quality_dummy_status = gr.HTML(
-                                value=_build_quality_dummy_result_html(),
-                                elem_id="quality-dummy-status-panel",
-                            )
-                    quality_dummy_relation_note = gr.HTML(
-                        value=(
-                            "<div class='quality-dummy-note'>"
-                            "Claim 详情会展示本次判断的证据关系。证据列表会进一步区分支持、矛盾、证据不足，"
-                            "并显示该证据来自原句检索还是放宽逻辑约束后的补充检索。"
-                            "</div>"
-                        ),
-                        elem_id="quality-dummy-relation-note",
-                    )
-                    with gr.Row(elem_id="quality-dummy-row-2", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-dummy-claim-list-panel"):
-                            gr.Markdown("### 2. Claim 列表")
-                            quality_dummy_active_check = gr.HTML(
-                                value=_build_quality_dummy_active_check_html(),
-                                elem_id="quality-dummy-active-check",
-                            )
-                            quality_dummy_claims = gr.Radio(
-                                label="Claim 列表",
-                                choices=quality_dummy_claim_choices,
-                                value=quality_dummy_claim_choices[0],
-                                elem_id="quality-dummy-claims",
-                            )
-                            with gr.Row(elem_id="quality-dummy-claim-pagination-row"):
-                                quality_dummy_claim_prev = ui_button("上一页")
-                                quality_dummy_claim_next = ui_button("下一页")
-                            quality_dummy_claim_page_info = gr.HTML(
-                                value="<div class='quality-dummy-note'>第 1 / 1 页，共 4 条 Claim</div>",
-                                elem_id="quality-dummy-claim-page-info",
-                            )
-                        with gr.Column(scale=1):
-                            quality_dummy_focus = gr.HTML(
-                                value=_build_quality_dummy_focus_html(),
-                                elem_id="quality-dummy-focus-panel",
-                            )
-                    with gr.Row(elem_id="quality-dummy-row-3", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-dummy-evidence-panel"):
-                            gr.Markdown("### 3. 证据列表")
-                            quality_dummy_evidence = gr.Dataframe(
-                                headers=["序号", "片段 ID", "文档", "定位", "证据关系", "检索来源", "检索路径", "重排分", "证据摘要"],
-                                datatype=["str"] * 9,
-                                interactive=False,
-                                row_count=3,
-                                column_count=9,
-                                label="证据列表",
-                                elem_id="quality-dummy-evidence-table",
-                                value=[
-                                    ["1", "SUP-001", "《本草纲目》", "卷一 / 药部", "支持", "全文", "原句检索", "-", "阿胶主治与补血相关表述高度一致"],
-                                    ["2", "CHK-014", "《神农本草经》", "上品 / 阿胶", "补充", "向量", "扩展检索", "-", "补充说明阿胶长期入药背景，可解释来源脉络"],
-                                    ["3", "CON-003", "《本草拾遗》", "卷三 / 校注", "矛盾", "向量", "扩展检索", "-", "存在剂量语义差异，需要人工复核原句上下文"],
-                                ],
-                                max_height=420,
-                            )
-                            with gr.Row(elem_id="quality-dummy-evidence-pagination-row"):
-                                quality_dummy_evidence_prev = ui_button("上一页")
-                                quality_dummy_evidence_next = ui_button("下一页")
-                            quality_dummy_evidence_page_info = gr.HTML(
-                                value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条证据</div>",
-                                elem_id="quality-dummy-evidence-page-info",
-                            )
-                        with gr.Column(scale=1):
-                            quality_dummy_evidence_detail = gr.HTML(
-                                value=_build_quality_dummy_evidence_detail_html(),
-                                elem_id="quality-dummy-evidence-detail",
-                            )
-                    with gr.Row(elem_id="quality-dummy-row-4", equal_height=True):
-                        with gr.Column(scale=1, elem_id="quality-dummy-history-panel"):
-                            gr.Markdown("### 4. 历史质检记录")
-                            quality_dummy_history_note = gr.HTML(
-                                value=(
-                                    "<div class='quality-dummy-note'>"
-                                    "最近质检记录用于回看历史质检任务。切换历史记录后，可重新查看当次的 Claim 与证据。"
-                                    "</div>"
-                                ),
-                                elem_id="quality-dummy-history-note",
-                            )
-                            quality_dummy_history_scope = gr.Dropdown(
-                                label="历史任务范围",
-                                choices=["全部历史任务", "仅当前知识库", "仅高风险任务"],
-                                value="全部历史任务",
-                                interactive=True,
-                                elem_id="quality-dummy-history-scope",
-                            )
-                            quality_dummy_history = gr.Dataframe(
-                                headers=["质检 ID", "模板", "总体结论", "Claim 数", "待处理 Claim", "时间", "输入摘要"],
-                                datatype=["str"] * 7,
-                                interactive=False,
-                                row_count=3,
-                                column_count=7,
-                                label="最近质检记录",
-                                elem_id="quality-dummy-history-table",
-                                value=quality_dummy_history_rows,
-                                max_height=420,
-                            )
-                            with gr.Row(elem_id="quality-dummy-history-pagination-row"):
-                                quality_dummy_history_prev = ui_button("上一页")
-                                quality_dummy_history_next = ui_button("下一页")
-                            quality_dummy_history_page_info = gr.HTML(
-                                value="<div class='quality-dummy-note'>第 1 / 1 页，共 3 条记录</div>",
-                                elem_id="quality-dummy-history-page-info",
-                            )
-                        with gr.Column(scale=1, elem_id="quality-dummy-action-panel"):
-                            gr.Markdown("### 5. 下载结果与动作")
-                            with gr.Row(elem_id="quality-dummy-export-row"):
-                                quality_dummy_action_export = ui_button("下载结果")
-                            quality_dummy_actions_result = gr.HTML(
-                                value=_build_quality_dummy_export_result_html(),
-                                elem_id="quality-dummy-export-result",
-                            )
-                            quality_dummy_followup = gr.HTML(
-                                value=_build_quality_dummy_actions_html(),
-                                elem_id="quality-dummy-actions-result",
-                            )
-                    with gr.Accordion("效果评测", open=False, elem_id="quality-dummy-evaluation-accordion"):
-                        with gr.Column(scale=1, elem_id="quality-dummy-evaluation-panel"):
-                            quality_dummy_evaluation_help = gr.HTML(
-                                value=_build_quality_dummy_evaluation_help_html(),
-                                elem_id="quality-dummy-evaluation-help",
-                            )
-                            quality_dummy_evaluation_cases = gr.Textbox(
-                                label="效果评测样例 JSON",
-                                lines=8,
-                                value='[{"sample_id":"case-001","input_text":"阿胶可以直接替代所有补血药"}]',
-                                interactive=False,
-                                elem_id="quality-dummy-evaluation-cases",
-                            )
-                            with gr.Row(elem_id="quality-dummy-evaluation-action-row", equal_height=True):
-                                with gr.Column(scale=1):
-                                    quality_dummy_evaluation_button = ui_button("执行效果评测")
-                                with gr.Column(scale=1):
-                                    quality_dummy_evaluation_export_button = ui_button("下载评测结果")
-                                    quality_dummy_evaluation_export_result = gr.HTML(
-                                        value=_build_quality_dummy_export_result_html(),
-                                        elem_id="quality-dummy-evaluation-export-result",
-                                    )
-                            quality_dummy_evaluation_summary = gr.HTML(
-                                value=_build_quality_dummy_evaluation_summary_html(),
-                                elem_id="quality-dummy-evaluation-summary",
-                            )
-                            quality_dummy_evaluation_table = gr.Dataframe(
-                                headers=[
-                                    "样例 ID",
-                                    "预期结论",
-                                    "实际结论",
-                                    "结论命中",
-                                    "预期风险",
-                                    "实际风险",
-                                    "风险命中",
-                                    "预期 Claim 数",
-                                    "实际 Claim 数",
-                                    "Claim 数命中",
-                                    "宽松命中",
-                                    "完全命中",
-                                    "差异说明",
-                                    "建议排查方向",
-                                    "输入摘要",
-                                ],
-                                datatype=["str"] * 15,
-                                interactive=False,
-                                row_count=2,
-                                column_count=15,
-                                label="效果评测明细",
-                                elem_id="quality-dummy-evaluation-table",
-                                value=_build_quality_dummy_evaluation_rows(),
-                            )
-                    with gr.Row(elem_id="quality-dummy-bottom-row", equal_height=True):
-                        with gr.Column(scale=1):
-                            quality_dummy_detail_help = gr.HTML(
-                                value=_build_quality_dummy_help_html(),
-                                elem_id="quality-dummy-detail-help",
-                            )
+                build_quality_dummy_tab(
+                    claim_choices=quality_dummy_claim_choices,
+                    evidence_rows=quality_dummy_evidence_rows,
+                    history_rows=quality_dummy_history_rows,
+                    build_top_help_html=_build_quality_dummy_top_help_html,
+                    build_template_html=_build_quality_dummy_template_html,
+                    build_progress_html=_build_quality_dummy_progress_html,
+                    build_result_html=_build_quality_dummy_result_html,
+                    build_active_check_html=_build_quality_dummy_active_check_html,
+                    build_focus_html=_build_quality_dummy_focus_html,
+                    build_evidence_detail_html=_build_quality_dummy_evidence_detail_html,
+                    build_export_result_html=_build_quality_dummy_export_result_html,
+                    build_actions_html=_build_quality_dummy_actions_html,
+                    build_evaluation_help_html=_build_quality_dummy_evaluation_help_html,
+                    build_evaluation_summary_html=_build_quality_dummy_evaluation_summary_html,
+                    build_evaluation_rows=_build_quality_dummy_evaluation_rows,
+                    build_help_html=_build_quality_dummy_help_html,
+                )
 
                 with gr.Tab("人工审核", visible=False, id=MAIN_TAB_IDS["人工审核"]) as review_tab:
                     review_candidate_state = gr.State(initial_review_candidate_items_state)

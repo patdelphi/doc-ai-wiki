@@ -5,6 +5,7 @@ from __future__ import annotations
 from base64 import b64encode
 from pathlib import Path
 import sqlite3
+import tomllib
 
 from fastapi.testclient import TestClient
 
@@ -44,7 +45,18 @@ def build_test_settings(tmp_path: Path) -> AppSettings:
         CHROMA_PERSIST_DIR=tmp_path / "chroma",
         RULES_DIR=rules_dir,
         TEMPLATES_DIR=tmp_path / "templates",
+        EMBEDDING_PROVIDER="local",
+        LLM_PROVIDER="disabled",
+        RERANK_ENABLED=False,
     )
+
+
+def read_project_version() -> str:
+    """从项目元数据读取当前版本，避免测试与实现重复维护版本号。"""
+
+    project_root = Path(__file__).resolve().parents[2]
+    pyproject_data = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+    return str(pyproject_data["project"]["version"])
 
 
 def build_api_auth_headers(database_path: Path) -> dict[str, str]:
@@ -188,7 +200,7 @@ def test_app_metadata_should_expose_current_version(tmp_path: Path) -> None:
     app = create_app(build_test_settings(tmp_path))
 
     assert app.title == "基于文档的知识库AI查询系统"
-    assert app.version == "0.5"
+    assert app.version == read_project_version()
 
 
 def test_protected_endpoint_should_require_http_basic_auth(tmp_path: Path) -> None:
@@ -807,6 +819,9 @@ def test_initialize_database_should_add_missing_document_metadata_columns(tmp_pa
             CHROMA_PERSIST_DIR=tmp_path / "chroma",
             RULES_DIR=tmp_path / "rules",
             TEMPLATES_DIR=tmp_path / "templates",
+            EMBEDDING_PROVIDER="local",
+            LLM_PROVIDER="disabled",
+            RERANK_ENABLED=False,
         )
     )
     with TestClient(app) as client:
@@ -1073,6 +1088,9 @@ def test_initialize_database_should_add_missing_quality_claim_columns(tmp_path: 
             CHROMA_PERSIST_DIR=tmp_path / "chroma",
             RULES_DIR=tmp_path / "rules",
             TEMPLATES_DIR=tmp_path / "templates",
+            EMBEDDING_PROVIDER="local",
+            LLM_PROVIDER="disabled",
+            RERANK_ENABLED=False,
         )
     )
     with TestClient(app) as client:
@@ -1118,6 +1136,9 @@ def test_initialize_database_should_add_missing_quality_check_template_columns(t
             CHROMA_PERSIST_DIR=tmp_path / "chroma",
             RULES_DIR=tmp_path / "rules",
             TEMPLATES_DIR=tmp_path / "templates",
+            EMBEDDING_PROVIDER="local",
+            LLM_PROVIDER="disabled",
+            RERANK_ENABLED=False,
         )
     )
     with TestClient(app) as client:

@@ -1,10 +1,11 @@
-"""程序说明：验证 API 与 UI 在启动阶段遇到向量维度冲突时会自动自愈。"""
+"""程序说明：验证 API 与 UI 在启动阶段遇到向量维度冲突时会自动自愈，并校验版本一致性。"""
 
 from __future__ import annotations
 
 import importlib
 import sys
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -280,3 +281,15 @@ def test_create_app_should_initialize_database_before_creating_vector_store(
 
     assert app is not None
     assert call_order[:2] == ["initialize_database", "vector_store"]
+
+
+def test_project_version_should_match_fastapi_app_version() -> None:
+    """项目元数据版本应与 FastAPI 应用版本保持一致。"""
+
+    project_root = Path(__file__).resolve().parents[2]
+    pyproject_data = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+    expected_version = str(pyproject_data["project"]["version"])
+    app_module = importlib.import_module("src.app")
+
+    assert expected_version == "0.6"
+    assert app_module.app.version == expected_version

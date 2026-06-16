@@ -1,5 +1,6 @@
-"""程序说明：验证最小 UI 可构建。"""
+"""程序说明：验证最小 UI 可构建，并确保 UI 测试不受模块重载污染。"""
 
+import importlib
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
-from src.ui.app import ConnectionScopedAuthService, create_ui_app
+from src.ui.app import create_ui_app
 from src.ui.document_page import build_document_tab
 from src.ui.page_helpers import get_selected_search_item_from_page_rows, paginate_table_rows
 from src.ui.pages import (
@@ -25,6 +26,12 @@ from src.ui.pages import (
     filter_visible_knowledge_base_items,
     normalize_auth_tab_name,
 )
+
+
+def get_current_ui_app_module():
+    """返回当前 ``sys.modules`` 中最新的 UI 应用模块，避免测试受模块重载污染。"""
+
+    return importlib.import_module("src.ui.app")
 
 
 def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
@@ -197,6 +204,7 @@ def test_connection_scoped_auth_service_should_open_and_close_connection_per_cal
     """认证包装层应按调用粒度创建并关闭数据库连接。"""
 
     lifecycle: list[str] = []
+    ui_app_module = get_current_ui_app_module()
 
     class DummyConnection:
         def __enter__(self):
@@ -216,10 +224,10 @@ def test_connection_scoped_auth_service_should_open_and_close_connection_per_cal
             lifecycle.append(f"authenticate:{username}")
             return {"username": username, "password": password}
 
-    monkeypatch.setattr("src.ui.app.create_connection", lambda database_path: DummyConnection())
-    monkeypatch.setattr("src.ui.app.AuthService", DummyAuthService)
+    monkeypatch.setattr(ui_app_module, "create_connection", lambda database_path: DummyConnection())
+    monkeypatch.setattr(ui_app_module, "AuthService", DummyAuthService)
 
-    service = ConnectionScopedAuthService("test.db")
+    service = ui_app_module.ConnectionScopedAuthService("test.db")
     result = service.authenticate("tester", "secret")
 
     assert result == {"username": "tester", "password": "secret"}
@@ -906,7 +914,7 @@ def test_restore_login_session_should_show_pending_access_tab_for_zero_permissio
     )
     initialize_database(settings.sqlite_db_path)
 
-    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    auth_service = get_current_ui_app_module().ConnectionScopedAuthService(settings.sqlite_db_path)
     success, _message = auth_service.register_user("pending_user", "StrongPass#123")
     assert success is True
 
@@ -1000,7 +1008,7 @@ def test_restore_login_session_should_clear_review_workspace_without_kb_permissi
     )
     initialize_database(settings.sqlite_db_path)
 
-    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    auth_service = get_current_ui_app_module().ConnectionScopedAuthService(settings.sqlite_db_path)
     success, _message = auth_service.register_user("review_no_kb_user", "StrongPass#123")
     assert success is True
 
@@ -1041,7 +1049,7 @@ def test_save_settings_user_permissions_ui_should_persist_selected_permissions(t
     )
     initialize_database(settings.sqlite_db_path)
 
-    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    auth_service = get_current_ui_app_module().ConnectionScopedAuthService(settings.sqlite_db_path)
     success, _message = auth_service.register_user("perm_ui_user", "StrongPass#123")
     assert success is True
 
@@ -1097,7 +1105,7 @@ def test_save_settings_user_permissions_ui_should_refresh_current_login_session(
     )
     initialize_database(settings.sqlite_db_path)
 
-    auth_service = ConnectionScopedAuthService(settings.sqlite_db_path)
+    auth_service = get_current_ui_app_module().ConnectionScopedAuthService(settings.sqlite_db_path)
     success, _message = auth_service.register_user("self_perm_user", "StrongPass#123")
     assert success is True
 
