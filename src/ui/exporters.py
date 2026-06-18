@@ -18,8 +18,9 @@ def save_markdown_export(
     result_name: str,
     linked_id: str | None = None,
     markdown_text: str,
+    file_extension: str = "txt",
 ) -> dict:
-    """将 Markdown 文本保存到 Docs 目录下的 TXT 文件，并生成 HTML 预览页。"""
+    """将 Markdown 文本保存到 Docs 目录下的文本文件，并生成 HTML 预览页。"""
 
     resolved_text = str(markdown_text or "").strip()
     if not resolved_text:
@@ -35,7 +36,8 @@ def save_markdown_export(
     if safe_linked_id:
         file_name_parts.append(safe_linked_id)
     file_name_parts.append(timestamp)
-    file_name = "_".join(file_name_parts) + ".txt"
+    safe_file_extension = _sanitize_file_extension(file_extension)
+    file_name = "_".join(file_name_parts) + f".{safe_file_extension}"
     file_path = docs_dir / file_name
     file_path.write_text(resolved_text, encoding="utf-8")
     preview_file_name = "_".join(file_name_parts) + ".preview.html"
@@ -133,6 +135,13 @@ def _sanitize_file_name_part(value: str) -> str:
     normalized = re.sub(r"[<>:\"/\\|?*\r\n\t]+", "_", str(value or "").strip())
     normalized = re.sub(r"\s+", "_", normalized)
     return normalized.strip("._")
+
+
+def _sanitize_file_extension(value: str) -> str:
+    """清理导出文件后缀，异常输入统一回退到 txt。"""
+
+    normalized = re.sub(r"[^A-Za-z0-9]+", "", str(value or "").strip().lstrip(".")).lower()
+    return normalized or "txt"
 
 
 def _render_markdown_blocks(markdown_text: str) -> str:

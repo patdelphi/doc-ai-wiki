@@ -702,7 +702,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """切换 PageIndex 知识库后刷新当前文档与结果区。"""
 
         document_choices, selected_document = _build_pageindex_document_choices(knowledge_base_choice)
-        status_html, tree_rows, answer_html, evidence_rows = _build_pageindex_selected_document_state(
+        (
+            status_html,
+            tree_rows,
+            answer_html,
+            evidence_rows,
+            debug_rows,
+            history_rows,
+            history_state,
+            active_query_id,
+            export_result_html,
+            download_file,
+        ) = _build_pageindex_selected_document_state(
             knowledge_base_choice,
             selected_document,
         )
@@ -712,8 +723,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             tree_rows,
             answer_html,
             evidence_rows,
-            [],
-            [],
+            debug_rows,
+            history_rows,
+            history_state,
+            active_query_id,
+            export_result_html,
+            download_file,
         )
 
     def change_pageindex_document_ui(_knowledge_base_choice: str | None, _document_choice: str | None):
@@ -733,9 +748,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 _build_pageindex_status_html("尚未提问。"),
                 [],
                 [],
+                [],
+                [],
+                "",
+                "",
+                None,
             )
         try:
             tree_rows = pageindex_service.get_tree_rows(knowledge_base_id, doc_uid)
+            history = pageindex_service.list_query_history(knowledge_base_id, doc_uid)
+            history_rows = _build_pageindex_history_rows(history)
+            active_query_id = str(history[0].get("query_id") or "") if history else ""
         except NotFoundAppError:
             return (
                 _build_pageindex_status_html("已切换文档，请构建或重建 PageIndex。", index_status="未构建"),
@@ -743,6 +766,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 _build_pageindex_status_html("尚未提问。"),
                 [],
                 [],
+                [],
+                [],
+                "",
+                "",
+                None,
             )
         except AppError as exc:
             return (
@@ -751,6 +779,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 _build_pageindex_status_html("尚未提问。"),
                 [],
                 [],
+                [],
+                [],
+                "",
+                "",
+                None,
             )
         return (
             _build_pageindex_status_html("PageIndex 已构建，可直接提问。", success=True, index_status="已构建"),
@@ -758,6 +791,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             _build_pageindex_status_html("尚未提问。"),
             [],
             [],
+            history_rows,
+            history,
+            active_query_id,
+            "",
+            None,
         )
 
     def build_pageindex_index_ui(knowledge_base_choice: str | None, document_choice: str | None, rebuild: bool = False):
@@ -863,12 +901,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
         if not knowledge_base_id or not doc_uid:
-            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), [], [], []
+            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), [], [], [], [], "", "", None
         try:
             result = pageindex_service.ask_question(knowledge_base_id, doc_uid, question or "")
             history = pageindex_service.list_query_history(knowledge_base_id, doc_uid)
         except AppError as exc:
-            return _build_pageindex_status_html(exc.message, success=False), [], [], []
+            return _build_pageindex_status_html(exc.message, success=False), [], [], [], [], "", "", None
         return (
             _build_pageindex_status_html(
                 result["answer"],
@@ -879,20 +917,82 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             _build_pageindex_evidence_rows(result.get("evidence") or []),
             _build_pageindex_debug_rows(result.get("debug") if isinstance(result.get("debug"), dict) else {}),
             _build_pageindex_history_rows(history),
+            history,
+            str(result.get("query_id") or ""),
+            format_operation_result_html(
+                {"success": True, "message": "已激活当前结果，可下载。"},
+                title="下载结果",
+            ),
+            None,
         )
 
-    def export_pageindex_results_ui(knowledge_base_choice: str | None, document_choice: str | None):
-        """导出当前 PageIndex 文档的问答历史。"""
+    def select_pageindex_history_ui(
+        knowledge_base_choice: str | None,
+        document_choice: str | None,
+        history_state: list[dict] | None,
+        current_history_rows: list[list[object]] | None,
+        evt: gr.SelectData,
+    ):
+        """点击历史记录后激活并回显对应 PageIndex 问答结果。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        doc_uid = _parse_pageindex_document_choice(document_choice)
+        current_rows = [] if current_history_rows is None else current_history_rows
+        selected_row = get_row_from_paged_table(current_rows, evt, id_column_index=0)
+        row_index = 0
+        if selected_row:
+            normalized_rows = normalize_table_rows(current_rows)
+            row_index = normalized_rows.index(selected_row) if selected_row in normalized_rows else 0
+        history_items = history_state or []
+        selected_item = history_items[row_index] if 0 <= row_index < len(history_items) else {}
+        query_id = str(selected_item.get("query_id") or "").strip()
+        if not knowledge_base_id or not doc_uid or not query_id:
+            return _build_pageindex_status_html("请先选择一条历史记录。", success=False), [], [], "", "", None
+        try:
+            record = pageindex_service.get_query_history_record(knowledge_base_id, doc_uid, query_id)
+        except AppError as exc:
+            return _build_pageindex_status_html(exc.message, success=False), [], [], "", "", None
+        return (
+            _build_pageindex_status_html(str(record.get("answer") or ""), success=True),
+            _build_pageindex_evidence_rows(record.get("evidence") if isinstance(record.get("evidence"), list) else []),
+            [],
+            str(record.get("query_id") or ""),
+            format_operation_result_html(
+                {"success": True, "message": "已激活历史记录，可下载。"},
+                title="下载结果",
+            ),
+            None,
+        )
+
+    def export_pageindex_results_ui(knowledge_base_choice: str | None, document_choice: str | None, active_query_id: str | None):
+        """导出当前激活的 PageIndex 问答记录。"""
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
         if not knowledge_base_id or not doc_uid:
-            return _build_pageindex_status_html("请先选择知识库和文档。", success=False)
+            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), None
         try:
-            markdown_text = pageindex_service.export_history_markdown(knowledge_base_id, doc_uid)
-            return export_markdown_result("PageIndex", "深度检索", markdown_text, linked_id=doc_uid)
+            markdown_text = pageindex_service.export_query_markdown(knowledge_base_id, doc_uid, active_query_id or "")
+            export_result = save_markdown_export(
+                settings_runtime_payload.get("sqlite_db_path") or ".",
+                module_name="PageIndex",
+                result_name="深度检索",
+                linked_id=active_query_id or doc_uid,
+                markdown_text=markdown_text,
+                file_extension="md",
+            )
+            result_html = format_operation_result_html(
+                {
+                    "success": True,
+                    "message": f'已生成 PageIndex 下载文件：{export_result["file_name"]}。请点击下方“下载文件”。',
+                    "preview_url": build_download_url(file_path=export_result["preview_file_path"]),
+                    "preview_file_name": export_result["preview_file_name"],
+                },
+                title="下载结果",
+            )
+            return result_html, export_result["file_path"]
         except AppError as exc:
-            return _build_pageindex_status_html(exc.message, success=False)
+            return _build_pageindex_status_html(exc.message, success=False), None
 
     def _has_tab_access(session: dict[str, object] | None, tab_name: str) -> bool:
         """判断当前登录态是否拥有指定主菜单权限。"""
@@ -5088,6 +5188,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_pageindex_answer_html,
         initial_pageindex_evidence_rows,
         initial_pageindex_debug_rows,
+        initial_pageindex_history_rows,
+        initial_pageindex_history_state,
+        initial_pageindex_active_query_id,
+        initial_pageindex_export_result_html,
+        initial_pageindex_download_file,
     ) = _build_pageindex_selected_document_state(initial_knowledge_base_choice, initial_pageindex_document_choice)
     initial_quality_claim_table_rows, initial_quality_claim_page, initial_quality_claim_page_info = reset_table_pagination(
         initial_claim_rows,
@@ -5694,7 +5799,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_answer_html=initial_pageindex_answer_html,
                         initial_evidence_rows=initial_pageindex_evidence_rows,
                         initial_debug_rows=initial_pageindex_debug_rows,
-                        initial_history_rows=[],
+                        initial_history_rows=initial_pageindex_history_rows,
+                        initial_history_state=initial_pageindex_history_state,
+                        initial_active_query_id=initial_pageindex_active_query_id,
+                        initial_export_result_html=initial_pageindex_export_result_html,
                     )
                     pageindex_knowledge_base = pageindex_components["pageindex_knowledge_base"]
 
@@ -5874,6 +5982,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 change_document=change_pageindex_document_ui,
                 build_index=build_pageindex_index_ui,
                 ask_question=ask_pageindex_question_ui,
+                select_history=select_pageindex_history_ui,
                 export_results=export_pageindex_results_ui,
             )
             bind_settings_events(

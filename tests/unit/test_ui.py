@@ -3447,7 +3447,10 @@ def test_search_ui_css_should_hide_cell_selection_buttons_and_use_normal_font_si
     assert "button.ui-button" in UI_CSS
     assert "button.ui-button--primary" in UI_CSS
     assert "button.ui-button--danger" in UI_CSS
+    assert "button.ui-button--warning" in UI_CSS
     assert "button.ui-button--pagination" in UI_CSS
+    assert "rgba(127, 29, 29, 0.88)" not in UI_CSS
+    assert "rgba(251, 191, 36, 0.95)" not in UI_CSS
     assert "border-radius:14px" in UI_CSS.replace(" ", "")
     assert "transform:translateY(-1px)" in UI_CSS.replace(" ", "")
     assert "transform:scale(0.98)" in UI_CSS.replace(" ", "")

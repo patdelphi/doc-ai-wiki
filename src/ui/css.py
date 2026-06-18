@@ -409,16 +409,16 @@ button.ui-button {
   min-height: 42px !important;
   padding: 0 18px !important;
   border-radius: 14px !important;
-  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  border: 1px solid rgba(96, 165, 250, 0.38) !important;
   background:
-    linear-gradient(180deg, rgba(71, 85, 105, 0.26), rgba(51, 65, 85, 0.18)) !important;
-  color: var(--body-text-color) !important;
+    linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.82)) !important;
+  color: #eff6ff !important;
   font-weight: 700 !important;
   font-size: 14px !important;
   letter-spacing: 0.02em !important;
   box-shadow:
-    0 8px 18px rgba(15, 23, 42, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+    0 10px 22px rgba(37, 99, 235, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
@@ -429,12 +429,12 @@ button.ui-button {
 }
 button.ui-button:hover {
   transform: translateY(-1px) !important;
-  border-color: rgba(96, 165, 250, 0.34) !important;
+  border-color: rgba(147, 197, 253, 0.52) !important;
   background:
-    linear-gradient(180deg, rgba(71, 85, 105, 0.34), rgba(51, 65, 85, 0.24)) !important;
+    linear-gradient(180deg, rgba(96, 165, 250, 0.94), rgba(37, 99, 235, 0.88)) !important;
   box-shadow:
-    0 10px 22px rgba(15, 23, 42, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    0 12px 24px rgba(37, 99, 235, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
 }
 button.ui-button:active {
   transform: scale(0.98) !important;
@@ -452,7 +452,11 @@ button.ui-button:disabled {
   transform: none !important;
   box-shadow: none !important;
 }
-button.ui-button--primary {
+button.ui-button--primary,
+button.ui-button--secondary,
+button.ui-button--danger,
+button.ui-button--warning,
+button.ui-button--pagination {
   border-color: rgba(96, 165, 250, 0.38) !important;
   background:
     linear-gradient(180deg, rgba(59, 130, 246, 0.88), rgba(37, 99, 235, 0.82)) !important;
@@ -461,25 +465,10 @@ button.ui-button--primary {
     0 10px 22px rgba(37, 99, 235, 0.20),
     inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
 }
-button.ui-button--danger {
-  border-color: rgba(248, 113, 113, 0.28) !important;
-  background:
-    linear-gradient(180deg, rgba(127, 29, 29, 0.88), rgba(153, 27, 27, 0.78)) !important;
-  color: #fee2e2 !important;
-  box-shadow:
-    0 10px 22px rgba(127, 29, 29, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-}
 button.ui-button--pagination {
   min-width: 96px !important;
   min-height: 38px !important;
   padding: 0 14px !important;
-  border-radius: 12px !important;
-  border-color: rgba(148, 163, 184, 0.2) !important;
-  background: rgba(51, 65, 85, 0.12) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 4px 12px rgba(15, 23, 42, 0.06) !important;
 }
 #document-quality-export-result,
 #document-quality-search-export-result,

@@ -1483,44 +1483,44 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
     if resolved.get("linked_check_id"):
         notes.append(f'关联质检：{_display_text(resolved.get("linked_check_id"))}')
     footer_html = None
+    link_items: list[str] = []
     if resolved.get("download_url"):
         file_name = _display_text(resolved.get("download_file_name") or "点击下载")
         download_url = str(resolved.get("download_url") or "")
-        link_items = [
-            (
-                '<div style="margin:0 0 12px 0;padding:12px 14px;'
-                'border:1px solid var(--border-color-primary);border-radius:12px;'
-                'background:var(--body-background-fill);">'
-                '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">下载文件</div>'
-                f'<div style="margin:0 0 6px 0;"><a href="{escape(download_url)}" '
-                'target="_blank" rel="noopener noreferrer" '
-                'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
-                f"{escape(file_name)}</a></div>"
-                '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">下载地址</div>'
-                '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
-                'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
-                f"{escape(download_url)}</div>"
-                "</div>"
-            )
-        ]
-        if resolved.get("preview_url"):
-            preview_name = _display_text(resolved.get("preview_file_name") or "查看渲染效果")
-            preview_url = str(resolved.get("preview_url") or "")
-            link_items.append(
-                '<div style="margin:0;padding:12px 14px;'
-                'border:1px solid var(--border-color-primary);border-radius:12px;'
-                'background:var(--body-background-fill);">'
-                '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">查看渲染效果</div>'
-                f'<div style="margin:0 0 6px 0;"><a href="{escape(preview_url)}" '
-                'target="_blank" rel="noopener noreferrer" '
-                'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
-                f"{escape(preview_name)}</a></div>"
-                '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">预览地址</div>'
-                '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
-                'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
-                f"{escape(preview_url)}</div>"
-                "</div>"
-            )
+        link_items.append(
+            '<div style="margin:0 0 12px 0;padding:12px 14px;'
+            'border:1px solid var(--border-color-primary);border-radius:12px;'
+            'background:var(--body-background-fill);">'
+            '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">下载文件</div>'
+            f'<div style="margin:0 0 6px 0;"><a href="{escape(download_url)}" '
+            'target="_blank" rel="noopener noreferrer" '
+            'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+            f"{escape(file_name)}</a></div>"
+            '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">下载地址</div>'
+            '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
+            'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+            f"{escape(download_url)}</div>"
+            "</div>"
+        )
+    if resolved.get("preview_url"):
+        preview_name = _display_text(resolved.get("preview_file_name") or "查看渲染效果")
+        preview_url = str(resolved.get("preview_url") or "")
+        link_items.append(
+            '<div style="margin:0;padding:12px 14px;'
+            'border:1px solid var(--border-color-primary);border-radius:12px;'
+            'background:var(--body-background-fill);">'
+            '<div style="font-size:13px;font-weight:700;margin:0 0 6px 0;">查看渲染效果</div>'
+            f'<div style="margin:0 0 6px 0;"><a href="{escape(preview_url)}" '
+            'target="_blank" rel="noopener noreferrer" '
+            'style="display:inline-block;max-width:100%;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+            f"{escape(preview_name)}</a></div>"
+            '<div style="font-size:12px;color:var(--body-text-color-subdued);margin:0 0 4px 0;">预览地址</div>'
+            '<div style="font-size:12px;line-height:1.7;color:var(--body-text-color);'
+            'white-space:normal;word-break:break-word;overflow-wrap:anywhere;">'
+            f"{escape(preview_url)}</div>"
+            "</div>"
+        )
+    if link_items:
         footer_html = "".join(link_items)
 
     status_label = _display_text(resolved.get("status_label")) if resolved.get("status_label") else "当前状态"

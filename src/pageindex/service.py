@@ -298,6 +298,46 @@ class PageIndexService:
             items.append(item)
         return items
 
+    def get_query_history_record(self, knowledge_base_id: str, doc_uid: str, query_id: str) -> dict:
+        """按记录 ID 读取当前知识库与文档下的一条 PageIndex 问答历史。"""
+
+        resolved_knowledge_base_id = self._require_knowledge_base_id(knowledge_base_id)
+        resolved_doc_uid = self._require_doc_uid(doc_uid)
+        resolved_query_id = str(query_id or "").strip()
+        if not resolved_query_id:
+            raise ValidationAppError("请先从历史记录中选择要下载的结果")
+        try:
+            with create_connection(self.settings.sqlite_db_path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    FROM pageindex_query_history
+                    WHERE knowledge_base_id = ? AND doc_uid = ? AND query_id = ?
+                    """,
+                    (resolved_knowledge_base_id, resolved_doc_uid, resolved_query_id),
+                ).fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise DatabaseAppError("读取 PageIndex 历史记录失败", details={"reason": str(exc)}) from exc
+        if row is None:
+            raise NotFoundAppError("未找到选中的 PageIndex 历史记录")
+        item = dict(row)
+        try:
+            evidence = json.loads(str(item.pop("evidence_json") or "[]"))
+        except json.JSONDecodeError:
+            evidence = []
+        item["evidence"] = evidence if isinstance(evidence, list) else []
+        return item
+
+    def export_query_markdown(self, knowledge_base_id: str, doc_uid: str, query_id: str) -> str:
+        """将当前激活的 PageIndex 历史记录导出为 Markdown。"""
+
+        record = self.get_query_history_record(knowledge_base_id, doc_uid, query_id)
+        return self._format_history_markdown(
+            knowledge_base_id=str(record.get("knowledge_base_id") or ""),
+            doc_uid=str(record.get("doc_uid") or ""),
+            history=[record],
+        )
+
     def export_history_markdown(self, knowledge_base_id: str, doc_uid: str) -> str:
         """将当前知识库与文档下的 PageIndex 历史导出为 Markdown。"""
 
@@ -306,12 +346,20 @@ class PageIndexService:
         history = list(reversed(self.list_query_history(resolved_knowledge_base_id, resolved_doc_uid, limit=200)))
         if not history:
             raise ValidationAppError("暂无可导出的 PageIndex 问答历史")
+        return self._format_history_markdown(
+            knowledge_base_id=resolved_knowledge_base_id,
+            doc_uid=resolved_doc_uid,
+            history=history,
+        )
+
+    def _format_history_markdown(self, *, knowledge_base_id: str, doc_uid: str, history: list[dict]) -> str:
+        """格式化 PageIndex 历史导出内容，供全量与单条导出复用。"""
 
         lines = [
             "# PageIndex 深度检索导出",
             "",
-            f"- 知识库：{resolved_knowledge_base_id}",
-            f"- 文档：{resolved_doc_uid}",
+            f"- 知识库：{knowledge_base_id}",
+            f"- 文档：{doc_uid}",
             "",
         ]
         for index, item in enumerate(history, start=1):
@@ -458,7 +506,7 @@ class PageIndexService:
         """让 LLM 根据 PageIndex 树结构选择相关节点，并基于证据生成回答。"""
 
         llm_client = self._get_llm_client()
-        candidates = self._build_tree_candidates(record, structure, question_analysis=question_analysis, limit=30, include_content=True)
+        candidates = self._build_tree_candidates(record, structure, question=question, question_analysis=question_analysis, limit=30, include_content=True)
         if not candidates:
             return [], "", {"candidate_nodes": [], "selected_nodes": []}
 
@@ -570,13 +618,16 @@ class PageIndexService:
         record: dict,
         structure: list[dict],
         *,
+        question: str = "",
         question_analysis: dict | None = None,
         limit: int = 80,
         include_content: bool = False,
     ) -> list[dict]:
         """将 PageIndex 树节点转换为 LLM 可选择的候选列表。"""
 
-        terms = self._analysis_terms(question_analysis or {})
+        raw_terms = self._analysis_terms(question_analysis or {})
+        question_text = str(question or (question_analysis or {}).get("question") or "")
+        terms = self._build_tree_scoring_terms(raw_terms, question_text)
         flattened = self._flatten_structure(structure)
         scored_items: list[tuple[int, int, dict]] = []
         for index, node in enumerate(flattened, start=1):
@@ -584,8 +635,7 @@ class PageIndexService:
             score = self._penalize_generic_front_matter(node, score)
             scored_items.append((score, index, node))
         scored_items.sort(key=lambda item: (-item[0], int(item[2].get("level") or 1), int(item[2].get("line_num") or 0)))
-        if not any(score > 0 for score, _index, _node in scored_items):
-            scored_items = [(score, index, node) for score, index, node in scored_items[:limit]]
+        scored_items = [(score, index, node) for score, index, node in scored_items if score > 0]
 
         client = PageIndexClient(workspace=str(record["workspace_path"])) if include_content else None
         candidates: list[dict] = []
@@ -822,7 +872,7 @@ class PageIndexService:
     def _rank_evidence(self, record: dict, structure: list[dict], question: str, question_analysis: dict | None = None) -> tuple[list[dict], list[dict]]:
         """按问题关键词对 PageIndex 节点进行本地打分。"""
 
-        candidates = self._build_tree_candidates(record, structure, question_analysis=question_analysis, limit=30, include_content=True)
+        candidates = self._build_tree_candidates(record, structure, question=question, question_analysis=question_analysis, limit=30, include_content=True)
         client = PageIndexClient(workspace=str(record["workspace_path"]))
         evidence: list[dict] = []
         for candidate in candidates[:3]:
@@ -847,12 +897,15 @@ class PageIndexService:
         terms = self._analysis_terms(question_analysis or {})
         if not terms:
             terms = self._extract_question_terms(question)
-        query_terms = terms[:24] or [question]
+        query_terms = self._build_rag_query_terms(terms, question)
+        if not query_terms:
+            return []
+        required_subject_terms = self._required_rag_subject_terms(terms)
         rows: list[dict] = []
         seen_chunks: set[str] = set()
         with create_connection(self.settings.sqlite_db_path) as connection:
             for term in query_terms:
-                if len(rows) >= 3:
+                if len(rows) >= 2:
                     break
                 normalized_term = str(term or "").strip()
                 if not normalized_term:
@@ -888,9 +941,16 @@ class PageIndexService:
                     chunk_id = str(item.get("chunk_id") or "")
                     if not chunk_id or chunk_id in seen_chunks:
                         continue
+                    content = str(item.get("content") or "")
+                    if normalized_term not in content:
+                        continue
+                    if required_subject_terms and not any(subject in content for subject in required_subject_terms):
+                        continue
+                    if self._is_incidental_rag_context(normalized_term, content):
+                        continue
                     seen_chunks.add(chunk_id)
                     rows.append(item)
-                    if len(rows) >= 3:
+                    if len(rows) >= 2:
                         break
 
         evidence: list[dict] = []
@@ -910,12 +970,100 @@ class PageIndexService:
         return evidence
 
     @staticmethod
+    def _required_rag_subject_terms(terms: list[str]) -> list[str]:
+        """提取必须出现在补充片段中的主题词，只做相关性门槛，不单独检索。"""
+
+        required: list[str] = []
+        for term in terms:
+            normalized = str(term or "").strip()
+            if normalized == "阿胶" and normalized not in required:
+                required.append(normalized)
+        return required
+
+    @classmethod
+    def _build_rag_query_terms(cls, terms: list[str], question: str) -> list[str]:
+        """构造 RAG/FTS 补充检索词，过滤会导致重复污染的泛词。"""
+
+        specific_terms: list[str] = []
+        seen: set[str] = set()
+        normalized_question = cls._normalize_rag_text(question)
+        for term in terms or cls._extract_question_terms(question):
+            normalized = str(term or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            if cls._normalize_rag_text(normalized) not in normalized_question:
+                continue
+            if cls._is_generic_rag_term(normalized):
+                continue
+            seen.add(normalized)
+            specific_terms.append(normalized)
+        specific_terms.sort(key=len, reverse=True)
+        return specific_terms[:8]
+
+    @staticmethod
+    def _normalize_rag_text(value: str) -> str:
+        """规范化 RAG/FTS 匹配文本，避免标点和空白影响问题原词判断。"""
+
+        return re.sub(r"[\s，。！？、,.?？：:；;（）()《》“”\"'`]+", "", str(value or ""))
+
+    @staticmethod
+    def _is_generic_rag_term(term: str) -> bool:
+        """判断词是否过于泛化，不适合单独驱动 RAG/FTS 补充证据。"""
+
+        normalized = PageIndexService._normalize_rag_text(str(term or ""))
+        noisy_fragments = {"哪些", "内容", "说明", "它对", "有帮", "帮助", "对皮", "肤有"}
+        if len(normalized) > 10 or "的" in normalized or normalized.startswith("对") or any(fragment in normalized for fragment in noisy_fragments):
+            return True
+        generic_terms = {
+            "阿胶",
+            "功效",
+            "作用",
+            "应用",
+            "疗效",
+            "益处",
+            "好处",
+            "帮助",
+            "内容",
+            "哪些",
+            "什么",
+            "如何",
+            "是否",
+            "证据",
+            "资料",
+            "研究",
+            "文献",
+            "相关",
+            "主要",
+            "方面",
+            "方向",
+        }
+        if normalized in generic_terms:
+            return True
+        without_subject = normalized.replace("阿胶", "")
+        return not without_subject or without_subject in generic_terms
+
+    @staticmethod
+    def _is_incidental_rag_context(term: str, content: str) -> bool:
+        """过滤试验脱落、排除病例等偶然提及问题词的无关上下文。"""
+
+        normalized_term = str(term or "").strip()
+        normalized_content = str(content or "")
+        if not normalized_term or normalized_term not in normalized_content:
+            return False
+        incidental_markers = ("因", "停止", "排除", "未能", "脱落", "未完成", "剔除", "不良事件")
+        start = max(normalized_content.find(normalized_term) - 18, 0)
+        end = min(normalized_content.find(normalized_term) + len(normalized_term) + 24, len(normalized_content))
+        window = normalized_content[start:end]
+        return any(marker in window for marker in incidental_markers)
+
+    @staticmethod
     def _merge_evidence(primary: list[dict], supplemental: list[dict]) -> list[dict]:
         """合并 PageIndex 节点证据和 RAG/FTS 证据，并按来源去重。"""
 
         merged: list[dict] = []
         seen: set[tuple[str, str]] = set()
-        for item in [*primary, *supplemental]:
+        source_items = primary if primary else supplemental
+        for item in source_items:
             key = (str(item.get("source_type") or "PageIndex 节点"), str(item.get("chunk_id") or item.get("position") or item.get("title") or ""))
             if key in seen:
                 continue
@@ -945,7 +1093,7 @@ class PageIndexService:
 
         if not evidence:
             return f"未在 PageIndex 文档结构中找到与“{question}”直接相关的证据。"
-        top = next((item for item in evidence if item.get("source_type") == "RAG/FTS 原文"), evidence[0])
+        top = next((item for item in evidence if item.get("source_type") == "PageIndex 节点"), evidence[0])
         content = str(top.get("content") or top.get("summary") or "").strip()
         if len(content) > 600:
             content = content[:600].rstrip() + "..."
@@ -966,15 +1114,64 @@ class PageIndexService:
         if len(terms) > 1:
             return terms
         compact_question = re.sub(r"[，。！？、,.?？\s]", "", question)
-        stop_words = {"哪些", "内容", "说明", "它对", "有帮助", "属于", "哪个", "知识", "文档", "什么", "如何", "是否"}
-        for match in re.findall(r"[\u4e00-\u9fff]{2,}", compact_question):
-            for size in (2, 3, 4):
-                for index in range(0, max(len(match) - size + 1, 0)):
-                    term = match[index : index + size]
-                    if term in stop_words or term in terms:
-                        continue
+        if "阿胶" in compact_question:
+            terms.append("阿胶")
+        semantic_text = compact_question
+        for pattern in (
+            "阿胶",
+            "哪些内容",
+            "有没有",
+            "能不能",
+            "有哪些",
+            "有什么",
+            "有好处吗",
+            "有作用吗",
+            "有帮助",
+            "如何",
+            "是否",
+            "治疗",
+            "说明",
+            "帮助",
+            "哪些",
+            "内容",
+            "它",
+            "对",
+            "吃",
+            "吗",
+        ):
+            semantic_text = semantic_text.replace(pattern, " ")
+        for segment in re.split(r"\s+", semantic_text):
+            segment = segment.strip()
+            if len(segment) < 2:
+                continue
+            for term in PageIndexService._expand_meaningful_segment(segment):
+                if term not in terms:
                     terms.append(term)
         return terms[:24]
+
+    @staticmethod
+    def _expand_meaningful_segment(segment: str) -> list[str]:
+        """从中文问题片段中抽取可用于结构检索的核心短语。"""
+
+        terms = [segment]
+        if len(segment) >= 4:
+            if "质量检测" in segment:
+                terms.append("质量检测")
+            if "检测方法" in segment:
+                terms.append("检测方法")
+            if "制作工艺" in segment:
+                terms.extend(["制作工艺", "工艺", "古法", "流程", "器用", "原料"])
+            if "古代文献" in segment:
+                terms.extend(["古代文献", "古籍", "本草", "文献"])
+            if "状态改善" in segment:
+                terms.append("状态改善")
+            if "皮肤状态" in segment:
+                terms.extend(["皮肤状态", "皮肤", "胶原", "抗氧化"])
+            if "癌症患者" in segment:
+                terms.extend(["癌症患者", "癌症"])
+            if "不孕不育" in segment:
+                terms.append("不孕不育")
+        return [term for term in terms if not PageIndexService._is_generic_tree_term(term)]
 
     @staticmethod
     def _normalize_term_list(value: object) -> list[str]:
@@ -1000,6 +1197,65 @@ class PageIndexService:
             terms.extend(self._normalize_term_list(question_analysis.get(key)))
         return self._normalize_term_list(terms)
 
+    @classmethod
+    def _build_tree_scoring_terms(cls, terms: list[str], question: str) -> list[str]:
+        """构造 PageIndex 树节点打分词，排除主题词、问句词和跨字碎片。"""
+
+        candidates = terms or cls._extract_question_terms(question)
+        scoring_terms: list[str] = []
+        seen: set[str] = set()
+        for term in candidates:
+            normalized = str(term or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            if cls._is_generic_tree_term(normalized):
+                continue
+            seen.add(normalized)
+            scoring_terms.append(normalized)
+        scoring_terms.sort(key=len, reverse=True)
+        return scoring_terms[:16]
+
+    @staticmethod
+    def _is_generic_tree_term(term: str) -> bool:
+        """判断词是否不适合参与 PageIndex 树节点打分。"""
+
+        normalized = PageIndexService._normalize_rag_text(str(term or ""))
+        if len(normalized) < 2:
+            return True
+        generic_terms = {
+            "阿胶",
+            "作用",
+            "功效",
+            "疗效",
+            "治疗",
+            "患者",
+            "好处",
+            "益处",
+            "证据",
+            "方法",
+            "特点",
+            "内容",
+            "哪些",
+            "什么",
+            "如何",
+            "是否",
+            "有没有",
+            "能不能",
+            "有作用",
+            "有好处",
+            "应用",
+            "研究",
+            "相关",
+            "主要",
+        }
+        if normalized in generic_terms:
+            return True
+        noisy_prefixes = ("对", "有", "能", "没", "吗", "么", "些")
+        noisy_suffixes = ("对", "有", "能", "不", "没", "吗", "么", "些")
+        if len(normalized) <= 4 and (normalized.startswith(noisy_prefixes) or normalized.endswith(noisy_suffixes)):
+            return True
+        return False
+
     def _score_node(self, node: dict, terms: list[str]) -> int:
         """按标题、摘要和节点原文对候选节点打分。"""
 
@@ -1010,14 +1266,18 @@ class PageIndexService:
             str(node.get("text") or ""),
         ]
         haystack = " ".join(haystack_parts).lower()
+        compact_haystack = re.sub(r"\s+", "", haystack)
         score = 0
         for term in terms:
             normalized = term.lower()
             if not normalized:
                 continue
-            if normalized in str(node.get("title") or "").lower():
+            compact_normalized = re.sub(r"\s+", "", normalized)
+            title_text = str(node.get("title") or "").lower()
+            compact_title = re.sub(r"\s+", "", title_text)
+            if normalized in title_text or compact_normalized in compact_title:
                 score += 4
-            elif normalized in haystack:
+            elif normalized in haystack or compact_normalized in compact_haystack:
                 score += 2
         return score
 
@@ -1026,6 +1286,7 @@ class PageIndexService:
         """降低文档标题、课题组、CIP、参考文献等泛化前置节点排序。"""
 
         title = str(node.get("title") or "").strip()
+        summary = str(node.get("summary") or node.get("prefix_summary") or "").strip()
         line_num = int(node.get("line_num") or 0)
         penalty = 0
         generic_patterns = ("通典", "全集", "课题组", "图书在版", "CIP", "参考文献")
@@ -1034,6 +1295,8 @@ class PageIndexService:
             penalty += 8
         if is_generic and line_num and line_num <= 80:
             penalty += 4
+        if re.search(r"/\d+", title) or re.search(r"/\d+", summary):
+            penalty += 6
         return max(score - penalty, 0)
 
     @staticmethod

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gradio as gr
+import pandas as pd
 
 from src.db.connection import create_connection, initialize_database
 from src.pageindex.service import PageIndexService
@@ -39,18 +40,26 @@ def test_build_pageindex_tab_should_return_expected_components() -> None:
         "pageindex_rebuild_button",
         "pageindex_question",
         "pageindex_ask_button",
+        "pageindex_tree_panel",
         "pageindex_tree",
         "pageindex_answer",
         "pageindex_evidence_table",
         "pageindex_debug_table",
         "pageindex_history_table",
+        "pageindex_history_state",
+        "pageindex_active_query_id",
         "pageindex_export_button",
+        "pageindex_export_result",
+        "pageindex_download_file",
     }
     assert expected_keys.issubset(components.keys())
     assert isinstance(components["pageindex_knowledge_base"], gr.Dropdown)
     assert components["pageindex_knowledge_base"].elem_id == "pageindex-knowledge-base"
+    assert isinstance(components["pageindex_tree_panel"], gr.Accordion)
+    assert components["pageindex_tree_panel"].open is False
     assert isinstance(components["pageindex_tree"], gr.Dataframe)
     assert components["pageindex_tree"].elem_id == "pageindex-tree"
+    assert "ui-button--primary" in (components["pageindex_export_button"].elem_classes or [])
 
 
 def test_pageindex_question_handler_should_return_answer_evidence_and_history(tmp_path) -> None:
@@ -71,7 +80,7 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
     ask_handler = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "ask_pageindex_question_ui"), None)
     assert ask_handler is not None
 
-    answer_html, evidence_rows, debug_rows, history_rows = ask_handler(
+    answer_html, evidence_rows, debug_rows, history_rows, history_state, active_query_id, export_result_html, download_file = ask_handler(
         "kb_alpha | kb_alpha 知识库",
         f'{document["doc_uid"]} | alpha',
         "风险",
@@ -84,6 +93,10 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
     assert debug_rows[0][1] == "风险"
     assert "本地候选召回" in debug_rows[0][5]
     assert history_rows[0][2] == "风险"
+    assert history_state[0]["question"] == "风险"
+    assert active_query_id == history_state[0]["query_id"]
+    assert "已激活当前结果，可下载。" in export_result_html
+    assert download_file is None
 
 
 def test_pageindex_status_should_show_llm_availability(tmp_path) -> None:
@@ -103,7 +116,7 @@ def test_pageindex_status_should_show_llm_availability(tmp_path) -> None:
     )
     assert change_handler is not None
 
-    status_html, _tree_rows, _answer_html, _evidence_rows, _debug_rows = change_handler(
+    status_html, _tree_rows, _answer_html, _evidence_rows, _debug_rows, _history_rows, _history_state, _active_query_id, _export_result_html, _download_file = change_handler(
         "default | 默认知识库",
         "",
     )
@@ -143,7 +156,10 @@ def test_pageindex_document_change_should_show_ready_when_index_already_exists(t
     )
     assert change_handler is not None
 
-    status_html, tree_rows, _answer_html, _evidence_rows, debug_rows = change_handler(
+    pageindex_service = PageIndexService(settings)
+    pageindex_service.ask_question("kb_alpha", document["doc_uid"], "风险")
+
+    status_html, tree_rows, _answer_html, _evidence_rows, debug_rows, history_rows, history_state, active_query_id, _export_result_html, _download_file = change_handler(
         "kb_alpha | kb_alpha 知识库",
         f'{document["doc_uid"]} | alpha',
     )
@@ -157,6 +173,9 @@ def test_pageindex_document_change_should_show_ready_when_index_already_exists(t
     assert "失败" not in status_html
     assert tree_rows[0][1] == "总论"
     assert debug_rows == []
+    assert history_rows[0][2] == "风险"
+    assert history_state[0]["question"] == "风险"
+    assert active_query_id == history_state[0]["query_id"]
 
 
 def test_pageindex_initial_state_should_show_ready_when_default_document_index_exists(tmp_path) -> None:
@@ -213,7 +232,7 @@ def test_pageindex_document_change_should_not_report_unbuilt_when_index_record_i
     )
     assert change_handler is not None
 
-    status_html, tree_rows, _answer_html, _evidence_rows, debug_rows = change_handler(
+    status_html, tree_rows, _answer_html, _evidence_rows, debug_rows, history_rows, history_state, active_query_id, _export_result_html, _download_file = change_handler(
         "kb_alpha | kb_alpha 知识库",
         f'{document["doc_uid"]} | alpha',
     )
@@ -222,3 +241,108 @@ def test_pageindex_document_change_should_not_report_unbuilt_when_index_record_i
     assert "未构建" not in status_html
     assert tree_rows == []
     assert debug_rows == []
+    assert history_rows == []
+    assert history_state == []
+    assert active_query_id == ""
+
+
+def test_pageindex_history_select_should_activate_record_for_download(tmp_path) -> None:
+    """点击 PageIndex 历史记录后，应回显该记录并设置为当前下载对象。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service = PageIndexService(settings)
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    first = service.ask_question("kb_alpha", document["doc_uid"], "风险")
+    second = service.ask_question("kb_alpha", document["doc_uid"], "知识库")
+
+    demo = create_ui_app(settings)
+    select_handler = next(
+        (
+            block_fn.fn
+            for block_fn in demo.fns.values()
+            if getattr(block_fn.fn, "__name__", "") == "select_pageindex_history_ui"
+        ),
+        None,
+    )
+    assert select_handler is not None
+
+    class FakeSelectData:
+        """测试用选择事件，模拟点击历史表第二行。"""
+
+        index = (1, 0)
+
+    history_state = [second, first]
+    history_rows = [
+        [second["created_at"], second["doc_uid"], second["question"], second["answer"][:300]],
+        [first["created_at"], first["doc_uid"], first["question"], first["answer"][:300]],
+    ]
+
+    answer_html, evidence_rows, debug_rows, active_query_id, export_result_html, download_file = select_handler(
+        "kb_alpha | kb_alpha 知识库",
+        f'{document["doc_uid"]} | alpha',
+        history_state,
+        pd.DataFrame(history_rows, columns=["时间", "文档", "问题", "回答摘要"]),
+        FakeSelectData(),
+    )
+
+    assert first["answer"] in answer_html
+    assert evidence_rows[0][1] == "风险"
+    assert debug_rows == []
+    assert active_query_id == first["query_id"]
+    assert "已激活历史记录，可下载。" in export_result_html
+    assert download_file is None
+
+
+def test_pageindex_export_should_download_active_history_record_only(tmp_path) -> None:
+    """PageIndex 下载结果应只导出当前激活的历史记录。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service = PageIndexService(settings)
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    active = service.ask_question("kb_alpha", document["doc_uid"], "风险")
+    service.ask_question("kb_alpha", document["doc_uid"], "不要导出这个问题")
+
+    demo = create_ui_app(settings)
+    export_handler = next(
+        (
+            block_fn.fn
+            for block_fn in demo.fns.values()
+            if getattr(block_fn.fn, "__name__", "") == "export_pageindex_results_ui"
+        ),
+        None,
+    )
+    assert export_handler is not None
+
+    result_html, download_file = export_handler(
+        "kb_alpha | kb_alpha 知识库",
+        f'{document["doc_uid"]} | alpha',
+        active["query_id"],
+    )
+
+    assert "已生成 PageIndex 下载文件" in result_html
+    assert download_file
+    assert download_file.endswith(".md")
+    assert "查看渲染效果" in result_html
+    assert ".preview.html" in result_html
+    assert "下载地址" not in result_html
+    with open(download_file, encoding="utf-8") as file:
+        exported_text = file.read()
+    assert "# PageIndex 深度检索导出" in exported_text
+    assert "问题：风险" in exported_text
+    assert "不要导出这个问题" not in exported_text

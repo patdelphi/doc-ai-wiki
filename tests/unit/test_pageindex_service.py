@@ -547,6 +547,104 @@ def test_pageindex_candidate_ranking_should_penalize_generic_front_matter(tmp_pa
     assert candidates[0]["title"] == "绪论 阿胶历史文化综述"
 
 
+def test_pageindex_question_terms_should_keep_meaningful_chinese_phrases() -> None:
+    """本地问题词提取应保留核心短语，避免跨字碎片污染检索。"""
+
+    cold_terms = PageIndexService._extract_question_terms("阿胶对感冒有没有作用")
+    quality_terms = PageIndexService._extract_question_terms("阿胶质量检测方法有哪些")
+
+    assert "感冒" in cold_terms
+    assert "不孕不育" in PageIndexService._extract_question_terms("阿胶能不能治疗不孕不育")
+    assert "胶对" not in cold_terms
+    assert "对感" not in cold_terms
+    assert "作用" not in cold_terms
+    assert "质量检测" in quality_terms
+    assert "检测方法" in quality_terms
+    assert "有哪些" not in quality_terms
+
+
+def test_pageindex_local_rank_should_return_empty_when_only_generic_terms_match(tmp_path: Path) -> None:
+    """本地降级没有核心问题词命中时应返回证据不足，而不是用泛词硬凑节点。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "基于斑马鱼模型的新阿胶对化疗诱导免疫损伤的保护作用", "line_num": 1, "level": 1, "summary": "免疫损伤保护", "nodes": []},
+        {"title": "不同工艺阿胶对血虚证小鼠外周血象的影响", "line_num": 8, "level": 1, "summary": "血虚证小鼠", "nodes": []},
+    ]
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶对感冒有没有作用")
+
+    assert evidence == []
+    assert debug_nodes == []
+
+
+def test_pageindex_local_rank_should_keep_direct_quality_detection_match(tmp_path: Path) -> None:
+    """本地降级仍应保留问题核心词直接命中的 PageIndex 节点。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "阿胶在《伤寒杂病论》中的应用", "line_num": 1, "level": 1, "summary": "经典方剂", "nodes": []},
+        {"title": "阿胶及其制品质量检测方法研究进展", "line_num": 12, "level": 1, "summary": "真伪鉴别、重金属检测和微生物检测", "nodes": []},
+    ]
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶质量检测方法有哪些")
+
+    assert evidence
+    assert evidence[0]["title"] == "阿胶及其制品质量检测方法研究进展"
+    assert debug_nodes[0]["title"] == "阿胶及其制品质量检测方法研究进展"
+
+
+def test_pageindex_local_rank_should_penalize_toc_like_nodes(tmp_path: Path) -> None:
+    """目录式 PageIndex 节点内容较薄，应排在真实正文节点之后。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "古法 /112", "line_num": 10, "level": 1, "summary": "文献 /112 流程 /117", "nodes": []},
+        {"title": "器 用", "line_num": 80, "level": 1, "summary": "阿胶制作过程中使用刮皮、熬胶、切胶工具", "nodes": []},
+    ]
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶制作工艺有什么特点")
+
+    assert evidence[0]["title"] == "器 用"
+    assert debug_nodes[0]["title"] == "器 用"
+
+
 def test_pageindex_service_should_add_rag_fts_evidence_inside_current_document_only(tmp_path: Path) -> None:
     """PageIndex 应在当前文档范围内补充 RAG/FTS 原文证据，不能混入其它文档。"""
 
@@ -587,6 +685,188 @@ def test_pageindex_service_should_add_rag_fts_evidence_inside_current_document_o
     assert all(item.get("doc_uid") == document["doc_uid"] for item in rag_items)
     assert "chunk_beta_skin" not in {item.get("chunk_id") for item in rag_items}
     assert answer["debug"]["rag_evidence"][0]["chunk_id"] == "chunk_alpha_skin"
+
+
+def test_pageindex_rag_evidence_should_ignore_generic_entity_terms(tmp_path: Path) -> None:
+    """RAG/FTS 补充证据不能被“阿胶”等泛词牵引到固定片段，应优先使用具体问题词。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_generic_ejiao",
+        content="阿胶是传统滋补材料，常见资料会介绍其补血、止血、滋阴等笼统功效。",
+        source_span="line 1",
+    )
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_cold_evidence",
+        content="感冒期间是否适合服用阿胶，需要结合发热、咳嗽和外感病程判断，不能只看滋补功效。",
+        source_span="line 20",
+    )
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "阿胶对感冒的疗效",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "感冒", "疗效"], "expanded_terms": []},
+    )
+
+    assert [item["chunk_id"] for item in rag_items] == ["chunk_cold_evidence"]
+    assert "感冒期间" in rag_items[0]["content"]
+
+
+def test_pageindex_rag_evidence_should_skip_when_only_generic_terms(tmp_path: Path) -> None:
+    """只有泛词时不追加 RAG/FTS 证据，避免不同问题反复引用同一批高频片段。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_generic_ejiao",
+        content="阿胶功效与作用介绍，包含补血、止血、滋阴等常见泛化描述。",
+        source_span="line 1",
+    )
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "阿胶有什么功效",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "功效", "作用"], "expanded_terms": []},
+    )
+
+    assert rag_items == []
+
+
+def test_pageindex_rag_evidence_should_skip_incidental_trial_dropout_context(tmp_path: Path) -> None:
+    """具体词只在试验脱落等偶发语境出现时，不应作为 PageIndex 补充证据。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_dropout_cold",
+        content="阿胶贫血研究中有1例患者因流行性感冒停止治疗，其数据被排除在分析之外。",
+        source_span="line 30",
+    )
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "阿胶对感冒的疗效",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "感冒", "疗效"], "expanded_terms": []},
+    )
+
+    assert rag_items == []
+
+
+def test_pageindex_rag_evidence_should_not_use_expanded_generic_medical_terms(tmp_path: Path) -> None:
+    """RAG/FTS 不应因 LLM 扩展出的泛化药理词命中弱相关原文片段。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_quality_control",
+        content="阿胶质量控制研究使用特征肽鉴别方法，比较不同动物胶原蛋白来源。",
+        source_span="line 100",
+    )
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_hormone",
+        content="阿胶珠联合孕激素用于妇科研究，观察子宫内膜与出血改善情况。",
+        source_span="line 120",
+    )
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "阿胶对感冒有没有作用",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "感冒", "免疫", "抗炎", "疗效"], "expanded_terms": ["质量控制", "孕激素"]},
+    )
+
+    assert rag_items == []
+
+
+def test_pageindex_rag_evidence_should_keep_question_specific_term_over_broad_context(tmp_path: Path) -> None:
+    """RAG/FTS 应优先保留问题里的具体词，过滤只含泛化上下文的片段。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_anemia",
+        content="阿胶用于贫血研究，主要观察血红蛋白水平和胃肠道不适反应。",
+        source_span="line 200",
+    )
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_fertility",
+        content="不孕不育患者辨证使用阿胶相关方剂时，需结合月经、卵巢储备和助孕方案综合判断。",
+        source_span="line 240",
+    )
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "阿胶能不能治疗不孕不育",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "不孕不育", "补血", "临床"], "expanded_terms": ["卵巢储备功能低下"]},
+    )
+
+    assert [item["chunk_id"] for item in rag_items] == ["chunk_fertility"]
 
 
 def test_pageindex_llm_answer_prompt_should_require_evidence_bound_format(tmp_path: Path) -> None:
