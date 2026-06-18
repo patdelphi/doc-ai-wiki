@@ -489,6 +489,70 @@ def test_pageindex_service_should_report_keyword_fallback_when_llm_reasoning_fai
     assert answer["debug"]["candidate_nodes"][0]["title"] == "风险"
 
 
+def test_pageindex_service_should_not_use_keyword_or_rag_fallback_when_llm_selects_no_node(tmp_path: Path) -> None:
+    """LLM 已判断候选节点不相关时，不应再用泛化关键词或 RAG 片段补出伪证据。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {
+            "title": "育肾活血方联合促性腺激素释放激素类似物治疗不孕症",
+            "line_num": 8,
+            "level": 1,
+            "summary": "不涉及阿胶治疗不孕不育。",
+            "nodes": [],
+        }
+    ]
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_generic_treatment",
+        content="观察组加用阿胶口服，治疗16周，用于补充铁剂相关研究。",
+        source_span="section-1:chunk-1",
+    )
+
+    class EmptySelectionClient:
+        """测试用语义推理客户端，模拟 LLM 明确认为候选证据不足。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "医疗咨询",
+                    "entities": ["阿胶", "不孕不育"],
+                    "keywords": ["阿胶", "治疗", "不孕不育"],
+                    "expanded_terms": ["不孕症", "疗效"],
+                }
+            return {"selected_nodes": [], "answer": "未找到直接证据。"}
+
+    service = PageIndexService(settings, llm_client=EmptySelectionClient())
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "阿胶能不能治疗不孕不育")
+
+    assert answer["retrieval_mode"] == "LLM 语义树推理"
+    assert answer["evidence"] == []
+    assert "未在 PageIndex 文档结构中找到" in answer["answer"]
+    assert answer["debug"]["selected_nodes"] == []
+
+
+def test_pageindex_rag_query_terms_should_ignore_generic_treatment_when_specific_term_exists() -> None:
+    """RAG/FTS 补证据不能用“治疗”这类泛词驱动，否则容易返回相似治疗流程噪音。"""
+
+    terms = ["阿胶", "治疗", "不孕不育"]
+
+    query_terms = PageIndexService._build_rag_query_terms(terms, "阿胶能不能治疗不孕不育")
+
+    assert query_terms == ["不孕不育"]
+
+
 def test_pageindex_service_should_return_debug_candidates_for_diagnosis(tmp_path: Path) -> None:
     """PageIndex 提问结果应返回候选节点诊断信息，便于判断召回和重排质量。"""
 
@@ -643,6 +707,40 @@ def test_pageindex_local_rank_should_penalize_toc_like_nodes(tmp_path: Path) -> 
 
     assert evidence[0]["title"] == "器 用"
     assert debug_nodes[0]["title"] == "器 用"
+
+
+def test_pageindex_tree_candidates_should_fallback_to_question_terms_when_llm_terms_are_generic(tmp_path: Path) -> None:
+    """LLM 问题分析词过泛时，树候选仍应使用用户问题中的核心短语。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "阿胶治疗贫血研究", "line_num": 1, "level": 1, "summary": "贫血治疗", "nodes": []},
+        {"title": "育肾活血方联合促性腺激素释放激素类似物治疗子宫内膜异位症不孕症", "line_num": 20, "level": 1, "summary": "不孕不育相关研究", "nodes": []},
+    ]
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    candidates = service._build_tree_candidates(
+        record,
+        structure,
+        question="阿胶能不能治疗不孕不育",
+        question_analysis={"entities": ["阿胶"], "keywords": ["阿胶", "治疗"], "expanded_terms": []},
+        limit=3,
+        include_content=False,
+    )
+
+    assert candidates
+    assert candidates[0]["title"] == "育肾活血方联合促性腺激素释放激素类似物治疗子宫内膜异位症不孕症"
 
 
 def test_pageindex_service_should_add_rag_fts_evidence_inside_current_document_only(tmp_path: Path) -> None:

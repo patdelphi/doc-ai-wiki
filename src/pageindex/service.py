@@ -473,6 +473,15 @@ class PageIndexService:
                     "llm_error": "",
                     "debug": debug,
                 }
+            debug["retrieval_mode"] = "LLM 语义树推理"
+            debug["question_analysis"] = question_analysis
+            return {
+                "evidence": [],
+                "answer": self._build_local_answer(question, []),
+                "retrieval_mode": "LLM 语义树推理",
+                "llm_error": "",
+                "debug": debug,
+            }
         except Exception as exc:  # noqa: BLE001
             llm_error = str(exc)
         else:
@@ -625,8 +634,13 @@ class PageIndexService:
     ) -> list[dict]:
         """将 PageIndex 树节点转换为 LLM 可选择的候选列表。"""
 
-        raw_terms = self._analysis_terms(question_analysis or {})
         question_text = str(question or (question_analysis or {}).get("question") or "")
+        raw_terms = self._normalize_term_list(
+            [
+                *self._analysis_terms(question_analysis or {}),
+                *self._extract_question_terms(question_text),
+            ]
+        )
         terms = self._build_tree_scoring_terms(raw_terms, question_text)
         flattened = self._flatten_structure(structure)
         scored_items: list[tuple[int, int, dict]] = []
@@ -1020,6 +1034,7 @@ class PageIndexService:
             "作用",
             "应用",
             "疗效",
+            "治疗",
             "益处",
             "好处",
             "帮助",
