@@ -331,11 +331,11 @@ def test_knowledge_base_service_should_move_legacy_root_documents_into_default_d
     assert len(moved_items) == 1
     assert not legacy_file.exists()
     assert moved_path.exists()
-    assert moved_items[0]["source_path"] == str(moved_path.resolve())
+    assert moved_items[0]["source_path"] == "default/legacy.md"
     assert moved_items[0]["knowledge_base_id"] == "default"
     assert updated_document is not None
     assert updated_document["knowledge_base_id"] == "default"
-    assert Path(updated_document["source_path"]).resolve() == moved_path.resolve()
+    assert updated_document["source_path"] == "default/legacy.md"
 
 
 def test_knowledge_base_service_should_repair_legacy_default_document_paths_after_file_migration(tmp_path: Path) -> None:
@@ -372,13 +372,13 @@ def test_knowledge_base_service_should_repair_legacy_default_document_paths_afte
     assert moved_items == [
         {
             "file_name": "legacy.md",
-            "source_path": str(migrated_file.resolve()),
+            "source_path": "default/legacy.md",
             "knowledge_base_id": "default",
         }
     ]
     assert updated_document is not None
     assert updated_document["knowledge_base_id"] == "default"
-    assert Path(updated_document["source_path"]).resolve() == migrated_file.resolve()
+    assert updated_document["source_path"] == "default/legacy.md"
 
 
 def test_knowledge_base_service_should_block_delete_when_quality_history_exists(tmp_path: Path) -> None:

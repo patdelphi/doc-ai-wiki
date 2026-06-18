@@ -1467,11 +1467,14 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
         )
 
     resolved = payload or {}
+    has_success = "success" in resolved
     success = bool(resolved.get("success"))
     progress_summary = resolved.get("progress_summary") or {}
     jobs = resolved.get("jobs") or []
     accepted = resolved.get("accepted") or []
-    description = _display_text(resolved.get("message")) if resolved.get("message") else ("操作已完成" if success else "操作未成功")
+    description = _display_text(resolved.get("message")) if resolved.get("message") else (
+        "操作已完成" if success else ("操作未成功" if has_success else "等待操作")
+    )
     notes: list[str] = []
     if resolved.get("error_code"):
         notes.append(f'错误代码：{_display_text(resolved.get("error_code"))}')
@@ -1520,7 +1523,9 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
             )
         footer_html = "".join(link_items)
 
-    cards = [("执行状态", "成功" if success else "失败")]
+    status_label = _display_text(resolved.get("status_label")) if resolved.get("status_label") else "当前状态"
+    status_value = _display_text(resolved.get("status_value")) if resolved.get("status_value") else "等待操作"
+    cards = [("执行状态", "成功" if success else "失败")] if has_success else [(status_label, status_value)]
     if jobs:
         cards.append(("处理文档数", str(len(jobs))))
     if accepted:
@@ -1539,7 +1544,7 @@ def format_operation_result_html(payload: dict | None, *, title: str) -> str:
         cards=cards,
         notes=notes,
         footer_html=footer_html,
-        tone="success" if success else "danger",
+        tone=("success" if success else "danger") if has_success else "neutral",
     )
 
 

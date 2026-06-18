@@ -48,6 +48,11 @@ Claim:
 class BaseLLMClient:
     """LLM 客户端抽象基类。"""
 
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        """调用模型并要求返回 JSON 对象。"""
+
+        raise NotImplementedError
+
     def evaluate_claim(
         self,
         *,
@@ -63,6 +68,11 @@ class BaseLLMClient:
 
 class DisabledLLMClient(BaseLLMClient):
     """禁用状态占位客户端。"""
+
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        """禁用状态下不应被调用。"""
+
+        raise ValidationAppError("LLM 客户端已禁用")
 
     def evaluate_claim(
         self,
@@ -149,6 +159,60 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
                 details={"provider": "openai", "model": self.model},
             ) from exc
 
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        """调用 OpenAI 兼容聊天接口，并解析 JSON 对象。"""
+
+        try:
+            return self._complete_json_once(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                use_response_format=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            first_error = exc
+        try:
+            return self._complete_json_once(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                use_response_format=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ExternalServiceAppError(
+                "LLM 服务调用失败",
+                details={"provider": "openai", "model": self.model, "first_error": str(first_error)[:300]},
+            ) from exc
+
+    def _complete_json_once(self, *, system_prompt: str, user_prompt: str, use_response_format: bool) -> dict:
+        """执行一次 OpenAI 兼容 JSON 调用；必要时允许从普通文本中提取 JSON。"""
+
+        request_payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
+            "enable_thinking": self.enable_thinking,
+        }
+        if use_response_format:
+            request_payload["response_format"] = {"type": "json_object"}
+        response = httpx.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_payload,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        parsed = _parse_json_object(content)
+        return parsed if isinstance(parsed, dict) else {}
+
 
 class AnthropicLLMClient(BaseLLMClient):
     """Anthropic Messages 接口客户端。"""
@@ -217,6 +281,43 @@ class AnthropicLLMClient(BaseLLMClient):
             payload = response.json()
             content = payload["content"][0]["text"]
             return _parse_llm_result(content)
+        except Exception as exc:  # noqa: BLE001
+            raise ExternalServiceAppError(
+                "LLM 服务调用失败",
+                details={"provider": "anthropic", "model": self.model},
+            ) from exc
+
+    def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+        """调用 Anthropic Messages 接口，并解析 JSON 对象。"""
+
+        try:
+            response = httpx.post(
+                f"{self.base_url}/v1/messages",
+                headers={
+                    "x-api-key": self.api_key,
+                    "anthropic-version": self.anthropic_version,
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "system": system_prompt,
+                    "max_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": user_prompt}],
+                        }
+                    ],
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = payload["content"][0]["text"]
+            parsed = json.loads(content)
+            return parsed if isinstance(parsed, dict) else {}
         except Exception as exc:  # noqa: BLE001
             raise ExternalServiceAppError(
                 "LLM 服务调用失败",
@@ -312,7 +413,7 @@ _VALID_RISK_LEVELS = {"low", "medium", "high"}
 def _parse_llm_result(content: str) -> dict:
     """解析 LLM 返回的 JSON 结果，并校验枚举值和范围约束。"""
 
-    payload = json.loads(content)
+    payload = _parse_json_object(content)
     if "verdict" not in payload and isinstance(payload.get("interpretation"), dict):
         payload = payload["interpretation"]
     # 枚举校验：非法值回退到安全默认值
@@ -337,6 +438,22 @@ def _parse_llm_result(content: str) -> dict:
         "risk_level": risk_level,
         "reason": str(payload.get("reason", "")),
     }
+
+
+def _parse_json_object(content: str) -> dict:
+    """从模型输出中解析 JSON 对象，兼容前后带解释文字的响应。"""
+
+    text = str(content or "").strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            raise
+        payload = json.loads(match.group(0))
+    if not isinstance(payload, dict):
+        raise ValueError("LLM 返回内容不是 JSON 对象")
+    return payload
 
 
 def _build_claim_logic_block(claim_text: str) -> str:

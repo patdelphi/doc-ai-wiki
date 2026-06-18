@@ -312,6 +312,7 @@ def _ensure_default_admin(connection: sqlite3.Connection) -> None:
         "人工审核",
         "知识库管理",
         "知识库检索",
+        "PageIndex 深度检索",
         "功能设置",
     ]
     for tab_name in tab_names:

@@ -1080,6 +1080,17 @@ def test_operation_result_html_should_show_pending_state_when_not_started() -> N
     assert "失败" not in operation_html
 
 
+def test_operation_result_html_should_treat_missing_success_as_neutral_hint() -> None:
+    """只有提示消息、没有 success 字段时，不应误显示为失败。"""
+
+    operation_html = format_operation_result_html({"message": "已切换文档，请构建或重建 PageIndex。"}, title="PageIndex 状态")
+
+    assert "已切换文档" in operation_html
+    assert "当前状态" in operation_html
+    assert "等待操作" in operation_html
+    assert "失败" not in operation_html
+
+
 def test_operation_result_html_should_render_download_link_when_present() -> None:
     """下载结果应渲染可点击的下载与预览链接。"""
 

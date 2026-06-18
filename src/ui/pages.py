@@ -8,7 +8,9 @@ import re
 import gradio as gr
 
 from src.auth.service import AUTH_TAB_NAMES, normalize_auth_tab_name
-from src.common.errors import AppError
+from src.common.errors import AppError, NotFoundAppError
+from src.common.paths import resolve_input_path
+from src.pageindex.service import PageIndexService
 from src.ui.css import UI_CSS
 from src.ui.exporters import build_download_url, save_markdown_export
 from src.ui.page_helpers import (
@@ -29,6 +31,7 @@ from src.ui.page_helpers import (
     extract_login_session_permissions as _extract_login_session_permissions,
 )
 from src.ui.document_page import bind_document_events, build_document_tab
+from src.ui.pageindex_page import bind_pageindex_events, build_pageindex_tab
 from src.ui.quality_dummy_page import build_quality_dummy_tab
 from src.ui.quality_page import bind_quality_events, build_quality_tab
 from src.ui.review_page import bind_review_events, build_review_tab
@@ -128,6 +131,7 @@ MAIN_TAB_IDS = {
     "人工审核": "main-tab-review",
     "知识库管理": "main-tab-document",
     "知识库检索": "main-tab-search",
+    "PageIndex 深度检索": "main-tab-pageindex",
     "功能设置": "main-tab-settings",
 }
 
@@ -555,6 +559,7 @@ def _build_quality_dummy_help_html() -> str:
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service, auth_service, runtime_config: dict | None = None) -> gr.Blocks:
     """构建最小可用界面。"""
 
+    pageindex_service = PageIndexService(ingest_service.settings)
     knowledge_base_items = ingest_service.list_knowledge_bases()
     knowledge_base_choices = build_knowledge_base_choices(knowledge_base_items)
     default_knowledge_base_choice = next(
@@ -641,6 +646,254 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         resolved_knowledge_base_id = parse_knowledge_base_choice(resolved_choice or "")
         return resolved_knowledge_base_id or None
 
+    def _build_pageindex_status_html(
+        message: str,
+        *,
+        success: bool | None = None,
+        index_status: str | None = None,
+        retrieval_mode: str | None = None,
+        llm_error: str | None = None,
+        include_llm_status: bool = True,
+    ) -> str:
+        """渲染 PageIndex 状态提示。"""
+
+        status_lines: list[str] = []
+        status_value = index_status or ("已构建" if success else "未构建")
+        if include_llm_status:
+            retrieval_status = pageindex_service.get_retrieval_status()
+            llm_label = "LLM 可用" if retrieval_status.get("llm_available") else "LLM 不可用"
+            status_lines.extend(
+                [
+                    f"索引状态：{status_value}",
+                    f'LLM 状态：{llm_label}（{retrieval_status.get("llm_status", "-")}）',
+                    f'检索模式：{retrieval_status.get("retrieval_mode", "-")}',
+                    f'模型：{retrieval_status.get("provider", "-")}/{retrieval_status.get("model", "-")}',
+                ]
+            )
+        if retrieval_mode:
+            status_lines.append(f"本次检索模式：{retrieval_mode}")
+        if llm_error:
+            status_lines.append(f"LLM 降级原因：{llm_error}")
+        resolved_message = message
+        if status_lines:
+            resolved_message = "\n".join([message, "", *status_lines])
+        payload = {"message": resolved_message, "status_label": "索引状态", "status_value": status_value}
+        return format_operation_result_html(payload, title="PageIndex 状态")
+
+    def _build_pageindex_document_choices(knowledge_base_choice: str | None) -> tuple[list[str], str | None]:
+        """按知识库生成 PageIndex 文档选择项，避免跨库混用文档。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        if not knowledge_base_id:
+            return [], None
+        try:
+            documents = pageindex_service.list_available_documents(knowledge_base_id)
+        except AppError:
+            return [], None
+        choices = [f'{item["doc_uid"]} | {item["doc_title"]}' for item in documents]
+        return choices, choices[0] if choices else None
+
+    def _parse_pageindex_document_choice(document_choice: str | None) -> str:
+        """从 PageIndex 文档下拉中解析 doc_uid。"""
+
+        return str(document_choice or "").split(" | ", maxsplit=1)[0].strip()
+
+    def change_pageindex_knowledge_base_ui(knowledge_base_choice: str | None):
+        """切换 PageIndex 知识库后刷新当前文档与结果区。"""
+
+        document_choices, selected_document = _build_pageindex_document_choices(knowledge_base_choice)
+        status_html, tree_rows, answer_html, evidence_rows = _build_pageindex_selected_document_state(
+            knowledge_base_choice,
+            selected_document,
+        )
+        return (
+            gr.update(choices=document_choices, value=selected_document),
+            status_html,
+            tree_rows,
+            answer_html,
+            evidence_rows,
+            [],
+            [],
+        )
+
+    def change_pageindex_document_ui(_knowledge_base_choice: str | None, _document_choice: str | None):
+        """切换 PageIndex 文档后清空旧结果，避免跨文档误读。"""
+
+        return _build_pageindex_selected_document_state(_knowledge_base_choice, _document_choice)
+
+    def _build_pageindex_selected_document_state(knowledge_base_choice: str | None, document_choice: str | None):
+        """读取当前文档 PageIndex 状态；已有索引时直接展示结构树。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        doc_uid = _parse_pageindex_document_choice(document_choice)
+        if not knowledge_base_id or not doc_uid:
+            return (
+                _build_pageindex_status_html("请选择当前知识库与文档，然后构建 PageIndex。", index_status="未选择文档"),
+                [],
+                _build_pageindex_status_html("尚未提问。"),
+                [],
+                [],
+            )
+        try:
+            tree_rows = pageindex_service.get_tree_rows(knowledge_base_id, doc_uid)
+        except NotFoundAppError:
+            return (
+                _build_pageindex_status_html("已切换文档，请构建或重建 PageIndex。", index_status="未构建"),
+                [],
+                _build_pageindex_status_html("尚未提问。"),
+                [],
+                [],
+            )
+        except AppError as exc:
+            return (
+                _build_pageindex_status_html(f"索引记录存在，但读取结构失败：{exc.message}", success=False, index_status="索引异常"),
+                [],
+                _build_pageindex_status_html("尚未提问。"),
+                [],
+                [],
+            )
+        return (
+            _build_pageindex_status_html("PageIndex 已构建，可直接提问。", success=True, index_status="已构建"),
+            tree_rows,
+            _build_pageindex_status_html("尚未提问。"),
+            [],
+            [],
+        )
+
+    def build_pageindex_index_ui(knowledge_base_choice: str | None, document_choice: str | None, rebuild: bool = False):
+        """触发 PageIndex 本地索引构建，并返回状态与结构表。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        doc_uid = _parse_pageindex_document_choice(document_choice)
+        if not knowledge_base_id or not doc_uid:
+            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), []
+        try:
+            result = pageindex_service.build_index(knowledge_base_id, doc_uid, rebuild=rebuild)
+        except AppError as exc:
+            return _build_pageindex_status_html(exc.message, success=False), []
+        tree_rows = pageindex_service.get_tree_rows(knowledge_base_id, doc_uid)
+        return (
+            _build_pageindex_status_html(f'PageIndex 已构建：{result["pageindex_doc_id"]}', success=True),
+            tree_rows,
+        )
+
+    def _build_pageindex_evidence_rows(evidence_items: list[dict] | None) -> list[list[object]]:
+        """将 PageIndex 证据转换为表格行。"""
+
+        rows: list[list[object]] = []
+        for index, item in enumerate(evidence_items or [], start=1):
+            rows.append(
+                [
+                    index,
+                    str(item.get("title") or ""),
+                    str(item.get("position") or ""),
+                    str(item.get("content") or item.get("summary") or "")[:500],
+                    str(item.get("source_type") or "PageIndex 节点"),
+                ]
+            )
+        return rows
+
+    def _build_pageindex_history_rows(history_items: list[dict] | None) -> list[list[object]]:
+        """将 PageIndex 历史转换为表格行。"""
+
+        rows: list[list[object]] = []
+        for item in history_items or []:
+            rows.append(
+                [
+                    str(item.get("created_at") or ""),
+                    str(item.get("doc_uid") or ""),
+                    str(item.get("question") or ""),
+                    str(item.get("answer") or "")[:300],
+                ]
+            )
+        return rows
+
+    def _build_pageindex_debug_rows(debug: dict | None) -> list[list[object]]:
+        """将 PageIndex 检索诊断转换为表格行。"""
+
+        if not isinstance(debug, dict):
+            return []
+        retrieval_mode = str(debug.get("retrieval_mode") or "")
+        selected_ids = {
+            str(item.get("candidate_id") or "")
+            for item in debug.get("selected_nodes") or []
+            if isinstance(item, dict)
+        }
+        selected_reasons = {
+            str(item.get("candidate_id") or ""): str(item.get("reason") or "")
+            for item in debug.get("selected_nodes") or []
+            if isinstance(item, dict)
+        }
+        rows: list[list[object]] = []
+        for index, item in enumerate(debug.get("candidate_nodes") or [], start=1):
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("candidate_id") or "")
+            reason = selected_reasons.get(candidate_id) or str(item.get("reason") or "")
+            if candidate_id in selected_ids and reason:
+                reason = f"已选中：{reason}"
+            rows.append(
+                [
+                    index,
+                    str(item.get("title") or ""),
+                    str(item.get("position") or ""),
+                    int(item.get("score") or 0),
+                    retrieval_mode,
+                    reason,
+                ]
+            )
+        for item in debug.get("rag_evidence") or []:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                [
+                    len(rows) + 1,
+                    str(item.get("title") or "RAG/FTS 原文片段"),
+                    str(item.get("position") or ""),
+                    0,
+                    retrieval_mode,
+                    str(item.get("reason") or "当前文档 RAG/FTS 补充命中"),
+                ]
+            )
+        return rows
+
+    def ask_pageindex_question_ui(knowledge_base_choice: str | None, document_choice: str | None, question: str | None):
+        """基于 PageIndex 本地结构提问，并刷新证据与历史。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        doc_uid = _parse_pageindex_document_choice(document_choice)
+        if not knowledge_base_id or not doc_uid:
+            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), [], [], []
+        try:
+            result = pageindex_service.ask_question(knowledge_base_id, doc_uid, question or "")
+            history = pageindex_service.list_query_history(knowledge_base_id, doc_uid)
+        except AppError as exc:
+            return _build_pageindex_status_html(exc.message, success=False), [], [], []
+        return (
+            _build_pageindex_status_html(
+                result["answer"],
+                success=True,
+                retrieval_mode=str(result.get("retrieval_mode") or ""),
+                llm_error=str(result.get("llm_error") or ""),
+            ),
+            _build_pageindex_evidence_rows(result.get("evidence") or []),
+            _build_pageindex_debug_rows(result.get("debug") if isinstance(result.get("debug"), dict) else {}),
+            _build_pageindex_history_rows(history),
+        )
+
+    def export_pageindex_results_ui(knowledge_base_choice: str | None, document_choice: str | None):
+        """导出当前 PageIndex 文档的问答历史。"""
+
+        knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
+        doc_uid = _parse_pageindex_document_choice(document_choice)
+        if not knowledge_base_id or not doc_uid:
+            return _build_pageindex_status_html("请先选择知识库和文档。", success=False)
+        try:
+            markdown_text = pageindex_service.export_history_markdown(knowledge_base_id, doc_uid)
+            return export_markdown_result("PageIndex", "深度检索", markdown_text, linked_id=doc_uid)
+        except AppError as exc:
+            return _build_pageindex_status_html(exc.message, success=False)
+
     def _has_tab_access(session: dict[str, object] | None, tab_name: str) -> bool:
         """判断当前登录态是否拥有指定主菜单权限。"""
 
@@ -690,6 +943,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             page=1,
             page_size=50,
         )
+        status_items = [_resolve_status_item_source_path(item) for item in status_items]
         database_summary = ingest_service.get_database_summary(knowledge_base_id=knowledge_base_id)
         state = build_document_management_state(documents, status_items)
         active_choice = selected_choice if selected_choice in state["document_choices"] else state["default_choice"]
@@ -713,6 +967,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "register_interactive": register_button_state["interactive"],
             "rebuild_interactive": rebuild_button_state["interactive"],
         }
+
+    def _resolve_status_item_source_path(item: dict) -> dict:
+        """将数据库相对路径转换为 UI 匹配使用的运行期路径。"""
+
+        resolved = dict(item)
+        source_path = str(resolved.get("source_path") or "").strip()
+        if not source_path:
+            return resolved
+        try:
+            resolved["source_path"] = str(resolve_input_path(source_path, ingest_service.settings.input_root))
+        except AppError:
+            return resolved
+        return resolved
 
     def build_document_quality_outputs(
         detail: dict | None,
@@ -4814,6 +5081,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         prepend_sequence=True,
     )
     initial_search_table_rows, initial_search_page, initial_search_page_info = reset_table_pagination([], prepend_sequence=False)
+    initial_pageindex_document_choices, initial_pageindex_document_choice = _build_pageindex_document_choices(initial_knowledge_base_choice)
+    (
+        initial_pageindex_status_html,
+        initial_pageindex_tree_rows,
+        initial_pageindex_answer_html,
+        initial_pageindex_evidence_rows,
+        initial_pageindex_debug_rows,
+    ) = _build_pageindex_selected_document_state(initial_knowledge_base_choice, initial_pageindex_document_choice)
     initial_quality_claim_table_rows, initial_quality_claim_page, initial_quality_claim_page_info = reset_table_pagination(
         initial_claim_rows,
         prepend_sequence=True,
@@ -4968,6 +5243,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *tab_visibility_updates,
             gr.update(value=_render_pending_access_html(session)),
             gr.update(),
+            knowledge_base_update,
             knowledge_base_update,
             knowledge_base_update,
             knowledge_base_update,
@@ -5407,6 +5683,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     search_export_button = search_components["search_export_button"]
                     search_export_result = search_components["search_export_result"]
 
+                with gr.Tab("PageIndex 深度检索", visible=False, id=MAIN_TAB_IDS["PageIndex 深度检索"]) as pageindex_tab:
+                    pageindex_components = build_pageindex_tab(
+                        knowledge_base_choices=knowledge_base_choices,
+                        initial_knowledge_base_choice=initial_knowledge_base_choice,
+                        document_choices=initial_pageindex_document_choices,
+                        initial_document_choice=initial_pageindex_document_choice,
+                        initial_status_html=initial_pageindex_status_html,
+                        initial_tree_rows=initial_pageindex_tree_rows,
+                        initial_answer_html=initial_pageindex_answer_html,
+                        initial_evidence_rows=initial_pageindex_evidence_rows,
+                        initial_debug_rows=initial_pageindex_debug_rows,
+                        initial_history_rows=[],
+                    )
+                    pageindex_knowledge_base = pageindex_components["pageindex_knowledge_base"]
+
                 with gr.Tab("功能设置", visible=False, id=MAIN_TAB_IDS["功能设置"]) as settings_tab:
                     settings_template_state = gr.State(initial_settings_template_state)
                     settings_selected_template_state = gr.State(initial_settings_selected_template_id)
@@ -5508,6 +5799,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 components=document_components,
                 login_state=login_state,
                 search_knowledge_base=search_knowledge_base,
+                pageindex_knowledge_base=pageindex_knowledge_base,
                 quality_knowledge_base=quality_knowledge_base,
                 review_knowledge_base=review_knowledge_base,
                 database_page_state=database_page_state,
@@ -5576,6 +5868,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 change_quality_evaluation_page=change_quality_evaluation_page,
                 export_quality_evaluation_results=export_quality_evaluation_results,
             )
+            bind_pageindex_events(
+                components=pageindex_components,
+                change_knowledge_base=change_pageindex_knowledge_base_ui,
+                change_document=change_pageindex_document_ui,
+                build_index=build_pageindex_index_ui,
+                ask_question=ask_pageindex_question_ui,
+                export_results=export_pageindex_results_ui,
+            )
             bind_settings_events(
                 components=settings_components,
                 settings_template_state=settings_template_state,
@@ -5597,6 +5897,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 review_tab=review_tab,
                 document_tab=document_tab,
                 search_tab=search_tab,
+                pageindex_tab=pageindex_tab,
                 settings_tab=settings_tab,
                 pending_access_view=pending_access_view,
                 quality_template=quality_template,
@@ -5604,6 +5905,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_knowledge_base=document_knowledge_base,
                 document_target_knowledge_base=document_target_knowledge_base,
                 search_knowledge_base=search_knowledge_base,
+                pageindex_knowledge_base=pageindex_knowledge_base,
                 quality_knowledge_base=quality_knowledge_base,
                 review_knowledge_base=review_knowledge_base,
                 quality_progress=quality_progress,
@@ -5850,10 +6152,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             auth_login_submit.click(fn=_do_login, inputs=[auth_login_username, auth_login_password],
                                     outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content,
-                                             pending_access_tab, quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                                             pending_access_tab, quality_tab, review_tab, document_tab, search_tab, pageindex_tab, settings_tab,
                                              pending_access_view, main_tabs,
                                              document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
-                                             review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                                             review_knowledge_base, search_knowledge_base, pageindex_knowledge_base, settings_knowledge_base_state,
                                              settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info,
                                              quality_progress, quality_result, quality_active_check, formatted_quality_result_state,
                                              quality_claims, quality_claim_page_state, quality_claim_page_info, selected_claim_state,
@@ -5873,10 +6175,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                     show_progress="hidden")
             auth_login_password.submit(fn=_do_login, inputs=[auth_login_username, auth_login_password],
                                        outputs=[login_state, persisted_login_state, auth_user_display, auth_login_result, auth_page, main_content,
-                                                pending_access_tab, quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                                                pending_access_tab, quality_tab, review_tab, document_tab, search_tab, pageindex_tab, settings_tab,
                                                 pending_access_view, main_tabs,
                                                 document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
-                                                review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                                                review_knowledge_base, search_knowledge_base, pageindex_knowledge_base, settings_knowledge_base_state,
                                                 settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info,
                                                 quality_progress, quality_result, quality_active_check, formatted_quality_result_state,
                                                 quality_claims, quality_claim_page_state, quality_claim_page_info, selected_claim_state,
@@ -5931,6 +6233,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     review_tab,
                     document_tab,
                     search_tab,
+                    pageindex_tab,
                     settings_tab,
                     pending_access_view,
                     main_tabs,
@@ -5939,6 +6242,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     quality_knowledge_base,
                     review_knowledge_base,
                     search_knowledge_base,
+                    pageindex_knowledge_base,
                     settings_knowledge_base_state,
                     settings_knowledge_base_table,
                     settings_knowledge_base_page_state,
@@ -5995,10 +6299,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 fn=_restore_login_session,
                 inputs=[persisted_login_state],
                 outputs=[login_state, auth_user_display, auth_page, main_content,
-                         pending_access_tab, quality_tab, review_tab, document_tab, search_tab, settings_tab,
+                         pending_access_tab, quality_tab, review_tab, document_tab, search_tab, pageindex_tab, settings_tab,
                          pending_access_view, main_tabs,
                          document_knowledge_base, document_target_knowledge_base, quality_knowledge_base,
-                         review_knowledge_base, search_knowledge_base, settings_knowledge_base_state,
+                         review_knowledge_base, search_knowledge_base, pageindex_knowledge_base, settings_knowledge_base_state,
                          settings_knowledge_base_table, settings_knowledge_base_page_state, settings_knowledge_base_page_info,
                          quality_progress, quality_result, quality_active_check, formatted_quality_result_state,
                          quality_claims, quality_claim_page_state, quality_claim_page_info, selected_claim_state,

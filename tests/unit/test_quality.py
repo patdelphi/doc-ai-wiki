@@ -402,6 +402,20 @@ def test_quality_service_should_build_complementary_queries_for_strict_claim() -
     assert any("也有" in query or "并非唯一" in query for query in queries)
 
 
+def test_quality_service_should_build_keyword_queries_for_chinese_sentence_claim() -> None:
+    """普通中文整句 Claim 应补充关键词查询，避免整句检索零召回。"""
+
+    query_specs = QualityService._build_retrieval_queries("阿胶能治疗癌症")
+
+    labels = [item["label"] for item in query_specs]
+    queries = [item["query"] for item in query_specs]
+
+    assert "keyword_focus" in labels
+    assert "阿胶 癌症" in queries
+    assert "癌症" in queries
+    assert "阿胶 治疗" in queries
+
+
 def test_quality_service_should_keep_broader_candidate_pool_before_final_judgement(tmp_path: Path) -> None:
     """多查询召回时，不应在整理上下文前过早截断候选证据。"""
 

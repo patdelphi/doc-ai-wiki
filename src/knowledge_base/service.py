@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from src.common.errors import NotFoundAppError, ValidationAppError
+from src.common.paths import resolve_input_path, to_input_relative_path
 from src.db.repositories import DocumentRepository, KnowledgeBaseRepository
 
 
@@ -107,17 +108,21 @@ class KnowledgeBaseService:
             resolved_source_path = source_path.resolve()
             target_path = self._build_available_target_path(resolved_source_path, default_directory)
             shutil.move(str(resolved_source_path), str(target_path))
-            document = self.document_repository.get_by_source_path(str(resolved_source_path))
+            source_relative_path = to_input_relative_path(resolved_source_path, self.input_root)
+            target_relative_path = to_input_relative_path(target_path, self.input_root)
+            document = self.document_repository.get_by_source_path(source_relative_path)
+            if not document:
+                document = self.document_repository.get_by_source_path(str(resolved_source_path))
             if document:
                 self.document_repository.reassign_document_knowledge_base(
                     doc_uid=document["doc_uid"],
                     knowledge_base_id="default",
-                    source_path=str(target_path.resolve()),
+                    source_path=target_relative_path,
                 )
             moved_items.append(
                 {
                     "file_name": target_path.name,
-                    "source_path": str(target_path.resolve()),
+                    "source_path": target_relative_path,
                     "knowledge_base_id": "default",
                 }
             )
@@ -147,7 +152,12 @@ class KnowledgeBaseService:
                 if not raw_source_path:
                     continue
 
-                resolved_source_path = Path(raw_source_path).resolve(strict=False)
+                raw_path = Path(raw_source_path)
+                resolved_source_path = (
+                    raw_path.resolve(strict=False)
+                    if raw_path.is_absolute()
+                    else (self.input_root / raw_path).resolve(strict=False)
+                )
                 # 仅修正“原来在 Input 根目录、现在文件已移动到 default 目录”的历史脏数据。
                 if resolved_source_path.exists() or resolved_source_path.parent != resolved_input_root:
                     continue
@@ -160,12 +170,12 @@ class KnowledgeBaseService:
                 self.document_repository.reassign_document_knowledge_base(
                     doc_uid=document["doc_uid"],
                     knowledge_base_id="default",
-                    source_path=str(resolved_candidate_path),
+                    source_path=to_input_relative_path(resolved_candidate_path, self.input_root),
                 )
                 repaired_items.append(
                     {
                         "file_name": resolved_candidate_path.name,
-                        "source_path": str(resolved_candidate_path),
+                        "source_path": to_input_relative_path(resolved_candidate_path, self.input_root),
                         "knowledge_base_id": "default",
                     }
                 )
@@ -179,10 +189,10 @@ class KnowledgeBaseService:
     def relocate_document_file(self, source_path: Path | str, target_knowledge_base_id: str) -> Path:
         """将输入文档移动到目标知识库目录，并返回最终路径。"""
 
-        source = Path(source_path)
         normalized_target_id = self._normalize_knowledge_base_id(target_knowledge_base_id)
         target_directory = self.get_input_directory(normalized_target_id)
         target_directory.mkdir(parents=True, exist_ok=True)
+        source = resolve_input_path(source_path, self.input_root)
 
         if not source.exists():
             return source

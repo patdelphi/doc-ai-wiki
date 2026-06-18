@@ -37,7 +37,7 @@ def test_auth_service_should_create_default_admin_on_initialization(tmp_path: Pa
     # admin 应拥有全部 tab 和知识库权限
     permissions = auth_service.get_user_permissions(admin_row["user_id"])
     assert permissions is not None
-    assert set(permissions.tab_names) == {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}
+    assert set(permissions.tab_names) == {"AI 质检", "人工审核", "知识库管理", "知识库检索", "PageIndex 深度检索", "功能设置"}
 
     connection.close()
 

@@ -11,6 +11,7 @@ from src.ai.embedding import build_embedding_client
 from src.chunking.splitter import split_text
 from src.common.config import AppSettings
 from src.common.errors import DatabaseAppError, NotFoundAppError, ValidationAppError
+from src.common.paths import resolve_input_path, to_input_relative_path
 from src.common.utils import read_text_file, sha256_of_text, utc_now_iso
 from src.db.repositories import DocumentRepository, IngestJobRepository
 from src.db.transaction import transaction
@@ -98,17 +99,8 @@ class IngestService:
             if progress_callback:
                 progress_callback(payload)
 
-        file_path = Path(document["file_path"])
-        if not file_path.is_absolute():
-            file_path = Path.cwd() / file_path
-        # C5 修复：校验文件路径是否在允许的输入目录内，防止路径遍历
-        resolved_path = file_path.resolve()
-        resolved_input_root = self.settings.input_root.resolve()
-        if not str(resolved_path).startswith(str(resolved_input_root)):
-            raise ValidationAppError(
-                "文件路径不在允许的输入目录内",
-                details={"file_path": str(file_path), "input_root": str(resolved_input_root)},
-            )
+        # C5 修复：校验文件路径是否在允许的输入目录内，防止路径遍历。
+        file_path = resolve_input_path(document["file_path"], self.settings.input_root)
         if not file_path.exists():
             raise NotFoundAppError("文档文件不存在", details={"file_path": str(file_path)})
         resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(
@@ -129,14 +121,15 @@ class IngestService:
         doc_id = metadata["doc_id"]
         edition = document.get("edition") or metadata.get("edition") or "default"
         doc_uid = f"{doc_id}_{edition}".replace(" ", "_")
-        existing = self.document_repository.get_by_source_path(str(file_path))
+        stored_source_path = to_input_relative_path(file_path, self.settings.input_root)
+        existing = self.document_repository.get_by_source_path(stored_source_path)
 
         if existing and existing["source_hash"] == source_hash and not rebuild_if_exists:
             if str(existing.get("knowledge_base_id") or "") != resolved_knowledge_base_id:
                 self.document_repository.reassign_document_knowledge_base(
                     doc_uid=existing["doc_uid"],
                     knowledge_base_id=resolved_knowledge_base_id,
-                    source_path=str(file_path),
+                    source_path=stored_source_path,
                 )
             return {
                 "job_id": f"job_{uuid4().hex[:12]}",
@@ -512,23 +505,29 @@ class IngestService:
         resolved_knowledge_base_id = self.knowledge_base_service.get_knowledge_base(target_knowledge_base_id)[
             "knowledge_base_id"
         ]
+        original_source_path = to_input_relative_path(source_path, self.settings.input_root)
         resolved_path = self.knowledge_base_service.relocate_document_file(source_path, resolved_knowledge_base_id)
+        stored_source_path = to_input_relative_path(resolved_path, self.settings.input_root)
 
         document = self.document_repository.get_by_doc_uid(doc_uid) if doc_uid else None
+        if not document:
+            document = self.document_repository.get_by_source_path(original_source_path)
+        if not document:
+            document = self.document_repository.get_by_source_path(stored_source_path)
         if not document:
             document = self.document_repository.get_by_source_path(source_path)
         if document:
             self.document_repository.reassign_document_knowledge_base(
                 doc_uid=document["doc_uid"],
                 knowledge_base_id=resolved_knowledge_base_id,
-                source_path=str(resolved_path),
+                source_path=stored_source_path,
             )
             return self.document_repository.get_by_doc_uid(document["doc_uid"]) or document
 
         return {
             "doc_uid": "",
             "knowledge_base_id": resolved_knowledge_base_id,
-            "source_path": str(resolved_path),
+            "source_path": stored_source_path,
         }
 
     def rebuild_documents(
@@ -567,7 +566,7 @@ class IngestService:
             if not document:
                 raise NotFoundAppError("文档不存在", details={"doc_uid": doc_uid})
 
-            file_path = Path(document["source_path"])
+            file_path = resolve_input_path(document["source_path"], self.settings.input_root)
             if not file_path.exists():
                 raise NotFoundAppError("源文档不存在", details={"doc_uid": doc_uid, "file_path": str(file_path)})
 
@@ -678,7 +677,7 @@ class IngestService:
                     author,
                     source_name,
                     json.dumps(tags, ensure_ascii=False),
-                    str(file_path),
+                    to_input_relative_path(file_path, self.settings.input_root),
                     source_hash,
                     "processing",
                     "pending",

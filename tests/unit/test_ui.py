@@ -661,7 +661,10 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
         if str(component.get("props", {}).get("label", "")) == "待开通"
     ]
 
-    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "功能设置"}.issubset(set(tab_labels))
+    assert {"AI 质检", "人工审核", "知识库管理", "知识库检索", "PageIndex 深度检索", "功能设置"}.issubset(set(tab_labels))
+    assert "pageindex-knowledge-base" in elem_ids
+    assert "pageindex-document" in elem_ids
+    assert "pageindex-tree" in elem_ids
     assert {"配置管理", "用户管理", "用户权限管理"}.issubset(set(visible_tab_labels))
     assert len(dummy_tabs) == 1
     assert dummy_tabs[0].get("props", {}).get("visible", True) is False
@@ -938,8 +941,9 @@ def test_restore_login_session_should_show_pending_access_tab_for_zero_permissio
     review_tab_update = outputs[6]
     document_tab_update = outputs[7]
     search_tab_update = outputs[8]
-    settings_tab_update = outputs[9]
-    pending_access_update = outputs[10]
+    pageindex_tab_update = outputs[9]
+    settings_tab_update = outputs[10]
+    pending_access_update = outputs[11]
 
     assert result_session.get("user_id") == user_id
     assert result_label == "<span>pending_user</span>"
@@ -950,6 +954,7 @@ def test_restore_login_session_should_show_pending_access_tab_for_zero_permissio
     assert review_tab_update["visible"] is False
     assert document_tab_update["visible"] is False
     assert search_tab_update["visible"] is False
+    assert pageindex_tab_update["visible"] is False
     assert settings_tab_update["visible"] is False
     assert "功能待开通" in pending_access_update["value"]
     assert "pending_user" in pending_access_update["value"]
@@ -987,10 +992,12 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
     outputs = restore_fn({"user_id": admin_user_id, "username": "admin"})
     pending_tab_update = outputs[4]
     quality_tab_update = outputs[5]
-    main_tabs_update = outputs[11]
+    pageindex_tab_update = outputs[9]
+    main_tabs_update = outputs[12]
 
     assert pending_tab_update["visible"] is False
     assert quality_tab_update["visible"] is True
+    assert pageindex_tab_update["visible"] is True
     # Gradio 6.x workaround: main_tabs 不再设置 selected，避免 Dataframe select 后 Tabs 跳转
     assert "selected" not in main_tabs_update
 
@@ -2001,8 +2008,8 @@ def test_load_document_management_state_ui_should_deduplicate_default_documents_
             ).fetchall()
         }
 
-    assert Path(repaired_paths["doc_default_1"]).resolve() == first_file.resolve()
-    assert Path(repaired_paths["doc_default_2"]).resolve() == second_file.resolve()
+    assert repaired_paths["doc_default_1"] == "default/a1.md"
+    assert repaired_paths["doc_default_2"] == "default/a2.md"
 
 
 def test_register_all_documents_ui_should_only_register_current_knowledge_base_files(tmp_path: Path) -> None:
@@ -2130,7 +2137,7 @@ def test_reassign_selected_document_ui_should_move_file_and_refresh_workspace(tm
     assert target_file.exists()
     assert moved_document is not None
     assert moved_document[0] == "kb_reassign_target"
-    assert Path(moved_document[1]).resolve() == target_file.resolve()
+    assert moved_document[1] == "kb_reassign_target/to_move.md"
     assert reassign_outputs[6] == []
     assert {row[1] for row in target_workspace[5]} == {"to_move.md"}
 

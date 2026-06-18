@@ -58,6 +58,88 @@ def test_openai_compatible_llm_client_should_send_enable_thinking_flag(monkeypat
     assert result["verdict"] == "verified"
 
 
+def test_openai_compatible_llm_client_should_complete_json(monkeypatch) -> None:
+    """OpenAI 兼容客户端应支持通用 JSON 对象输出，供 PageIndex 语义检索复用。"""
+
+    from src.ai.llm import OpenAICompatibleLLMClient
+
+    captured_payload: dict = {}
+
+    class StubResponse:
+        """测试用响应对象。"""
+
+        def raise_for_status(self) -> None:
+            return None
+
+        @staticmethod
+        def json() -> dict:
+            return {"choices": [{"message": {"content": '{"answer":"语义回答"}'}}]}
+
+    def fake_post(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_payload.update(kwargs["json"])
+        return StubResponse()
+
+    monkeypatch.setattr("src.ai.llm.httpx.post", fake_post)
+    client = OpenAICompatibleLLMClient(
+        base_url="https://example.com/v1",
+        api_key="test-key",
+        model="gpt-test",
+        timeout_seconds=30,
+        max_tokens=256,
+        temperature=0,
+        top_p=1,
+        enable_thinking=False,
+    )
+
+    result = client.complete_json(system_prompt="system", user_prompt="user")
+
+    assert captured_payload["response_format"] == {"type": "json_object"}
+    assert result == {"answer": "语义回答"}
+
+
+def test_openai_compatible_llm_client_should_retry_complete_json_without_response_format(monkeypatch) -> None:
+    """通用 JSON 调用在 response_format 不兼容时，应重试普通聊天并提取 JSON。"""
+
+    import httpx
+    from src.ai.llm import OpenAICompatibleLLMClient
+
+    captured_payloads: list[dict] = []
+
+    class StubResponse:
+        """测试用响应对象。"""
+
+        def raise_for_status(self) -> None:
+            return None
+
+        @staticmethod
+        def json() -> dict:
+            return {"choices": [{"message": {"content": '好的，结果如下：{"answer":"重试成功"}'}}]}
+
+    def fake_post(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured_payloads.append(kwargs["json"])
+        if len(captured_payloads) == 1:
+            raise httpx.ReadTimeout("timeout")
+        return StubResponse()
+
+    monkeypatch.setattr("src.ai.llm.httpx.post", fake_post)
+    client = OpenAICompatibleLLMClient(
+        base_url="https://example.com/v1",
+        api_key="test-key",
+        model="gpt-test",
+        timeout_seconds=30,
+        max_tokens=256,
+        temperature=0,
+        top_p=1,
+        enable_thinking=False,
+    )
+
+    result = client.complete_json(system_prompt="system", user_prompt="user")
+
+    assert captured_payloads[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in captured_payloads[1]
+    assert result == {"answer": "重试成功"}
+
+
 def test_parse_llm_result_should_support_nested_interpretation() -> None:
     """解析器应兼容部分模型返回的 interpretation 包装结构。"""
 

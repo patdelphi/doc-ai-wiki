@@ -77,6 +77,38 @@ class QualityService:
         "采用",
         "使用",
     )
+    _QUERY_RELATION_WORDS = (
+        "治疗",
+        "保健",
+        "作用",
+        "功效",
+        "缓解",
+        "改善",
+        "预防",
+        "调理",
+        "补血",
+        "养血",
+        "滋补",
+    )
+    _QUERY_STOP_PHRASES = (
+        "什么",
+        "是否",
+        "是不是",
+        "有没有",
+        "怎么样",
+        "为什么",
+        "吗",
+        "呢",
+        "的",
+        "了",
+        "对",
+        "有",
+        "能",
+        "可以",
+        "能够",
+        "特别",
+        "比较",
+    )
 
     def __init__(
         self,
@@ -789,6 +821,8 @@ class QualityService:
         topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
         if topic_query:
             query_specs.append({"label": "topic_focus", "query": topic_query})
+        for keyword_query in cls._build_keyword_focus_queries(normalized_query or literal_query):
+            query_specs.append({"label": "keyword_focus", "query": keyword_query})
         counter_query = cls._build_counter_probe_query(normalized_query or literal_query, claim_logic)
         if counter_query:
             query_specs.append({"label": "counter_probe", "query": counter_query})
@@ -831,6 +865,53 @@ class QualityService:
                 return "".join(parts[:2])
             return focused_query
         return cls._sanitize_retrieval_query_text(topic_query)
+
+    @classmethod
+    def _build_keyword_focus_queries(cls, normalized_query: str) -> list[str]:
+        """为中文整句 Claim 生成更容易命中的关键词查询。"""
+
+        query = cls._sanitize_retrieval_query_text(normalized_query)
+        if not query or " " in query:
+            return []
+        compact = query
+        for phrase in cls._QUERY_STOP_PHRASES:
+            compact = compact.replace(phrase, " ")
+        compact = cls._sanitize_retrieval_query_text(compact)
+
+        relation_terms = [term for term in cls._QUERY_RELATION_WORDS if term in query]
+        entity_terms = [
+            cls._strip_relation_terms(term, relation_terms)
+            for term in re.split(r"\s+", compact)
+            if term and len(term) >= 2
+        ]
+        entity_terms = [term for term in entity_terms if term and len(term) >= 2 and term not in relation_terms]
+        # 中文无空格时，按关系词切出前后主题，避免继续拿整句检索。
+        if not entity_terms:
+            split_pattern = "|".join(re.escape(term) for term in relation_terms) if relation_terms else ""
+            if split_pattern:
+                entity_terms = [part for part in re.split(split_pattern, compact) if len(part) >= 2]
+        if not entity_terms:
+            return []
+
+        queries: list[str] = []
+        head = entity_terms[0]
+        tail = entity_terms[-1]
+        if head and tail and head != tail:
+            queries.append(f"{head} {tail}")
+        if tail:
+            queries.append(tail)
+        if head and relation_terms:
+            queries.append(f"{head} {relation_terms[0]}")
+        return queries
+
+    @staticmethod
+    def _strip_relation_terms(text: str, relation_terms: list[str]) -> str:
+        """从候选实体片段中剥离关系词。"""
+
+        cleaned = str(text or "")
+        for term in relation_terms:
+            cleaned = cleaned.replace(term, " ")
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     @classmethod
     def _build_counter_probe_query(cls, normalized_query: str, claim_logic: dict) -> str:

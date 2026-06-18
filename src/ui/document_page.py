@@ -385,6 +385,7 @@ def bind_document_events(
     components: dict[str, gr.components.Component],
     login_state,
     search_knowledge_base,
+    pageindex_knowledge_base,
     quality_knowledge_base,
     review_knowledge_base,
     database_page_state,
@@ -547,6 +548,12 @@ def bind_document_events(
         fn=lambda choice: gr.Dropdown(value=choice),
         inputs=[document_knowledge_base],
         outputs=[document_target_knowledge_base],
+        queue=False,
+    )
+    document_knowledge_base.input(
+        fn=lambda choice: gr.Dropdown(value=choice),
+        inputs=[document_knowledge_base],
+        outputs=[pageindex_knowledge_base],
         queue=False,
     )
     scan_button.click(
