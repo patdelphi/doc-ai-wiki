@@ -514,6 +514,39 @@ def test_pageindex_service_should_return_debug_candidates_for_diagnosis(tmp_path
     assert "line 5" == debug["candidate_nodes"][0]["position"]
 
 
+def test_pageindex_candidate_ranking_should_penalize_generic_front_matter(tmp_path: Path) -> None:
+    """本地候选召回应降低文档标题、课题组、CIP 等泛化前置节点的排序。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "阿胶历史文化通典", "line_num": 1, "level": 1, "summary": "阿胶历史文化来源", "nodes": []},
+        {"title": "《阿胶历史文化通典》课题组", "line_num": 57, "level": 1, "summary": "阿胶历史文化来源", "nodes": []},
+        {"title": "绪论 阿胶历史文化综述", "line_num": 116, "level": 1, "summary": "介绍阿胶历史文化来源", "nodes": []},
+    ]
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    candidates = service._build_tree_candidates(
+        record,
+        structure,
+        question_analysis={"keywords": ["阿胶", "历史", "文化", "来源"], "entities": [], "expanded_terms": []},
+        limit=3,
+        include_content=False,
+    )
+
+    assert candidates[0]["title"] == "绪论 阿胶历史文化综述"
+
+
 def test_pageindex_service_should_add_rag_fts_evidence_inside_current_document_only(tmp_path: Path) -> None:
     """PageIndex 应在当前文档范围内补充 RAG/FTS 原文证据，不能混入其它文档。"""
 
@@ -550,6 +583,7 @@ def test_pageindex_service_should_add_rag_fts_evidence_inside_current_document_o
     assert rag_items
     assert rag_items[0]["chunk_id"] == "chunk_alpha_skin"
     assert "滋养阴血" in rag_items[0]["content"]
+    assert "滋养阴血" in answer["answer"]
     assert all(item.get("doc_uid") == document["doc_uid"] for item in rag_items)
     assert "chunk_beta_skin" not in {item.get("chunk_id") for item in rag_items}
     assert answer["debug"]["rag_evidence"][0]["chunk_id"] == "chunk_alpha_skin"

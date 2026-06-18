@@ -581,6 +581,7 @@ class PageIndexService:
         scored_items: list[tuple[int, int, dict]] = []
         for index, node in enumerate(flattened, start=1):
             score = self._score_node(node, terms)
+            score = self._penalize_generic_front_matter(node, score)
             scored_items.append((score, index, node))
         scored_items.sort(key=lambda item: (-item[0], int(item[2].get("level") or 1), int(item[2].get("line_num") or 0)))
         if not any(score > 0 for score, _index, _node in scored_items):
@@ -944,13 +945,14 @@ class PageIndexService:
 
         if not evidence:
             return f"未在 PageIndex 文档结构中找到与“{question}”直接相关的证据。"
-        top = evidence[0]
+        top = next((item for item in evidence if item.get("source_type") == "RAG/FTS 原文"), evidence[0])
         content = str(top.get("content") or top.get("summary") or "").strip()
         if len(content) > 600:
             content = content[:600].rstrip() + "..."
+        source_label = str(top.get("source_type") or "PageIndex")
         return "\n\n".join(
             [
-                f"根据 PageIndex 定位，最相关位置是“{top.get('title', '')}”（{top.get('position', '')}）。",
+                f"根据{source_label}定位，最相关位置是“{top.get('title', '')}”（{top.get('position', '')}）。",
                 content,
             ]
         ).strip()
@@ -1018,6 +1020,21 @@ class PageIndexService:
             elif normalized in haystack:
                 score += 2
         return score
+
+    @staticmethod
+    def _penalize_generic_front_matter(node: dict, score: int) -> int:
+        """降低文档标题、课题组、CIP、参考文献等泛化前置节点排序。"""
+
+        title = str(node.get("title") or "").strip()
+        line_num = int(node.get("line_num") or 0)
+        penalty = 0
+        generic_patterns = ("通典", "全集", "课题组", "图书在版", "CIP", "参考文献")
+        is_generic = any(pattern in title for pattern in generic_patterns)
+        if is_generic:
+            penalty += 8
+        if is_generic and line_num and line_num <= 80:
+            penalty += 4
+        return max(score - penalty, 0)
 
     @staticmethod
     def _candidate_to_debug(candidate: dict) -> dict:
