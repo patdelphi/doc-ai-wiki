@@ -8,6 +8,7 @@ import pytest
 
 from src.common.config import AppSettings
 from src.common.errors import ValidationAppError
+from src.common.paths import resolve_input_path
 from src.db.connection import create_connection, initialize_database
 from src.db.repositories import DocumentRepository, QualityRepository
 from src.ingest.service import IngestService
@@ -688,7 +689,8 @@ def test_ingest_service_should_relocate_document_to_target_knowledge_base(tmp_pa
     moved_document = repository.get_by_doc_uid(job["doc_uid"])
     assert moved_document is not None
     assert moved_document["knowledge_base_id"] == "kb_b"
-    assert Path(moved_document["source_path"]).resolve() == (input_root / "kb_b" / "legacy.md").resolve()
+    assert moved_document["source_path"] == "kb_b/legacy.md"
+    assert resolve_input_path(moved_document["source_path"], input_root) == (input_root / "kb_b" / "legacy.md").resolve()
 
 
 def test_review_service_should_filter_review_candidates_by_knowledge_base(tmp_path: Path) -> None:

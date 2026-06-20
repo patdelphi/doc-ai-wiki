@@ -186,7 +186,8 @@ doc-ai-wiki/
 
 - `Docs` 只放开发文档，不放知识库业务输入
 - `Input` 放待入库或已整理好的知识库源文档，按知识库 ID 分子目录
-- `index/app.db`、`index/chroma` 属于本地运行期数据，不建议直接同步到远端仓库
+- `index/app.db`、`index/chroma`、`index/pageindex_workspace` 属于本地运行期数据，不建议直接同步到远端仓库
+- 如果需要重建运行期数据，应从 `Input`、规则、模板和配置重新执行入库、全文索引、向量索引与 PageIndex 构建流程
 - 如果需要同步知识库内容到 GitHub，应优先同步 `Input`、模板、规则和源码
 
 ## 快速开始
@@ -446,7 +447,8 @@ python ".aipython/inspect_index_status.py"
 
 - 建议显式配置 `LLM`、`Embedding`、`Rerank`
 - 建议将 `.env` 与密钥文件排除出版本控制
-- 建议不要把 `index/app.db`、`index/chroma` 直接作为 Git 仓库内容同步
+- 建议不要把 `index/app.db`、`index/chroma`、`index/pageindex_workspace` 直接作为 Git 仓库内容同步
+- PageIndex workspace、SQLite 数据库和 Chroma 向量库都应视为可重建运行期资产，不作为长期版本资产管理
 - 如果需要共享知识库基础数据，优先共享 `Input`、规则文件、模板文件和导出的开发文档
 
 ## 当前版本边界

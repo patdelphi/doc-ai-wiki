@@ -530,3 +530,99 @@
 - [ ] 不接 PageIndex 线上服务或 MCP。
 - [ ] 不新增数据库迁移，除非 P0/P3 实现时确实需要保存诊断历史。
 - [ ] 不自动 commit；执行完成后再由用户确认是否提交。
+
+## 2026-06-20 Markdown 知识库可信 MVP 优化计划
+
+> 范围："src/chunking"、"src/metadata"、"src/ingest"、"src/retrieval"、"src/quality"、"src/db"、"tests"、"Docs"
+> 来源："Docs/md_knowledge_base_project_analysis_20260620.md" 复核结果
+> 目标：把当前可用 MVP 收口为证据可追溯、测试可验证、验收可交付的可信 MVP。
+
+### 关键假设
+
+- [ ] 不继续扩大新功能范围，优先修正 Markdown 分块、元数据追溯、verdict、评测和运行期数据治理。
+- [ ] 当前主 verdict 先以代码实际枚举 `"verified"`、`"needs_review"`、`"rejected"` 为基准，再决定是否迁移到更细枚举。
+- [ ] PageIndex 保持长文档增强定位，不替代主 RAG/FTS 检索验收。
+- [ ] `python` 与 `pytest` 当前可用；全量测试需要单独安排更长超时时间或分组执行。
+- [ ] 所有新增功能先补测试，再做最小实现；数据库结构变更必须有事务和迁移/兼容策略。
+
+### P0：验收与测试状态收口
+
+- [x] 修正分析文档中“python/pytest 不可用”的过期描述，改为“测试可收集，单元与集成测试已分组通过”。
+- [x] 分组运行全量测试，至少覆盖 `"tests/unit"`、`"tests/integration"`、PageIndex、UI、质量服务。
+- [x] 记录测试结果到 `"Docs/test_report_20260620.md"`，包含命令、耗时、通过/失败/超时情况。
+- [x] 基于实际测试结果更新 `"Docs/acceptance.MD"`，避免已实现能力长期未勾选。
+- [x] 新增 `"Docs/acceptance_report_20260620.md"`，逐项标注已通过、部分通过、未通过、未验证。
+
+### P0：运行期数据治理
+
+- [x] 复核 `".gitignore"` 对 `"index/"` 的处理边界：当前已忽略数据库和 Chroma，但未忽略 PageIndex workspace JSON。
+- [x] 决定 `"index/pageindex_workspace/"` 是否应整体忽略，或改为只保留可公开 fixture。
+- [x] 明确 `"logs/"`、`"*.db"`、导出文件、临时运行文件的同步策略。
+- [x] 更新 `"readme.md"` 或 `"Docs/deployment"`，说明索引、数据库、PageIndex workspace 的重建方式。
+- [x] 验证 `git status --short --branch` 不再出现容易误提交的运行期数据。
+
+### P1：Markdown 结构感知分块
+
+- [x] 为当前固定长度分块补回归测试，锁定长段落、表格、代码块、引用块的期望行为。
+- [x] 新增 Markdown 结构解析能力，识别段落、列表、表格、引用块、代码块。
+- [x] 以语义块为基本单位合并 chunk，只有超长普通段落才做保守二次切分。
+- [x] 保留现有 `split_text()` 兼容入口，入库服务无需改调用方即可使用新分块器。
+- [x] 跑 `"tests/unit/test_chunking.py"`、`"tests/unit/test_sections.py"` 和入库相关测试。
+
+### 2026-06-20 P1 Markdown 分块执行结果
+
+- [x] 已将 `"src/chunking/splitter.py"` 从纯固定长度切分升级为 Markdown 语义块优先切分。
+- [x] 表格、围栏代码块、连续引用块会保持在同一 chunk 中；超长普通段落继续按长度兜底切分。
+- [x] `python -m pytest tests/unit/test_chunking.py -q` 结果 `4 passed`。
+- [x] `python -m pytest tests/unit/test_sections.py tests/unit/test_ingest_quality.py tests/unit/test_knowledge_base.py -q` 结果 `18 passed`。
+- [x] `python -m pytest tests/integration/test_app.py::test_register_document_and_query_status_should_work tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest tests/integration/test_app.py::test_rebuild_should_support_fulltext_and_vector_separately -q` 结果 `3 passed`。
+- [x] `python -m pytest tests -q` 结果 `267 passed`。
+
+### P1：元数据与证据追溯
+
+- [ ] 设计 `heading_path`、`source_start_line`、`source_end_line`、`chunk_type`、`content_hash`、`source_anchor` 的存储或派生方案。
+- [ ] 如需改表，新增兼容旧数据库的初始化/迁移逻辑，确保事务内完成。
+- [ ] 入库时为 section 和 chunk 写入稳定出处信息，检索与质检结果透传到 evidence details。
+- [ ] UI/导出中展示可人工复核的来源位置，不只显示笼统 `source_span`。
+- [ ] 增加证据可追溯率测试，确认质检结果能定位到原文范围。
+
+### P1：verdict 与证据关系统一
+
+- [ ] 梳理当前 `"verified"`、`"needs_review"`、`"rejected"` 与 `"support"`、`"contradict"`、`"insufficient"` 的关系。
+- [ ] 决定是否引入 `"contradicted"`、`"suspected"`、`"insufficient_evidence"`、`"manual_review_required"` 细枚举。
+- [ ] 若保持简化枚举，更新设计文档、验收文档、UI 文案和评测口径，避免文档与代码不一致。
+- [ ] 若迁移细枚举，先写兼容映射和历史结果展示测试，再改服务、API、UI、导出。
+- [ ] 增加无证据、弱证据、反证、绝对化、唯一性 claim 的回归测试。
+
+### P1：实体归一与查询扩展
+
+- [ ] 建立最小实体词表目录，例如 `"data/entities"`，先覆盖当前知识库高频术语和别名。
+- [ ] 新增 query normalization，处理别名、同义表达、繁简/异体、领域术语。
+- [ ] 在入库、检索、质检三处复用同一套归一逻辑，避免各模块硬编码补丁分裂。
+- [ ] 增加中文问法变化、别名查询、同义查询的检索测试。
+
+### P2：正式评测集与质量指标
+
+- [ ] 新增 `"tests/evaluation/retrieval_cases.jsonl"`，至少 50 条问题与标准证据。
+- [ ] 新增 `"tests/evaluation/claim_check_cases.jsonl"`，至少 50 条 claim 与人工标注 verdict。
+- [ ] 新增 `"tests/evaluation/rule_cases.jsonl"`，覆盖命中与非命中样例。
+- [ ] 扩展 PageIndex 固定问题到 50 条，并区分真实 LLM 与离线降级结果。
+- [ ] 输出固定指标：Top-5 命中率、claim 准确率、无证据 verified 率、证据可追溯率。
+
+### P2：PageIndex 与主链路融合
+
+- [ ] 保持 PageIndex 作为长文档结构增强，主验收仍以 RAG/FTS/质检链路为准。
+- [ ] 检查 PageIndex 主证据与 RAG/FTS 补充证据是否稳定合并，而不是互相覆盖。
+- [ ] 对论文合集类 Markdown 增加文章边界识别计划，减少一个超大树中主题混杂。
+- [ ] 设计跨文档 PageIndex 检索策略，但不在可信 MVP 收口前优先实现。
+
+### 验收标准
+
+- [x] `python -m pytest tests` 能完成并形成可追踪报告。
+- [x] `"Docs/acceptance.MD"` 与实际代码、测试状态一致。
+- [x] 运行期 `"index/"`、日志、数据库不会被误提交。
+- [ ] 每个 chunk 至少能追溯到标题路径、原文范围和 chunk 类型。
+- [ ] 无证据或证据不足时不会输出 `"verified"`。
+- [ ] 50 条检索样例 Top-5 命中率达到 80% 或明确记录差距。
+- [ ] 50 条 claim 样例准确率达到 80% 或明确记录差距。
+- [ ] 人工审核可保存、可查询，原始 verdict 不被覆盖。

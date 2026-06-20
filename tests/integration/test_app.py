@@ -566,8 +566,8 @@ def test_ingest_status_endpoint_should_only_return_requested_knowledge_base_item
     assert medical_items[0]["doc_title"] == "医学文档"
 
 
-def test_gradio_startup_scripts_should_only_launch_ui_entry() -> None:
-    """Gradio 启动脚本应仅调用 UI 启动入口。"""
+def test_gradio_startup_scripts_should_launch_backend_and_ui_entries() -> None:
+    """Gradio 启动脚本应同时启动后端 API 与 UI 入口。"""
 
     script_paths = [
         Path("start_gradio_local_7860.ps1"),
@@ -580,7 +580,7 @@ def test_gradio_startup_scripts_should_only_launch_ui_entry() -> None:
         assert script_path.exists() is True
         script_content = script_path.read_text(encoding="utf-8")
         assert "src.ui.app" in script_content
-        assert "src.app" not in script_content
+        assert "src.app:app" in script_content
 
 
 def test_register_document_and_query_status_should_work(tmp_path: Path) -> None:
@@ -1179,7 +1179,7 @@ def test_rebuild_should_support_fulltext_and_vector_separately(tmp_path: Path) -
         ).fetchone()
         connection.close()
         assert source_path_row is not None
-        registered_source_path = Path(str(source_path_row[0]))
+        registered_source_path = input_root / str(source_path_row[0])
 
         registered_source_path.write_text(
             "# 重建文档\n\n更新后的关键词乙。",

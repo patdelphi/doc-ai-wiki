@@ -14,44 +14,48 @@ def read_script(script_name: str) -> str:
     return (PROJECT_ROOT / script_name).read_text(encoding="utf-8")
 
 
-def test_local_powershell_startup_script_should_bind_to_127001_on_port_7860() -> None:
-    """本地 PowerShell 脚本应固定监听 127.0.0.1:7860。"""
+def test_local_powershell_startup_script_should_start_from_127001_and_7860() -> None:
+    """本地 PowerShell 脚本应从 127.0.0.1 与 7860 起自动寻找可用端口。"""
 
     content = read_script("start_gradio_local_7860.ps1")
 
-    assert '$env:APP_HOST = "127.0.0.1"' in content
-    assert '$env:GRADIO_PORT = "7860"' in content
-    assert "python -m src.ui.app" in content
+    assert '$hostValue = "127.0.0.1"' in content
+    assert "$frontendPort = Get-FreePort -StartPort 7860 -HostValue $hostValue" in content
+    assert '$env:GRADIO_PORT = [string]$frontendPort' in content
+    assert '$frontendArgs = @("-m", "src.ui.app")' in content
 
 
-def test_server_powershell_startup_script_should_bind_to_0000_on_port_80() -> None:
-    """服务器 PowerShell 脚本应固定监听 0.0.0.0:80。"""
+def test_server_powershell_startup_script_should_start_from_0000_and_80() -> None:
+    """服务器 PowerShell 脚本应从 0.0.0.0 与 80 起自动寻找可用端口。"""
 
     content = read_script("start_gradio_server_80.ps1")
 
-    assert '$env:APP_HOST = "0.0.0.0"' in content
-    assert '$env:GRADIO_PORT = "80"' in content
-    assert "python -m src.ui.app" in content
+    assert '$hostValue = "0.0.0.0"' in content
+    assert "$frontendPort = Get-FreePort -StartPort 80 -HostValue $hostValue" in content
+    assert '$env:GRADIO_PORT = [string]$frontendPort' in content
+    assert '$frontendArgs = @("-m", "src.ui.app")' in content
 
 
-def test_local_shell_startup_script_should_bind_to_127001_on_port_7860() -> None:
-    """本地 Shell 脚本应固定监听 127.0.0.1:7860。"""
+def test_local_shell_startup_script_should_start_from_127001_and_7860() -> None:
+    """本地 Shell 脚本应从 127.0.0.1 与 7860 起自动寻找可用端口。"""
 
     content = read_script("start_gradio_local_7860.sh")
 
-    assert 'export APP_HOST="127.0.0.1"' in content
-    assert 'export GRADIO_PORT="7860"' in content
-    assert "python -m src.ui.app" in content
+    assert 'APP_HOST_VALUE="127.0.0.1"' in content
+    assert 'GRADIO_PORT_VALUE="$(find_free_port 7860)"' in content
+    assert 'export GRADIO_PORT="$GRADIO_PORT_VALUE"' in content
+    assert '"$PYTHON_BIN" -m src.ui.app' in content
 
 
-def test_server_shell_startup_script_should_bind_to_0000_on_port_80() -> None:
-    """服务器 Shell 脚本应固定监听 0.0.0.0:80。"""
+def test_server_shell_startup_script_should_start_from_0000_and_80() -> None:
+    """服务器 Shell 脚本应从 0.0.0.0 与 80 起自动寻找可用端口。"""
 
     content = read_script("start_gradio_server_80.sh")
 
-    assert 'export APP_HOST="0.0.0.0"' in content
-    assert 'export GRADIO_PORT="80"' in content
-    assert "python -m src.ui.app" in content
+    assert 'APP_HOST_VALUE="0.0.0.0"' in content
+    assert 'GRADIO_PORT_VALUE="$(find_free_port 80)"' in content
+    assert 'export GRADIO_PORT="$GRADIO_PORT_VALUE"' in content
+    assert '"$PYTHON_BIN" -m src.ui.app' in content
 
 
 def test_legacy_powershell_startup_script_should_not_exist_anymore() -> None:

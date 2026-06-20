@@ -12,6 +12,7 @@ index/*.db
 index/**/*.db
 index/**/*.sqlite3
 index/chroma/
+index/pageindex_workspace/
 
 # 运行过程中的导出结果与临时文件不再同步到 GitHub
 Docs/*.csv
