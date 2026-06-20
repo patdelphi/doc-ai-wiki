@@ -859,6 +859,12 @@ def test_format_claim_detail_for_review_should_build_summary_and_evidence_table(
                         "matched_sources": ["fulltext", "vector"],
                         "matched_queries": ["claim_literal", "logic_relaxed"],
                         "rerank_score": 0.9,
+                        "heading_path": "总论 > 产地",
+                        "source_start_line": 3,
+                        "source_end_line": 6,
+                        "source_anchor": "L3-L6",
+                        "chunk_type": "paragraph",
+                        "content_hash": "a" * 64,
                     }
                 ],
             }
@@ -873,6 +879,9 @@ def test_format_claim_detail_for_review_should_build_summary_and_evidence_table(
     assert detail["evidence_table"][0]["matched_sources"] == "fulltext、vector"
     assert detail["evidence_table"][0]["matched_queries"] == "claim_literal、logic_relaxed"
     assert detail["evidence_table"][0]["evidence_relation"] == "contradict"
+    assert detail["evidence_table"][0]["heading_path"] == "总论 > 产地"
+    assert detail["evidence_table"][0]["source_anchor"] == "L3-L6"
+    assert detail["evidence_table"][0]["chunk_type"] == "paragraph"
 
 
 def test_claim_display_helpers_should_generate_markdown_and_rows() -> None:
@@ -1151,6 +1160,10 @@ def test_evidence_detail_html_should_render_plain_text_block_without_quote_style
             "matched_queries": ["claim_literal"],
             "rerank_score": 0.88,
             "relation_reason": "直接支持。",
+            "heading_path": "总论 > 产地",
+            "source_anchor": "L3-L6",
+            "chunk_type": "paragraph",
+            "content_hash": "b" * 64,
             "content_preview": "[section-112:chunk-183] 国际良种驴繁育中心\n带动毛驴产业可持续发展。",
         }
     )
@@ -1161,6 +1174,9 @@ def test_evidence_detail_html_should_render_plain_text_block_without_quote_style
     assert "word-break:break-word" in detail_html.replace(" ", "")
     assert "<blockquote" not in detail_html.lower()
     assert "<pre" not in detail_html.lower()
+    assert "总论 &gt; 产地" in detail_html
+    assert "L3-L6" in detail_html
+    assert "paragraph" in detail_html
 
 
 def test_document_management_helpers_should_return_detail_and_button_states() -> None:
@@ -1345,6 +1361,9 @@ def test_search_and_quality_export_markdown_should_follow_claim_order_and_includ
                             "relation_reason": "补充检索发现反证。",
                             "context_mode": "chunk_only",
                             "section_title": "辨伪",
+                            "heading_path": "总论 > 辨伪",
+                            "source_anchor": "L3-L6",
+                            "chunk_type": "paragraph",
                             "content_preview": "证据内容",
                         }
                     ],
@@ -1427,6 +1446,9 @@ def test_search_and_quality_export_markdown_should_follow_claim_order_and_includ
     assert "## Claim 2" in quality_markdown
     assert "#### 完整证据详情" in quality_markdown
     assert "##### 证据 1" in quality_markdown
+    assert "标题路径：总论 > 辨伪" in quality_markdown
+    assert "来源锚点：L3-L6" in quality_markdown
+    assert "Chunk 类型：paragraph" in quality_markdown
     assert quality_markdown.index("## Claim 1") < quality_markdown.index("## Claim 2")
     assert quality_markdown.index("阿胶可以治疗所有贫血") < quality_markdown.index("东阿有阿胶的专利技术")
     assert quality_markdown.index("第二条证据内容") > quality_markdown.index("## Claim 2")

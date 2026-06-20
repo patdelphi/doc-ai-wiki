@@ -336,7 +336,9 @@ class DocumentRepository:
         with create_connection(self.database_path) as connection:
             rows = connection.execute(
                 """
-                SELECT chunk_id, doc_uid, section_id, source_span, content
+                SELECT chunk_id, doc_uid, section_id, source_span, heading_path,
+                       source_start_line, source_end_line, page_no, chunk_type,
+                       content_hash, source_anchor, content
                 FROM chunks
                 WHERE doc_uid = ?
                 ORDER BY chunk_index ASC

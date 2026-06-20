@@ -190,7 +190,7 @@ MVP 阶段必须完成以下 4 项核心能力：
 
 - 单元测试：`python -m pytest tests/unit -q`，结果 `235 passed`
 - 集成测试：`python -m pytest tests/integration/test_app.py -q`，结果 `29 passed`
-- 完整测试：`python -m pytest tests -q`，结果 `267 passed`
+- 完整测试：`python -m pytest tests -q`，结果 `270 passed`
 - 测试收集：`python -m pytest --collect-only -q`，结果 `264 tests collected`
 - MVP 主链路：基本通过
 - 高可信证据追溯、正式评测集、Markdown 结构感知分块：仍需继续优化

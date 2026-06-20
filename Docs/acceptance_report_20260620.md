@@ -20,7 +20,7 @@
 | 多知识库隔离 | 已通过 | 知识库、检索、审核、PageIndex 单测与集成测试覆盖隔离 |
 | UI 回归 | 已通过 | UI 单测覆盖主要页面构建、联动、权限、分页和导出 |
 | PageIndex | 部分通过 | 10 问离线评测通过；仍需扩展到 50 问并区分真实 LLM 与离线降级 |
-| 高可信证据追溯 | 部分通过 | 当前有 `source_span` 与 evidence details，但缺少行号、标题路径、chunk 类型 |
+| 高可信证据追溯 | 部分通过 | 当前已补 `heading_path`、起止行号、`chunk_type`、`content_hash` 与 `source_anchor`，并在证据详情与导出中展示；仍缺正式可追溯率评测 |
 | 正式质量指标 | 未完成 | 尚缺 50 条检索样例、50 条 claim 样例和固定指标报告 |
 
 ## 已完成验证
@@ -28,7 +28,7 @@
 - `python -m pytest --collect-only -q`：264 collected
 - `python -m pytest tests/unit -q`：235 passed
 - `python -m pytest tests/integration/test_app.py -q`：29 passed
-- `python -m pytest tests -q`：267 passed
+- `python -m pytest tests -q`：270 passed
 - `python -m pytest tests/unit/test_chunking.py tests/unit/test_sections.py tests/unit/test_quality.py -q`：20 passed
 - `python -m pytest tests/unit/test_retrieval.py tests/unit/test_review.py tests/unit/test_knowledge_base.py -q`：20 passed
 - `python -m pytest tests/unit/test_startup_scripts.py -q`：6 passed
@@ -36,7 +36,7 @@
 ## 未完成事项
 
 - Markdown 结构感知分块仍未实现，当前仍是固定字符长度切分。
-- chunk 级追溯字段不足，缺少 `heading_path`、`source_start_line`、`source_end_line`、`chunk_type`。
+- 仍需建立正式证据可追溯率评测。
 - verdict 体系仍需统一当前简化枚举与设计文档细枚举。
 - 正式评测集不足，PageIndex 仅有 10 问离线评测。
 - 生产级部署仍需补监控、数据治理、CI 报告和更严格权限回归。

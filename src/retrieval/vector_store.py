@@ -267,16 +267,23 @@ class VectorStore:
         for start in range(0, total, batch_size):
             batch = items[start : start + batch_size]
             documents = [item["content"] for item in batch]
-            metadatas = [
-                {
+            metadatas = []
+            for item in batch:
+                metadata = {
                     "doc_uid": item["doc_uid"],
                     "chunk_id": item["chunk_id"],
                     "source_span": item.get("source_span") or "",
+                    "heading_path": item.get("heading_path") or "",
+                    "source_anchor": item.get("source_anchor") or "",
+                    "chunk_type": item.get("chunk_type") or "",
+                    "content_hash": item.get("content_hash") or "",
                     # H7 修复：写入知识库 ID，支持向量检索按知识库过滤
                     "knowledge_base_id": item.get("knowledge_base_id") or "",
                 }
-                for item in batch
-            ]
+                for trace_key in ("source_start_line", "source_end_line", "page_no"):
+                    if item.get(trace_key) is not None:
+                        metadata[trace_key] = int(item[trace_key])
+                metadatas.append(metadata)
             self.collection.upsert(
                 ids=[item["chunk_id"] for item in batch],
                 documents=documents,
@@ -345,6 +352,13 @@ class VectorStore:
                     "chunk_id": metadata.get("chunk_id"),
                     "doc_uid": metadata.get("doc_uid"),
                     "source_span": metadata.get("source_span"),
+                    "heading_path": metadata.get("heading_path"),
+                    "source_start_line": metadata.get("source_start_line"),
+                    "source_end_line": metadata.get("source_end_line"),
+                    "page_no": metadata.get("page_no"),
+                    "source_anchor": metadata.get("source_anchor"),
+                    "chunk_type": metadata.get("chunk_type"),
+                    "content_hash": metadata.get("content_hash"),
                     "content": document,
                     "score": 1 - float(distance),
                 }

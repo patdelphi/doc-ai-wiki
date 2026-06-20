@@ -76,7 +76,7 @@ pytest --version -> pytest 9.0.3
 python -m pytest --collect-only -q -> 264 tests collected
 ```
 
-后续已完成验证：`tests/unit` 235 条通过，`tests/integration/test_app.py` 29 条通过；P1 分块升级后完整 `python -m pytest tests -q` 267 条通过。完整测试仍建议在 CI 中持续执行，以避免单机环境和耗时差异影响判断。
+后续已完成验证：`tests/unit` 235 条通过，`tests/integration/test_app.py` 29 条通过；P1 追溯字段升级后完整 `python -m pytest tests -q` 270 条通过。完整测试仍建议在 CI 中持续执行，以避免单机环境和耗时差异影响判断。
 
 ---
 
@@ -278,7 +278,7 @@ python -m pytest tests/integration/test_app.py -q
 - `python -m pytest --collect-only -q` 成功收集 264 条测试
 - `python -m pytest tests/unit -q` 结果 235 passed
 - `python -m pytest tests/integration/test_app.py -q` 结果 29 passed
-- `python -m pytest tests -q` 结果 267 passed
+- `python -m pytest tests -q` 结果 270 passed
 
 影响：
 

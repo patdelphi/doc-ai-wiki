@@ -1,5 +1,6 @@
 """程序说明：验证文档入库质检结果的统计与异常提示。"""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,115 @@ def test_inspect_document_quality_should_report_complete_metrics(tmp_path: Path)
     assert report["summary"]["level"] == "success"
     assert report["first_section_title"] == "总论"
     assert report["last_section_title"] == "产地"
+
+
+def test_initialize_database_should_add_traceability_columns_to_legacy_tables(tmp_path: Path) -> None:
+    """旧版章节与分块表初始化后应自动补齐追溯字段。"""
+
+    database_path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE document_sections (
+            section_id TEXT PRIMARY KEY,
+            doc_uid TEXT NOT NULL,
+            section_title TEXT NOT NULL,
+            section_level INTEGER NOT NULL,
+            source_span TEXT,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE chunks (
+            chunk_id TEXT PRIMARY KEY,
+            doc_uid TEXT NOT NULL,
+            section_id TEXT,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            source_span TEXT,
+            token_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    initialize_database(database_path)
+
+    with create_connection(database_path) as upgraded_connection:
+        section_columns = {
+            row["name"]
+            for row in upgraded_connection.execute("PRAGMA table_info(document_sections)").fetchall()
+        }
+        chunk_columns = {
+            row["name"]
+            for row in upgraded_connection.execute("PRAGMA table_info(chunks)").fetchall()
+        }
+
+    assert {"heading_path", "source_start_line", "source_end_line", "source_anchor"}.issubset(section_columns)
+    assert {
+        "heading_path",
+        "source_start_line",
+        "source_end_line",
+        "page_no",
+        "chunk_type",
+        "content_hash",
+        "source_anchor",
+    }.issubset(chunk_columns)
+
+
+def test_register_document_should_store_traceability_metadata(tmp_path: Path) -> None:
+    """Markdown 入库应为章节和 chunk 写入标题路径、行号、类型与内容 hash。"""
+
+    service = _build_ingest_service(tmp_path)
+    document_path = tmp_path / "Input" / "trace.md"
+    document_path.write_text(
+        "# 总论\n第一段。\n\n## 表格\n| 项目 | 说明 |\n|---|---|\n| 阿胶 | 说明 |\n",
+        encoding="utf-8",
+    )
+
+    job = service.register_document({"file_path": str(document_path)})
+
+    with create_connection(service.settings.sqlite_db_path) as connection:
+        section_rows = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT section_title, heading_path, source_start_line, source_end_line, source_anchor
+                FROM document_sections
+                WHERE doc_uid = ?
+                ORDER BY source_start_line ASC
+                """,
+                (job["doc_uid"],),
+            ).fetchall()
+        ]
+        table_chunk = dict(
+            connection.execute(
+                """
+                SELECT heading_path, source_start_line, source_end_line, chunk_type, content_hash, source_anchor, content
+                FROM chunks
+                WHERE doc_uid = ? AND content LIKE ?
+                """,
+                (job["doc_uid"], "%| 项目 | 说明 |%"),
+            ).fetchone()
+        )
+
+    assert section_rows[0]["heading_path"] == "总论"
+    assert section_rows[0]["source_start_line"] == 1
+    assert section_rows[0]["source_end_line"] == 3
+    assert section_rows[0]["source_anchor"] == "L1-L3"
+    assert section_rows[1]["heading_path"] == "总论 > 表格"
+    assert section_rows[1]["source_start_line"] == 4
+    assert section_rows[1]["source_end_line"] == 7
+    assert table_chunk["heading_path"] == "总论 > 表格"
+    assert table_chunk["source_start_line"] == 4
+    assert table_chunk["source_end_line"] == 7
+    assert table_chunk["chunk_type"] == "table"
+    assert len(table_chunk["content_hash"]) == 64
+    assert table_chunk["source_anchor"] == "L4-L7"
 
 
 def test_inspect_document_quality_should_warn_when_index_counts_mismatch(tmp_path: Path) -> None:

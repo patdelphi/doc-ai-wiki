@@ -29,6 +29,23 @@ QUALITY_CHECK_COLUMNS = {
     "template_name": "TEXT",
 }
 
+SECTION_TRACEABILITY_COLUMNS = {
+    "heading_path": "TEXT",
+    "source_start_line": "INTEGER",
+    "source_end_line": "INTEGER",
+    "source_anchor": "TEXT",
+}
+
+CHUNK_TRACEABILITY_COLUMNS = {
+    "heading_path": "TEXT",
+    "source_start_line": "INTEGER",
+    "source_end_line": "INTEGER",
+    "page_no": "INTEGER",
+    "chunk_type": "TEXT NOT NULL DEFAULT 'paragraph'",
+    "content_hash": "TEXT",
+    "source_anchor": "TEXT",
+}
+
 
 def create_connection(database_path: Path) -> sqlite3.Connection:
     """创建 SQLite 连接，并启用行字典访问。"""
@@ -51,6 +68,8 @@ def initialize_database(database_path: Path) -> None:
         connection.executescript(SCHEMA_SQL)
         _ensure_default_knowledge_base(connection)
         _ensure_document_columns(connection)
+        _ensure_section_traceability_columns(connection)
+        _ensure_chunk_traceability_columns(connection)
         _ensure_quality_check_columns(connection)
         _ensure_quality_claim_columns(connection)
         _ensure_review_record_foreign_key(connection)
@@ -210,6 +229,18 @@ def _ensure_document_columns(connection: sqlite3.Connection) -> None:
     """为历史数据库补齐新增的文档元数据列。"""
 
     _ensure_table_columns(connection, "documents", DOCUMENT_METADATA_COLUMNS)
+
+
+def _ensure_section_traceability_columns(connection: sqlite3.Connection) -> None:
+    """为历史章节表补齐出处追溯字段。"""
+
+    _ensure_table_columns(connection, "document_sections", SECTION_TRACEABILITY_COLUMNS)
+
+
+def _ensure_chunk_traceability_columns(connection: sqlite3.Connection) -> None:
+    """为历史分块表补齐出处追溯字段。"""
+
+    _ensure_table_columns(connection, "chunks", CHUNK_TRACEABILITY_COLUMNS)
 
 
 def _ensure_quality_check_columns(connection: sqlite3.Connection) -> None:

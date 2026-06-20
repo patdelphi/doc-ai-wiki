@@ -695,15 +695,20 @@ class IngestService:
                 connection.execute(
                     """
                     INSERT INTO document_sections (
-                        section_id, doc_uid, section_title, section_level, source_span,
+                        section_id, doc_uid, section_title, section_level, heading_path,
+                        source_start_line, source_end_line, source_anchor, source_span,
                         content, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         section_id,
                         doc_uid,
                         section["section_title"],
                         section["section_level"],
+                        section.get("heading_path"),
+                        section.get("source_start_line"),
+                        section.get("source_end_line"),
+                        section.get("source_anchor"),
                         section["source_span"],
                         section["content"],
                         now,
@@ -714,11 +719,20 @@ class IngestService:
                 for chunk_content in split_text(section["content"]):
                     chunk_id = f"chk_{uuid4().hex[:12]}"
                     source_span = f"{section['source_span']}:chunk-{chunk_index}"
+                    chunk_type = _detect_chunk_type(chunk_content)
+                    content_hash = sha256_of_text(chunk_content)
                     chunk_item = {
                         "chunk_id": chunk_id,
                         "doc_uid": doc_uid,
                         "section_id": section_id,
                         "source_span": source_span,
+                        "heading_path": section.get("heading_path"),
+                        "source_start_line": section.get("source_start_line"),
+                        "source_end_line": section.get("source_end_line"),
+                        "page_no": None,
+                        "chunk_type": chunk_type,
+                        "content_hash": content_hash,
+                        "source_anchor": section.get("source_anchor"),
                         "content": chunk_content,
                         # H7 修复：写入知识库 ID，供向量检索按知识库过滤
                         "knowledge_base_id": knowledge_base_id,
@@ -728,8 +742,9 @@ class IngestService:
                         """
                         INSERT INTO chunks (
                             chunk_id, doc_uid, section_id, chunk_index, content, source_span,
-                            token_count, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            heading_path, source_start_line, source_end_line, page_no, chunk_type,
+                            content_hash, source_anchor, token_count, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             chunk_id,
@@ -738,6 +753,13 @@ class IngestService:
                             chunk_index,
                             chunk_content,
                             source_span,
+                            section.get("heading_path"),
+                            section.get("source_start_line"),
+                            section.get("source_end_line"),
+                            None,
+                            chunk_type,
+                            content_hash,
+                            section.get("source_anchor"),
                             len(chunk_content),
                             now,
                             now,
@@ -770,3 +792,31 @@ class IngestService:
                 "向量索引写入失败",
                 details={"doc_uid": doc_uid, "stage": "vector_index"},
             ) from exc
+
+
+def _detect_chunk_type(chunk_content: str) -> str:
+    """根据 chunk 首个有效行识别基础 Markdown 类型。"""
+
+    for line in chunk_content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            return "code"
+        if stripped.startswith("|") and stripped.endswith("|"):
+            return "table"
+        if stripped.startswith(">"):
+            return "blockquote"
+        if stripped.startswith(("- ", "* ", "+ ")) or _is_ordered_list_line(stripped):
+            return "list"
+        return "paragraph"
+    return "paragraph"
+
+
+def _is_ordered_list_line(stripped_line: str) -> bool:
+    """判断是否为有序列表行。"""
+
+    dot_index = stripped_line.find(". ")
+    if dot_index <= 0:
+        return False
+    return stripped_line[:dot_index].isdigit()

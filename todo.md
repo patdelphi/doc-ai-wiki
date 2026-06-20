@@ -580,11 +580,25 @@
 
 ### P1：元数据与证据追溯
 
-- [ ] 设计 `heading_path`、`source_start_line`、`source_end_line`、`chunk_type`、`content_hash`、`source_anchor` 的存储或派生方案。
-- [ ] 如需改表，新增兼容旧数据库的初始化/迁移逻辑，确保事务内完成。
-- [ ] 入库时为 section 和 chunk 写入稳定出处信息，检索与质检结果透传到 evidence details。
-- [ ] UI/导出中展示可人工复核的来源位置，不只显示笼统 `source_span`。
-- [ ] 增加证据可追溯率测试，确认质检结果能定位到原文范围。
+- [x] 设计 `heading_path`、`source_start_line`、`source_end_line`、`chunk_type`、`content_hash`、`source_anchor` 的存储或派生方案。
+- [x] 如需改表，新增兼容旧数据库的初始化/迁移逻辑，确保事务内完成。
+- [x] 入库时为 section 和 chunk 写入稳定出处信息，检索与质检结果透传到 evidence details。
+- [x] UI/导出中展示可人工复核的来源位置，不只显示笼统 `source_span`。
+- [x] 增加证据可追溯率测试，确认质检结果能定位到原文范围。
+
+### 2026-06-20 P1 元数据追溯执行结果
+
+- [x] `document_sections` 增加 `heading_path`、`source_start_line`、`source_end_line`、`source_anchor`。
+- [x] `chunks` 增加 `heading_path`、`source_start_line`、`source_end_line`、`page_no`、`chunk_type`、`content_hash`、`source_anchor`。
+- [x] `initialize_database()` 可为旧版章节表和分块表自动补齐追溯列。
+- [x] Markdown 章节解析保留标题路径与行号范围。
+- [x] 入库写入 chunk 类型、内容 hash 和 source anchor；全文检索、向量检索和 chunk detail 透传追溯字段。
+- [x] 审核证据详情、证据 HTML 和质检导出展示标题路径、来源锚点、chunk 类型和内容 hash。
+- [x] `python -m pytest tests/unit/test_sections.py tests/unit/test_ingest_quality.py tests/unit/test_retrieval.py -q` 结果 `9 passed`。
+- [x] `python -m pytest tests/unit/test_vector_store.py tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest tests/integration/test_app.py::test_rebuild_should_support_fulltext_and_vector_separately -q` 结果 `9 passed`。
+- [x] `python -m pytest tests/unit/test_viewmodels.py -q` 结果 `45 passed`。
+- [x] `python -m pytest tests/unit/test_ui.py -q` 结果 `58 passed`。
+- [x] `python -m pytest tests -q` 结果 `270 passed`。
 
 ### P1：verdict 与证据关系统一
 

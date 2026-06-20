@@ -60,7 +60,9 @@ class RetrievalService:
             try:
                 rows = connection.execute(
                     f"""
-                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
+                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
+                           c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
+                           c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
                     FROM chunk_fts f
                     JOIN chunks c ON c.chunk_id = f.chunk_id
                     JOIN documents d ON d.doc_uid = c.doc_uid
@@ -78,7 +80,9 @@ class RetrievalService:
             if not rows:
                 rows = connection.execute(
                     f"""
-                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json, c.source_span, c.content
+                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
+                           c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
+                           c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
                     FROM chunks c
                     JOIN documents d ON d.doc_uid = c.doc_uid
                     WHERE content LIKE ?
@@ -168,7 +172,9 @@ class RetrievalService:
         with create_connection(self.database_path) as connection:
             row = connection.execute(
                 """
-                SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span, c.content,
+                SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span,
+                       c.heading_path, c.source_start_line, c.source_end_line, c.page_no,
+                       c.chunk_type, c.content_hash, c.source_anchor, c.content,
                        d.doc_title, d.author, d.source_name, d.tags_json, s.section_title
                 FROM chunks c
                 JOIN documents d ON d.doc_uid = c.doc_uid
@@ -227,7 +233,9 @@ class RetrievalService:
 
         chunk_row = connection.execute(
             """
-            SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span, c.content,
+            SELECT c.chunk_id, c.doc_uid, c.section_id, c.chunk_index, c.source_span,
+                   c.heading_path, c.source_start_line, c.source_end_line, c.page_no,
+                   c.chunk_type, c.content_hash, c.source_anchor, c.content,
                    d.doc_title, s.section_title, s.content AS section_content
             FROM chunks c
             JOIN documents d ON d.doc_uid = c.doc_uid

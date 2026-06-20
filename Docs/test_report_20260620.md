@@ -22,10 +22,14 @@
 | `python -m pytest tests/integration/test_app.py -q` | 29 passed | API 集成验证 |
 | `python -m pytest tests/unit/test_startup_scripts.py -q` | 6 passed | 启动脚本验证 |
 | `python -m pytest tests/unit -q` | 235 passed | 单元测试全量验证，耗时约 4 分 29 秒 |
-| `python -m pytest tests -q` | 267 passed | P1 分块升级后完整测试验证，耗时约 5 分 00 秒 |
+| `python -m pytest tests -q` | 270 passed | P1 追溯字段升级后完整测试验证，耗时约 5 分 08 秒 |
 | `python -m pytest tests/unit/test_chunking.py -q` | 4 passed | P1 Markdown 结构感知分块验证 |
 | `python -m pytest tests/unit/test_sections.py tests/unit/test_ingest_quality.py tests/unit/test_knowledge_base.py -q` | 18 passed | P1 分块影响路径验证 |
 | `python -m pytest tests/integration/test_app.py::test_register_document_and_query_status_should_work tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest tests/integration/test_app.py::test_rebuild_should_support_fulltext_and_vector_separately -q` | 3 passed | P1 入库、检索、重建集成验证 |
+| `python -m pytest tests/unit/test_sections.py tests/unit/test_ingest_quality.py tests/unit/test_retrieval.py -q` | 9 passed | P1 元数据追溯、入库与全文检索验证 |
+| `python -m pytest tests/unit/test_vector_store.py tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest tests/integration/test_app.py::test_rebuild_should_support_fulltext_and_vector_separately -q` | 9 passed | P1 向量 metadata 与重建链路验证 |
+| `python -m pytest tests/unit/test_viewmodels.py -q` | 45 passed | P1 证据详情与导出展示验证 |
+| `python -m pytest tests/unit/test_ui.py -q` | 58 passed | P1 UI 构建与页面回归验证 |
 
 ## 本轮修复的测试预期
 
@@ -40,6 +44,14 @@
 - 表格、围栏代码块、连续引用块会保持在同一 chunk 中。
 - 超长普通段落仍按长度和重叠配置做兜底切分，兼容原有 `split_text()` 调用方。
 
+## P1 元数据追溯补充验证
+
+- `document_sections` 已支持标题路径、起止行号和来源锚点。
+- `chunks` 已支持标题路径、起止行号、页码占位、chunk 类型、内容 hash 和来源锚点。
+- 旧库初始化会通过 `ALTER TABLE` 补齐新增追溯列。
+- 入库、全文检索、向量检索、向量重建链路均可保留 chunk 级追溯字段。
+- 审核证据详情、证据 HTML 和质检导出会展示标题路径、来源锚点、chunk 类型和内容 hash。
+
 ## 结论
 
-当前环境不是“无法验证测试”。截至本报告，完整测试 `python -m pytest tests -q` 已通过，结果为 `267 passed, 6 warnings`。后续仍建议在 CI 中持续运行完整测试，并把耗时作为质量门禁的一部分记录。
+当前环境不是“无法验证测试”。截至本报告，完整测试 `python -m pytest tests -q` 已通过，结果为 `270 passed, 6 warnings`。后续仍建议在 CI 中持续运行完整测试，并把耗时作为质量门禁的一部分记录。
