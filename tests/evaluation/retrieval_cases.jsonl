@@ -1,0 +1,50 @@
+{"case_id":"ret_001","query":"阿胶 贫血","expected_doc_uids":["doc_ejiao"],"expected_chunk_ids":["ejiao_effect_001"],"expected_evidence":"阿胶与贫血相关证据"}
+{"case_id":"ret_002","query":"驴皮胶 贫血","expected_doc_uids":["doc_ejiao"],"expected_chunk_ids":["ejiao_effect_001"],"expected_evidence":"别名应命中阿胶相关证据"}
+{"case_id":"ret_003","query":"东阿阿胶 产地","expected_doc_uids":["doc_ejiao_origin"],"expected_chunk_ids":["ejiao_origin_001"],"expected_evidence":"东阿阿胶与产地说明"}
+{"case_id":"ret_004","query":"阿膠 功效","expected_doc_uids":["doc_ejiao"],"expected_chunk_ids":["ejiao_effect_002"],"expected_evidence":"繁体阿膠应归一为阿胶"}
+{"case_id":"ret_005","query":"阿胶 滋阴润燥","expected_doc_uids":["doc_ejiao"],"expected_chunk_ids":["ejiao_effect_003"],"expected_evidence":"滋阴润燥相关段落"}
+{"case_id":"ret_006","query":"阿胶 食用禁忌","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_001"],"expected_evidence":"禁忌和注意事项"}
+{"case_id":"ret_007","query":"阿胶 孕妇 注意事项","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_002"],"expected_evidence":"孕妇使用注意"}
+{"case_id":"ret_008","query":"阿胶 糖尿病 禁忌","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_003"],"expected_evidence":"糖尿病相关风险"}
+{"case_id":"ret_009","query":"阿胶 癌症 治疗","expected_doc_uids":["doc_ejiao_limits"],"expected_chunk_ids":["ejiao_limits_001"],"expected_evidence":"不应宣称治疗癌症"}
+{"case_id":"ret_010","query":"阿胶 免疫力","expected_doc_uids":["doc_ejiao_effect"],"expected_chunk_ids":["ejiao_effect_004"],"expected_evidence":"免疫相关表述"}
+{"case_id":"ret_011","query":"阿胶 皮肤 状态","expected_doc_uids":["doc_ejiao_effect"],"expected_chunk_ids":["ejiao_effect_005"],"expected_evidence":"皮肤状态相关证据"}
+{"case_id":"ret_012","query":"阿胶 睡眠 改善","expected_doc_uids":["doc_ejiao_effect"],"expected_chunk_ids":["ejiao_effect_006"],"expected_evidence":"睡眠相关证据"}
+{"case_id":"ret_013","query":"阿胶 月经 调理","expected_doc_uids":["doc_ejiao_effect"],"expected_chunk_ids":["ejiao_effect_007"],"expected_evidence":"月经调理相关证据"}
+{"case_id":"ret_014","query":"阿胶 儿童 使用","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_004"],"expected_evidence":"儿童使用限制"}
+{"case_id":"ret_015","query":"阿胶 过敏 反应","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_005"],"expected_evidence":"过敏反应相关证据"}
+{"case_id":"ret_016","query":"阿胶 保质期 保存","expected_doc_uids":["doc_ejiao_storage"],"expected_chunk_ids":["ejiao_storage_001"],"expected_evidence":"保存方式和保质期"}
+{"case_id":"ret_017","query":"阿胶 真伪 鉴别","expected_doc_uids":["doc_ejiao_quality"],"expected_chunk_ids":["ejiao_quality_001"],"expected_evidence":"真伪鉴别方法"}
+{"case_id":"ret_018","query":"阿胶 原料 驴皮","expected_doc_uids":["doc_ejiao_origin"],"expected_chunk_ids":["ejiao_origin_002"],"expected_evidence":"原料说明"}
+{"case_id":"ret_019","query":"阿胶 黄酒 冲服","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_001"],"expected_evidence":"冲服方法"}
+{"case_id":"ret_020","query":"阿胶 用量 每日","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_002"],"expected_evidence":"每日用量"}
+{"case_id":"ret_021","query":"鹿角胶 功效","expected_doc_uids":["doc_deerhorn_glue"],"expected_chunk_ids":["deerhorn_effect_001"],"expected_evidence":"鹿角胶功效"}
+{"case_id":"ret_022","query":"鹿角胶 阿胶 区别","expected_doc_uids":["doc_glue_compare"],"expected_chunk_ids":["glue_compare_001"],"expected_evidence":"鹿角胶与阿胶区别"}
+{"case_id":"ret_023","query":"龟甲胶 功效","expected_doc_uids":["doc_tortoise_glue"],"expected_chunk_ids":["tortoise_effect_001"],"expected_evidence":"龟甲胶功效"}
+{"case_id":"ret_024","query":"阿胶 鹿角胶 龟甲胶 对比","expected_doc_uids":["doc_glue_compare"],"expected_chunk_ids":["glue_compare_002"],"expected_evidence":"三类胶对比"}
+{"case_id":"ret_025","query":"补血 中药 阿胶","expected_doc_uids":["doc_ejiao_effect"],"expected_chunk_ids":["ejiao_effect_008"],"expected_evidence":"补血相关证据"}
+{"case_id":"ret_026","query":"阿胶 现代研究","expected_doc_uids":["doc_ejiao_research"],"expected_chunk_ids":["ejiao_research_001"],"expected_evidence":"现代研究概述"}
+{"case_id":"ret_027","query":"阿胶 临床证据","expected_doc_uids":["doc_ejiao_research"],"expected_chunk_ids":["ejiao_research_002"],"expected_evidence":"临床证据限制"}
+{"case_id":"ret_028","query":"阿胶 不良反应","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_006"],"expected_evidence":"不良反应"}
+{"case_id":"ret_029","query":"阿胶 与药物相互作用","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_007"],"expected_evidence":"药物相互作用"}
+{"case_id":"ret_030","query":"阿胶 适宜人群","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_003"],"expected_evidence":"适宜人群"}
+{"case_id":"ret_031","query":"阿胶 不适宜人群","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_004"],"expected_evidence":"不适宜人群"}
+{"case_id":"ret_032","query":"阿胶 服用时间","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_005"],"expected_evidence":"服用时间"}
+{"case_id":"ret_033","query":"阿胶 与感冒","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_008"],"expected_evidence":"感冒期间使用"}
+{"case_id":"ret_034","query":"阿胶 与脾胃虚弱","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_009"],"expected_evidence":"脾胃虚弱注意"}
+{"case_id":"ret_035","query":"阿胶 与高血压","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_010"],"expected_evidence":"高血压相关注意"}
+{"case_id":"ret_036","query":"阿胶 产地 唯一","expected_doc_uids":["doc_ejiao_origin"],"expected_chunk_ids":["ejiao_origin_003"],"expected_evidence":"产地并非唯一"}
+{"case_id":"ret_037","query":"阿胶 东阿 一家","expected_doc_uids":["doc_ejiao_origin"],"expected_chunk_ids":["ejiao_origin_004"],"expected_evidence":"东阿不是唯一生产地"}
+{"case_id":"ret_038","query":"阿胶 国家标准","expected_doc_uids":["doc_ejiao_quality"],"expected_chunk_ids":["ejiao_quality_002"],"expected_evidence":"标准相关内容"}
+{"case_id":"ret_039","query":"阿胶 配伍 禁忌","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_011"],"expected_evidence":"配伍禁忌"}
+{"case_id":"ret_040","query":"阿胶 铁剂 同服","expected_doc_uids":["doc_ejiao_safety"],"expected_chunk_ids":["ejiao_safety_012"],"expected_evidence":"同服注意"}
+{"case_id":"ret_041","query":"阿胶 和红枣","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_006"],"expected_evidence":"红枣搭配"}
+{"case_id":"ret_042","query":"阿胶 和枸杞","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_007"],"expected_evidence":"枸杞搭配"}
+{"case_id":"ret_043","query":"阿胶糕 糖分","expected_doc_uids":["doc_ejiao_food"],"expected_chunk_ids":["ejiao_food_001"],"expected_evidence":"阿胶糕糖分"}
+{"case_id":"ret_044","query":"阿胶糕 与阿胶 区别","expected_doc_uids":["doc_ejiao_food"],"expected_chunk_ids":["ejiao_food_002"],"expected_evidence":"产品区别"}
+{"case_id":"ret_045","query":"阿胶粉 冲泡","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_008"],"expected_evidence":"阿胶粉冲泡"}
+{"case_id":"ret_046","query":"阿胶片 烊化","expected_doc_uids":["doc_ejiao_usage"],"expected_chunk_ids":["ejiao_usage_009"],"expected_evidence":"烊化方法"}
+{"case_id":"ret_047","query":"阿胶 价格 因素","expected_doc_uids":["doc_ejiao_market"],"expected_chunk_ids":["ejiao_market_001"],"expected_evidence":"价格因素"}
+{"case_id":"ret_048","query":"阿胶 不能替代药物","expected_doc_uids":["doc_ejiao_limits"],"expected_chunk_ids":["ejiao_limits_002"],"expected_evidence":"不能替代药物治疗"}
+{"case_id":"ret_049","query":"阿胶 证据不足","expected_doc_uids":["doc_ejiao_limits"],"expected_chunk_ids":["ejiao_limits_003"],"expected_evidence":"证据不足表述"}
+{"case_id":"ret_050","query":"阿胶 宣传 合规","expected_doc_uids":["doc_ejiao_compliance"],"expected_chunk_ids":["ejiao_compliance_001"],"expected_evidence":"宣传合规要求"}

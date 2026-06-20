@@ -21,6 +21,7 @@ from src.quality.verdicts import (
     most_conservative_verdict,
 )
 from src.retrieval.service import RetrievalService
+from src.retrieval.query_normalizer import expand_query_texts, normalize_query_text
 from src.retrieval.vector_store import VectorStore
 from src.rules.service import RuleService
 
@@ -812,13 +813,21 @@ class QualityService:
         literal_query = claim_text.strip()
         claim_logic = cls._build_claim_logic_snapshot(claim_text)
         query_specs = [{"label": "claim_literal", "query": literal_query}]
+        for expanded_query in expand_query_texts(literal_query, limit=4)[1:]:
+            query_specs.append({"label": "entity_expanded", "query": expanded_query})
         normalized_query = cls._normalize_claim_query_for_retrieval(claim_text)
         if normalized_query and normalized_query != literal_query:
             query_specs.append({"label": "logic_relaxed", "query": normalized_query})
+        normalized_entity_query = normalize_query_text(normalized_query)
+        if normalized_entity_query and normalized_entity_query != normalized_query:
+            query_specs.append({"label": "entity_expanded", "query": normalized_entity_query})
         topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
         if topic_query:
             query_specs.append({"label": "topic_focus", "query": topic_query})
-        for keyword_query in cls._build_keyword_focus_queries(normalized_query or literal_query):
+        for keyword_source in expand_query_texts(normalized_query or literal_query, limit=4):
+            for keyword_query in cls._build_keyword_focus_queries(keyword_source):
+                query_specs.append({"label": "keyword_focus", "query": keyword_query})
+        for keyword_query in cls._build_keyword_focus_queries(normalized_entity_query):
             query_specs.append({"label": "keyword_focus", "query": keyword_query})
         counter_query = cls._build_counter_probe_query(normalized_query or literal_query, claim_logic)
         if counter_query:

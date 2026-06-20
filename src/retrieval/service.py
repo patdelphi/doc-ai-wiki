@@ -7,6 +7,7 @@ import sqlite3
 
 from src.ai.rerank import BaseReranker, DisabledReranker
 from src.db.connection import create_connection
+from src.retrieval.query_normalizer import expand_query_texts
 from src.retrieval.vector_store import VectorStore
 
 
@@ -37,63 +38,78 @@ class RetrievalService:
     ) -> list[dict]:
         """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
 
+        query_texts = expand_query_texts(query, limit=6)
         doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
         knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
         like_doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
         like_knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
-        params_list: list = [query]
-        if doc_uid:
-            params_list.append(doc_uid)
-        if knowledge_base_id:
-            params_list.append(knowledge_base_id)
-        params_list.append(top_k)
-        params = tuple(params_list)
-        like_params_list: list = [f"%{query}%"]
-        if doc_uid:
-            like_params_list.append(doc_uid)
-        if knowledge_base_id:
-            like_params_list.append(knowledge_base_id)
-        like_params_list.append(top_k)
-        like_params = tuple(like_params_list)
 
+        collected_rows: list[dict] = []
+        seen_chunk_ids: set[str] = set()
         with create_connection(self.database_path) as connection:
-            try:
-                rows = connection.execute(
-                    f"""
-                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
-                           c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
-                           c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
-                    FROM chunk_fts f
-                    JOIN chunks c ON c.chunk_id = f.chunk_id
-                    JOIN documents d ON d.doc_uid = c.doc_uid
-                    WHERE chunk_fts MATCH ?
-                    {doc_uid_filter}
-                    {knowledge_base_filter}
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
-            except sqlite3.OperationalError:
-                # 某些 SQLite/FTS5 运行环境对 MATCH 参数解析不稳定，失败时回退到 LIKE，
-                # 避免检索异常直接中断 AI 质检链路。
-                rows = []
-            if not rows:
-                rows = connection.execute(
-                    f"""
-                    SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
-                           c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
-                           c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
-                    FROM chunks c
-                    JOIN documents d ON d.doc_uid = c.doc_uid
-                    WHERE content LIKE ?
-                    {like_doc_uid_filter}
-                    {like_knowledge_base_filter}
-                    ORDER BY c.updated_at DESC
-                    LIMIT ?
-                    """,
-                    like_params,
-                ).fetchall()
-        return [self._with_source(self._normalize_metadata_fields(dict(row)), "fulltext") for row in rows]
+            for query_text in query_texts:
+                params_list: list = [query_text]
+                if doc_uid:
+                    params_list.append(doc_uid)
+                if knowledge_base_id:
+                    params_list.append(knowledge_base_id)
+                params_list.append(top_k)
+                params = tuple(params_list)
+                try:
+                    rows = connection.execute(
+                        f"""
+                        SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
+                               c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
+                               c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
+                        FROM chunk_fts f
+                        JOIN chunks c ON c.chunk_id = f.chunk_id
+                        JOIN documents d ON d.doc_uid = c.doc_uid
+                        WHERE chunk_fts MATCH ?
+                        {doc_uid_filter}
+                        {knowledge_base_filter}
+                        LIMIT ?
+                        """,
+                        params,
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    # 某些 SQLite/FTS5 运行环境对 MATCH 参数解析不稳定，失败时回退到 LIKE，
+                    # 避免检索异常直接中断 AI 质检链路。
+                    rows = []
+                if not rows:
+                    like_params_list: list = [f"%{query_text}%"]
+                    if doc_uid:
+                        like_params_list.append(doc_uid)
+                    if knowledge_base_id:
+                        like_params_list.append(knowledge_base_id)
+                    like_params_list.append(top_k)
+                    like_params = tuple(like_params_list)
+                    rows = connection.execute(
+                        f"""
+                        SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
+                               c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
+                               c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
+                        FROM chunks c
+                        JOIN documents d ON d.doc_uid = c.doc_uid
+                        WHERE content LIKE ?
+                        {like_doc_uid_filter}
+                        {like_knowledge_base_filter}
+                        ORDER BY c.updated_at DESC
+                        LIMIT ?
+                        """,
+                        like_params,
+                    ).fetchall()
+                for row in rows:
+                    row_dict = dict(row)
+                    chunk_id = str(row_dict.get("chunk_id") or "")
+                    if not chunk_id or chunk_id in seen_chunk_ids:
+                        continue
+                    collected_rows.append(row_dict)
+                    seen_chunk_ids.add(chunk_id)
+                    if len(collected_rows) >= top_k:
+                        break
+                if len(collected_rows) >= top_k:
+                    break
+        return [self._with_source(self._normalize_metadata_fields(row), "fulltext") for row in collected_rows]
 
     def vector_search(
         self,

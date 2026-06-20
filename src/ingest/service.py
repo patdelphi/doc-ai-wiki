@@ -19,6 +19,7 @@ from src.ingest.quality_config import IngestQualityConfigService
 from src.knowledge_base.service import KnowledgeBaseService
 from src.metadata.extractor import extract_basic_metadata
 from src.metadata.sections import parse_markdown_sections
+from src.retrieval.query_normalizer import build_normalized_index_text
 from src.retrieval.vector_store import VectorStore
 
 
@@ -770,7 +771,7 @@ class IngestService:
                         INSERT INTO chunk_fts (chunk_id, doc_uid, content)
                         VALUES (?, ?, ?)
                         """,
-                        (chunk_id, doc_uid, chunk_content),
+                        (chunk_id, doc_uid, build_normalized_index_text(chunk_content)),
                     )
                     chunk_index += 1
         return chunk_items

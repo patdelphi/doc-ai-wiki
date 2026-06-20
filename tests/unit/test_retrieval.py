@@ -153,3 +153,40 @@ def test_fulltext_search_should_return_traceability_fields_from_sqlite(tmp_path:
     assert items[0]["chunk_type"] == "paragraph"
     assert items[0]["content_hash"] == "b" * 64
     assert items[0]["source_anchor"] == "L3-L6"
+
+
+def test_fulltext_search_should_expand_entity_alias_query(tmp_path: Path) -> None:
+    """用户用别名检索时，应通过实体归一扩展命中标准名内容。"""
+
+    database_path = tmp_path / "app.db"
+    initialize_database(database_path)
+    now = "2026-06-20T00:00:00+00:00"
+    with create_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO documents (
+                doc_uid, knowledge_base_id, doc_id, doc_title, source_path, source_hash,
+                ingest_status, index_status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("doc_alias", "default", "doc_alias", "阿胶资料", "default/ejiao.md", "hash", "completed", "indexed", now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO chunks (
+                chunk_id, doc_uid, section_id, chunk_index, content, source_span,
+                token_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("chunk_alias", "doc_alias", None, 0, "阿胶常用于中医药资料整理。", "section-1:chunk-0", 12, now, now),
+        )
+        connection.execute(
+            "INSERT INTO chunk_fts (chunk_id, doc_uid, content) VALUES (?, ?, ?)",
+            ("chunk_alias", "doc_alias", "阿胶常用于中医药资料整理。"),
+        )
+        connection.commit()
+
+    items = RetrievalService(database_path).fulltext_search("驴皮胶", top_k=5, knowledge_base_id="default")
+
+    assert len(items) == 1
+    assert items[0]["chunk_id"] == "chunk_alias"

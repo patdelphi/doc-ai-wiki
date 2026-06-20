@@ -416,6 +416,17 @@ def test_quality_service_should_build_keyword_queries_for_chinese_sentence_claim
     assert "阿胶 治疗" in queries
 
 
+def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
+    """质检 Claim 使用别名时，应补充标准名查询，避免各模块硬编码补丁分裂。"""
+
+    query_specs = QualityService._build_retrieval_queries("驴皮胶能改善贫血")
+
+    queries = [item["query"] for item in query_specs]
+
+    assert "阿胶能改善贫血" in queries
+    assert "阿胶 贫血" in queries
+
+
 def test_quality_service_should_keep_broader_candidate_pool_before_final_judgement(tmp_path: Path) -> None:
     """多查询召回时，不应在整理上下文前过早截断候选证据。"""
 

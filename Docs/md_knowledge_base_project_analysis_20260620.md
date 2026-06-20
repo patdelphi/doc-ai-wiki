@@ -397,19 +397,31 @@ source_anchor
 
 ---
 
-### 4.6 P1 问题：实体归一尚未真正落地
+### 4.6 P1 状态：实体归一已最小落地，仍需评测扩展
 
-设计文档要求最小实体归一，但当前实现中未看到完整词表和归一流程。
+当前已新增最小实体词表和统一 query normalizer：
 
-影响：
+```text
+data/entities/term_dictionary.json
+src/retrieval/query_normalizer.py
+```
 
-- 别名、异体字、繁简、同义词召回不稳定
-- 中文长文档问法变化时召回下降
-- PageIndex 与普通 RAG 的关键词提取需要大量硬编码补丁
+已覆盖：
+
+- 查询侧繁简 / 异体和别名归一
+- 全文检索 query expansion
+- AI 质检 retrieval queries 复用同一套扩展逻辑
+- 入库 FTS 索引文本追加归一文本，同时保留原始 chunk 内容
+
+剩余影响：
+
+- 词表仍是最小样例，覆盖面不足
+- 同义表达还需要结合正式评测集扩展
+- PageIndex 的问题理解词表尚未与主 RAG 评测统一口径
 
 建议：
 
-补齐：
+继续扩展：
 
 ```text
 data/entities/
@@ -419,7 +431,7 @@ data/entities/
 └── domain_terms.json
 ```
 
-并在入库、检索、质检三处复用。
+并用 50 条检索样例和 50 条 Claim 样例持续验证召回收益。
 
 ---
 
@@ -456,19 +468,15 @@ MVP 文档要求：
 - 规则测试集：30 条命中样例与 30 条非命中样例
 - 跨领域样例集：10 条
 
-当前已有 PageIndex 10 问评测，但不足以覆盖主链路。
+当前已有 PageIndex 10 问评测，但不足以覆盖主链路。主链路评测集已新增最小正式样例：
 
-建议新增：
+- `tests/evaluation/retrieval_cases.jsonl`：50 条检索问题。
+- `tests/evaluation/claim_check_cases.jsonl`：50 条 Claim 标注。
+- `tests/evaluation/rule_cases.jsonl`：覆盖规则命中与非命中样例。
+- `tests/evaluation/pageindex_cases.jsonl`：50 条 PageIndex 固定问题，区分真实 LLM 推理与离线降级样例。
+- `src/retrieval/evaluation.py`：输出 Top-K 命中率、证据追溯率、Claim verdict 准确率、无证据 verified 率。
 
-```text
-tests/evaluation/
-├── retrieval_cases.jsonl
-├── claim_check_cases.jsonl
-├── rule_cases.jsonl
-└── pageindex_cases.jsonl
-```
-
-并输出固定指标。
+后续建议基于真实本地知识库输出完整固定指标报告，并区分 PageIndex 真实 LLM 与离线降级结果。
 
 ---
 
@@ -481,7 +489,7 @@ tests/evaluation/
 | 证据追溯不足 | 高 | 无法满足高可信质检 | 增加行号、标题路径、chunk 类型 |
 | verdict 细枚举迁移 | 中 | 当前已集中简化枚举，但尚未迁移到细枚举 | 保留简化口径，后续如需细分再做兼容迁移 |
 | 实体归一缺失 | 中高 | 中文知识库召回不稳定 | 建实体词表与 query expansion |
-| 评测集不足 | 中高 | 无法判断优化有效性 | 建正式评测集和自动化指标 |
+| 评测集不足 | 中 | 已建立 50 条检索样例、50 条 Claim 样例、50 条 PageIndex 样例和固定指标计算；仍缺真实运行报告 | 运行完整评测并记录指标差距 |
 | PageIndex 仍偏实验 | 中 | 适合增强，不宜作为唯一依据 | 与普通 RAG 合并证据并评测 |
 | 运行期数据未治理 | 中 | 可能误提交、泄露或状态不一致 | 明确 `.gitignore` 和数据重建流程 |
 | 权限系统复杂度 | 中 | 多知识库、多用户增加回归风险 | 持续保留对象级权限测试 |
@@ -545,8 +553,8 @@ src/metadata/markdown_parser.py
 
 建议任务：
 
-1. 建立 query normalization
-2. 接入实体词表和别名扩展
+1. 扩展 query normalization 词表覆盖面
+2. 基于评测集继续优化实体词表和别名扩展
 3. 优化全文 / 向量融合排序
 4. 增加 rerank 失败降级记录
 5. 增加检索 debug 输出

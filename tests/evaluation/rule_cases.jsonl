@@ -1,0 +1,6 @@
+{"case_id":"rule_001","input_text":"阿胶能治疗所有癌症。","rule_code":"ABSOLUTE_CLAIM","expected_hit":true,"expected_level":"error"}
+{"case_id":"rule_002","input_text":"阿胶只有东阿一家生产。","rule_code":"EXCLUSIVE_CLAIM","expected_hit":true,"expected_level":"error"}
+{"case_id":"rule_003","input_text":"阿胶能保证治愈失眠。","rule_code":"MEDICAL_CURE_PROMISE","expected_hit":true,"expected_level":"error"}
+{"case_id":"rule_004","input_text":"阿胶可以替代医生开具的药物。","rule_code":"REPLACE_MEDICAL_TREATMENT","expected_hit":true,"expected_level":"block"}
+{"case_id":"rule_005","input_text":"阿胶可能有辅助调理价值，具体使用需结合个人情况。","rule_code":"ABSOLUTE_CLAIM","expected_hit":false,"expected_level":""}
+{"case_id":"rule_006","input_text":"糖尿病患者食用阿胶糕时需要关注糖分。","rule_code":"MEDICAL_CURE_PROMISE","expected_hit":false,"expected_level":""}

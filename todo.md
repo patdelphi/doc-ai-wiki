@@ -620,18 +620,39 @@
 
 ### P1：实体归一与查询扩展
 
-- [ ] 建立最小实体词表目录，例如 `"data/entities"`，先覆盖当前知识库高频术语和别名。
-- [ ] 新增 query normalization，处理别名、同义表达、繁简/异体、领域术语。
-- [ ] 在入库、检索、质检三处复用同一套归一逻辑，避免各模块硬编码补丁分裂。
-- [ ] 增加中文问法变化、别名查询、同义查询的检索测试。
+- [x] 建立最小实体词表目录，例如 `"data/entities"`，先覆盖当前知识库高频术语和别名。
+- [x] 新增 query normalization，处理别名、同义表达、繁简/异体、领域术语。
+- [x] 在入库、检索、质检三处复用同一套归一逻辑，避免各模块硬编码补丁分裂。
+- [x] 增加中文问法变化、别名查询、同义查询的检索测试。
+
+### 2026-06-20 P1 实体归一与查询扩展执行结果
+
+- [x] 新增 `"data/entities/term_dictionary.json"`，先覆盖 `"阿胶"`、`"驴皮胶"`、`"驢皮膠"`、`"东阿阿胶"` 等最小别名和异体写法。
+- [x] 新增 `"src/retrieval/query_normalizer.py"`，集中提供查询归一、查询扩展和入库索引文本归一。
+- [x] 入库写入 FTS 时保留原始 chunk 内容，并追加归一文本，不改写 `"chunks.content"` 原文。
+- [x] 全文检索会按原 query、标准名 query、别名 query 依次检索并按 `chunk_id` 去重。
+- [x] AI 质检的 retrieval queries 复用同一套归一扩展，别名 Claim 会生成标准名与关键词查询。
+- [x] `python -m pytest "tests/unit/test_query_normalizer.py" "tests/unit/test_retrieval.py" "tests/unit/test_quality.py" -q` 结果 `25 passed`。
+- [x] `python -m pytest "tests/unit/test_ingest_quality.py" "tests/integration/test_app.py::test_register_document_and_query_status_should_work" "tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest" -q` 结果 `8 passed`。
 
 ### P2：正式评测集与质量指标
 
-- [ ] 新增 `"tests/evaluation/retrieval_cases.jsonl"`，至少 50 条问题与标准证据。
-- [ ] 新增 `"tests/evaluation/claim_check_cases.jsonl"`，至少 50 条 claim 与人工标注 verdict。
-- [ ] 新增 `"tests/evaluation/rule_cases.jsonl"`，覆盖命中与非命中样例。
-- [ ] 扩展 PageIndex 固定问题到 50 条，并区分真实 LLM 与离线降级结果。
-- [ ] 输出固定指标：Top-5 命中率、claim 准确率、无证据 verified 率、证据可追溯率。
+- [x] 新增 `"tests/evaluation/retrieval_cases.jsonl"`，至少 50 条问题与标准证据。
+- [x] 新增 `"tests/evaluation/claim_check_cases.jsonl"`，至少 50 条 claim 与人工标注 verdict。
+- [x] 新增 `"tests/evaluation/rule_cases.jsonl"`，覆盖命中与非命中样例。
+- [x] 扩展 PageIndex 固定问题到 50 条，并区分真实 LLM 与离线降级结果。
+- [x] 输出固定指标：Top-5 命中率、claim 准确率、无证据 verified 率、证据可追溯率。
+
+### 2026-06-20 P2 正式评测集与质量指标执行结果
+
+- [x] 新增 `"src/retrieval/evaluation.py"`，提供 JSONL 读取、检索 Top-K 命中率、证据追溯率、Claim verdict 准确率、无证据 verified 率计算。
+- [x] 新增 `"tests/evaluation/retrieval_cases.jsonl"`，当前 `50` 条检索问题与标准证据标注。
+- [x] 新增 `"tests/evaluation/claim_check_cases.jsonl"`，当前 `50` 条 Claim 与人工标注 verdict。
+- [x] 新增 `"tests/evaluation/rule_cases.jsonl"`，覆盖规则命中与非命中样例。
+- [x] 新增 `"tests/unit/test_retrieval_evaluation.py"` 与 `"tests/unit/test_evaluation_fixtures.py"`，锁定指标计算和评测集最低规模。
+- [x] `python -m pytest "tests/unit/test_retrieval_evaluation.py" "tests/unit/test_evaluation_fixtures.py" -q` 结果 `6 passed`。
+- [x] 新增 `"tests/evaluation/pageindex_cases.jsonl"`，当前 `50` 条 PageIndex 固定问题，并用 `requires_llm` / `mode` 区分真实 LLM 推理与离线降级样例。
+- [ ] 后续仍需基于真实本地知识库形成真实 LLM / 离线降级的分组运行结果。
 
 ### P2：PageIndex 与主链路融合
 
