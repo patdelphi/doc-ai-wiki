@@ -602,11 +602,21 @@
 
 ### P1：verdict 与证据关系统一
 
-- [ ] 梳理当前 `"verified"`、`"needs_review"`、`"rejected"` 与 `"support"`、`"contradict"`、`"insufficient"` 的关系。
-- [ ] 决定是否引入 `"contradicted"`、`"suspected"`、`"insufficient_evidence"`、`"manual_review_required"` 细枚举。
-- [ ] 若保持简化枚举，更新设计文档、验收文档、UI 文案和评测口径，避免文档与代码不一致。
+- [x] 梳理当前 `"verified"`、`"needs_review"`、`"rejected"` 与 `"support"`、`"contradict"`、`"insufficient"` 的关系。
+- [x] 决定是否引入 `"contradicted"`、`"suspected"`、`"insufficient_evidence"`、`"manual_review_required"` 细枚举。
+- [x] 若保持简化枚举，更新设计文档、验收文档、UI 文案和评测口径，避免文档与代码不一致。
 - [ ] 若迁移细枚举，先写兼容映射和历史结果展示测试，再改服务、API、UI、导出。
-- [ ] 增加无证据、弱证据、反证、绝对化、唯一性 claim 的回归测试。
+- [x] 增加无证据、弱证据、反证、绝对化、唯一性 claim 的回归测试。
+
+### 2026-06-20 P1 verdict 体系统一执行结果
+
+- [x] 新增 `"src/quality/verdicts.py"`，集中定义 claim verdict、证据关系、保守合并和总体 verdict 聚合。
+- [x] 当前阶段保留 API 简化枚举：`"verified"`、`"needs_review"`、`"rejected"`；总体全通过仍输出 `"passed"`。
+- [x] 证据关系细分保留在 `"support"`、`"contradict"`、`"insufficient"`，用于修正模型 verdict。
+- [x] `QualityService` 的总体 verdict 聚合与 LLM/启发式合并已改用统一 helper。
+- [x] `python -m pytest tests/unit/test_verdicts.py tests/unit/test_quality.py -q` 结果 `23 passed`。
+- [x] `python -m pytest tests/unit/test_viewmodels.py::test_claim_display_helpers_should_generate_markdown_and_rows tests/integration/test_app.py::test_quality_and_review_flow_should_persist_result -q` 结果 `2 passed`。
+- [x] `python -m pytest tests -q` 结果 `275 passed`。
 
 ### P1：实体归一与查询扩展
 

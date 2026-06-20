@@ -51,7 +51,7 @@
 | 元数据 | `src/metadata/extractor.py`、`src/metadata/sections.py` | 当前元数据和章节解析较轻量，缺少行号、页码、稳定标题路径等追溯信息 |
 | 分块 | `src/chunking/splitter.py` | 当前仍是固定字符长度切块，与设计中“禁止简单按固定字数粗暴截断”不一致 |
 | 检索 | `src/retrieval/service.py`、`src/retrieval/vector_store.py` | 已有 FTS5、LIKE 兜底、ChromaDB、混合检索、知识库过滤和上下文扩展 |
-| 质检 | `src/quality/service.py` | 已串联 claim、规则、检索、证据、LLM/启发式、持久化，但 verdict 体系需统一 |
+| 质检 | `src/quality/service.py`、`src/quality/verdicts.py` | 已串联 claim、规则、检索、证据、LLM/启发式、持久化；当前 verdict 简化枚举已集中定义 |
 | PageIndex | `src/pageindex/service.py` | 已集成本地 PageIndex，支持结构检索、LLM 语义树推理、RAG/FTS 补证据 |
 | API | `src/app.py` | 已有 `/ingest`、`/search`、`/quality`、`/review`、`/knowledge-bases` 等接口 |
 | 测试 | `tests/` | 测试覆盖面较广；当前环境可收集 264 条测试，单元与集成测试已可分组验证 |
@@ -76,7 +76,7 @@ pytest --version -> pytest 9.0.3
 python -m pytest --collect-only -q -> 264 tests collected
 ```
 
-后续已完成验证：`tests/unit` 235 条通过，`tests/integration/test_app.py` 29 条通过；P1 追溯字段升级后完整 `python -m pytest tests -q` 270 条通过。完整测试仍建议在 CI 中持续执行，以避免单机环境和耗时差异影响判断。
+后续已完成验证：`tests/unit` 235 条通过，`tests/integration/test_app.py` 29 条通过；P1 verdict 统一后完整 `python -m pytest tests -q` 275 条通过。完整测试仍建议在 CI 中持续执行，以避免单机环境和耗时差异影响判断。
 
 ---
 
@@ -164,7 +164,7 @@ python -m pytest --collect-only -q -> 264 tests collected
 
 主要差距：
 
-- 当前代码主要使用 `verified`、`needs_review`、`rejected`，与设计文档中的 `verified`、`contradicted`、`suspected`、`insufficient_evidence`、`manual_review_required` 不一致
+- 当前代码保留 `verified`、`needs_review`、`rejected` 简化枚举，并用 `support`、`contradict`、`insufficient` 表达证据关系；细枚举暂不迁移
 - 证据相关不等于证据支持，当前仍存在“检索到相关证据即较容易 verified”的风险
 - 反证、弱证据、范围扩大、绝对化表述、唯一性表述等复杂 claim 还需要更多评测验证
 - 缺少正式 claim 评测集和准确率指标
@@ -278,7 +278,7 @@ python -m pytest tests/integration/test_app.py -q
 - `python -m pytest --collect-only -q` 成功收集 264 条测试
 - `python -m pytest tests/unit -q` 结果 235 passed
 - `python -m pytest tests/integration/test_app.py -q` 结果 29 passed
-- `python -m pytest tests -q` 结果 270 passed
+- `python -m pytest tests -q` 结果 275 passed
 
 影响：
 
@@ -423,21 +423,11 @@ data/entities/
 
 ---
 
-### 4.7 P1 问题：verdict 体系需要统一
+### 4.7 P1 问题：verdict 体系需要持续治理
 
-当前代码与文档使用不同 verdict 枚举。
+当前代码已将简化 verdict 与证据关系集中到 `src/quality/verdicts.py`。为避免破坏历史记录与 API，当前阶段不迁移到细枚举。
 
-建议统一为：
-
-```text
-verified
-contradicted
-suspected
-insufficient_evidence
-manual_review_required
-```
-
-或明确保留当前简化版本：
+当前保留：
 
 ```text
 verified
@@ -445,7 +435,15 @@ needs_review
 rejected
 ```
 
-但不建议文档、代码、UI、报表长期不一致。
+证据关系使用：
+
+```text
+support
+contradict
+insufficient
+```
+
+如后续确需引入 `contradicted`、`suspected`、`insufficient_evidence`、`manual_review_required`，建议单独规划兼容映射、历史数据展示和 API 版本口径。
 
 ---
 
@@ -481,7 +479,7 @@ tests/evaluation/
 | 测试报告未同步 | 中高 | 当前测试可运行，但报告与验收清单仍需同步 | 记录单元、集成、收集结果并更新验收报告 |
 | 固定长度分块 | 高 | 直接影响检索和证据质量 | 升级 Markdown 结构感知分块 |
 | 证据追溯不足 | 高 | 无法满足高可信质检 | 增加行号、标题路径、chunk 类型 |
-| verdict 不一致 | 中高 | 影响 API、UI、评测、审核统计 | 统一内部枚举和迁移映射 |
+| verdict 细枚举迁移 | 中 | 当前已集中简化枚举，但尚未迁移到细枚举 | 保留简化口径，后续如需细分再做兼容迁移 |
 | 实体归一缺失 | 中高 | 中文知识库召回不稳定 | 建实体词表与 query expansion |
 | 评测集不足 | 中高 | 无法判断优化有效性 | 建正式评测集和自动化指标 |
 | PageIndex 仍偏实验 | 中 | 适合增强，不宜作为唯一依据 | 与普通 RAG 合并证据并评测 |

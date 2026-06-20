@@ -12,6 +12,14 @@ from src.common.errors import DatabaseAppError, ExternalServiceAppError, Validat
 from src.common.utils import utc_now_iso
 from src.db.repositories import QualityRepository
 from src.quality.templates import QualityTemplateService
+from src.quality.verdicts import (
+    EvidenceRelation,
+    QualityVerdict,
+    build_overall_verdict,
+    coerce_evidence_relation,
+    merge_verdict_with_evidence_relation,
+    most_conservative_verdict,
+)
 from src.retrieval.service import RetrievalService
 from src.retrieval.vector_store import VectorStore
 from src.rules.service import RuleService
@@ -587,20 +595,20 @@ class QualityService:
 
         if max_hit_level == "block":
             return {
-                "verdict": "rejected",
+                "verdict": QualityVerdict.REJECTED.value,
                 "confidence": 0.15,
                 "risk_level": "high",
                 "has_evidence": has_evidence,
-                "evidence_judgement": "contradict",
+                "evidence_judgement": EvidenceRelation.CONTRADICT.value,
                 "reason": "命中阻断级规则，当前内容不能直接放行。",
             }
         if QualityService._has_counter_evidence(evidence_list, logic_snapshot):
             return {
-                "verdict": "rejected",
+                "verdict": QualityVerdict.REJECTED.value,
                 "confidence": 0.25,
                 "risk_level": "high",
                 "has_evidence": has_evidence,
-                "evidence_judgement": "contradict",
+                "evidence_judgement": EvidenceRelation.CONTRADICT.value,
                 "reason": QualityService._build_heuristic_reason(
                     claim_text=claim_text,
                     evidence_list=evidence_list,
@@ -610,29 +618,29 @@ class QualityService:
             }
         if max_hit_level == "error":
             return {
-                "verdict": "needs_review",
+                "verdict": QualityVerdict.NEEDS_REVIEW.value,
                 "confidence": 0.35,
                 "risk_level": "high",
                 "has_evidence": has_evidence,
-                "evidence_judgement": "insufficient",
+                "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
                 "reason": "命中高风险规则，当前证据不足以直接放行。",
             }
         if max_hit_level == "warn":
             return {
-                "verdict": "needs_review",
+                "verdict": QualityVerdict.NEEDS_REVIEW.value,
                 "confidence": 0.55,
                 "risk_level": "medium",
                 "has_evidence": has_evidence,
-                "evidence_judgement": "insufficient",
+                "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
                 "reason": "命中提示级规则，建议结合更直接证据继续核对。",
             }
         if logic_snapshot.get("requires_strict_evidence"):
             return {
-                "verdict": "needs_review",
+                "verdict": QualityVerdict.NEEDS_REVIEW.value,
                 "confidence": 0.45 if has_evidence else 0.2,
                 "risk_level": "high" if logic_snapshot.get("has_exclusive") or logic_snapshot.get("has_negation") else "medium",
                 "has_evidence": has_evidence,
-                "evidence_judgement": "insufficient",
+                "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
                 "reason": QualityService._build_heuristic_reason(
                     claim_text=claim_text,
                     evidence_list=evidence_list,
@@ -642,19 +650,19 @@ class QualityService:
             }
         if has_evidence:
             return {
-                "verdict": "verified",
+                "verdict": QualityVerdict.VERIFIED.value,
                 "confidence": 0.85,
                 "risk_level": "low",
                 "has_evidence": True,
-                "evidence_judgement": "support",
+                "evidence_judgement": EvidenceRelation.SUPPORT.value,
                 "reason": "已检索到直接相关且未见明显冲突的支持证据。",
             }
         return {
-            "verdict": "needs_review",
+            "verdict": QualityVerdict.NEEDS_REVIEW.value,
             "confidence": 0.2,
             "risk_level": "medium",
             "has_evidence": False,
-            "evidence_judgement": "insufficient",
+            "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
             "reason": "当前未检索到足够直接的证据，建议人工复核。",
         }
 
@@ -675,13 +683,8 @@ class QualityService:
         """根据 claim 结果生成总体结论。M3 修复：空列表保护。"""
 
         if not claim_items:
-            return "needs_review"
-        verdicts = {item["verdict"] for item in claim_items}
-        if "rejected" in verdicts:
-            return "rejected"
-        if verdicts == {"verified"}:
-            return "passed"
-        return "needs_review"
+            return QualityVerdict.NEEDS_REVIEW.value
+        return build_overall_verdict([item["verdict"] for item in claim_items])
 
     @staticmethod
     def _build_overall_risk_level(claim_items: list[dict]) -> str:
@@ -715,20 +718,14 @@ class QualityService:
     def _merge_evaluation_result(*, heuristic: dict, llm_result: dict) -> dict:
         """合并启发式和模型结论，始终选择更保守的判定。"""
 
-        verdict_priority = {"verified": 0, "needs_review": 1, "rejected": 2}
         risk_priority = {"low": 0, "medium": 1, "high": 2}
 
-        heuristic_verdict = str(heuristic.get("verdict") or "needs_review")
+        heuristic_verdict = str(heuristic.get("verdict") or QualityVerdict.NEEDS_REVIEW.value)
         llm_verdict = str(llm_result.get("verdict") or heuristic_verdict)
         evidence_judgement = str(llm_result.get("evidence_judgement") or "").lower()
-        if evidence_judgement == "contradict":
-            llm_verdict = "rejected"
-        elif evidence_judgement == "insufficient" and llm_verdict == "verified":
-            llm_verdict = "needs_review"
-        final_verdict = max(
-            (heuristic_verdict, llm_verdict),
-            key=lambda value: verdict_priority.get(value, 1),
-        )
+        normalized_relation = coerce_evidence_relation(evidence_judgement or heuristic.get("evidence_judgement"))
+        llm_verdict = merge_verdict_with_evidence_relation(llm_verdict, normalized_relation)
+        final_verdict = most_conservative_verdict(heuristic_verdict, llm_verdict).value
 
         heuristic_risk = str(heuristic.get("risk_level") or "medium")
         llm_risk = str(llm_result.get("risk_level") or heuristic_risk)
@@ -746,7 +743,7 @@ class QualityService:
             "confidence": final_confidence,
             "risk_level": final_risk,
             "has_evidence": bool(llm_result.get("has_evidence", heuristic.get("has_evidence", False))),
-            "evidence_judgement": evidence_judgement or str(heuristic.get("evidence_judgement") or "insufficient"),
+            "evidence_judgement": (evidence_judgement or normalized_relation.value),
             "reason": str(llm_result.get("reason") or heuristic.get("reason") or ""),
         }
 
