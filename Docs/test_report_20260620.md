@@ -22,7 +22,7 @@
 | `python -m pytest tests/integration/test_app.py -q` | 29 passed | API 集成验证 |
 | `python -m pytest tests/unit/test_startup_scripts.py -q` | 6 passed | 启动脚本验证 |
 | `python -m pytest tests/unit -q` | 235 passed | 单元测试全量验证，耗时约 4 分 29 秒 |
-| `python -m pytest tests -q` | 287 passed | P2 PageIndex 50 问评测集后完整测试验证，耗时约 5 分 30 秒 |
+| `python -m pytest tests -q` | 291 passed | P2 检索样例证据对齐建议后完整测试验证，耗时约 5 分 13 秒 |
 | `python -m pytest tests/unit/test_chunking.py -q` | 4 passed | P1 Markdown 结构感知分块验证 |
 | `python -m pytest tests/unit/test_sections.py tests/unit/test_ingest_quality.py tests/unit/test_knowledge_base.py -q` | 18 passed | P1 分块影响路径验证 |
 | `python -m pytest tests/integration/test_app.py::test_register_document_and_query_status_should_work tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest tests/integration/test_app.py::test_rebuild_should_support_fulltext_and_vector_separately -q` | 3 passed | P1 入库、检索、重建集成验证 |
@@ -34,7 +34,7 @@
 | `python -m pytest tests/unit/test_viewmodels.py::test_claim_display_helpers_should_generate_markdown_and_rows tests/integration/test_app.py::test_quality_and_review_flow_should_persist_result -q` | 2 passed | P1 verdict 展示与质检审核链路验证 |
 | `python -m pytest tests/unit/test_query_normalizer.py tests/unit/test_retrieval.py tests/unit/test_quality.py -q` | 25 passed | P1 实体归一、别名查询扩展、全文检索与质检查询验证 |
 | `python -m pytest tests/unit/test_ingest_quality.py tests/integration/test_app.py::test_register_document_and_query_status_should_work tests/integration/test_app.py::test_vector_and_hybrid_search_should_return_results_after_ingest -q` | 8 passed | P1 入库 FTS 索引文本归一与主入库链路验证 |
-| `python -m pytest tests/unit/test_retrieval_evaluation.py tests/unit/test_evaluation_fixtures.py -q` | 7 passed | P2 正式评测集规模、JSONL 读取、检索/Claim 指标计算、PageIndex 样例验证 |
+| `python -m pytest tests/unit/test_retrieval_evaluation.py tests/unit/test_evaluation_fixtures.py -q` | 11 passed | P2 正式评测集规模、JSONL 读取、检索/Claim 指标计算、PageIndex 样例、Markdown 报告、证据目录导出和对齐建议验证 |
 | `python -m pytest tests/unit/test_evaluation_fixtures.py -q` | 4 passed | P2 PageIndex 50 问评测集规模与 LLM/离线模式字段验证 |
 
 ## 本轮修复的测试预期
@@ -80,8 +80,12 @@
 - `tests/evaluation/rule_cases.jsonl` 已覆盖规则命中与非命中样例。
 - `tests/evaluation/pageindex_cases.jsonl` 已包含 `50` 条 PageIndex 固定问题，并区分真实 LLM 推理与离线降级样例。
 - `src/retrieval/evaluation.py` 已提供 Top-K 命中率、证据追溯率、Claim verdict 准确率、无证据 verified 率计算。
+- `Docs/retrieval_evaluation_run_20260620.md` 已记录本地只读检索评测运行结果：`50` 条样例，Top-K 命中率 `0.0`，证据追溯率 `0.0`。
+- `Docs/evidence_catalog_20260620.md` 已从真实 SQLite 只读导出 `200` 条候选证据目录，便于后续对齐标准证据 ID。
+- `Docs/retrieval_alignment_suggestions_20260621.md` 已为 `50` 条检索样例生成候选证据 ID 建议，建议覆盖率 `1.0`。
+- 当前差距是评测样例标准 `doc_uid` / `chunk_id` 尚未与本机真实知识库 ID 对齐。
 - 后续仍需基于真实本地知识库补充真实 LLM 与离线降级分组运行结果。
 
 ## 结论
 
-当前环境不是“无法验证测试”。截至本报告，完整测试 `python -m pytest tests -q` 已通过，结果为 `287 passed, 6 warnings`。后续仍建议在 CI 中持续运行完整测试，并把耗时作为质量门禁的一部分记录。
+当前环境不是“无法验证测试”。截至本报告，完整测试 `python -m pytest tests -q` 已通过，结果为 `291 passed, 6 warnings`。后续仍建议在 CI 中持续运行完整测试，并把耗时作为质量门禁的一部分记录。

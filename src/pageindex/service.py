@@ -267,6 +267,60 @@ class PageIndexService:
             "created_at": created_at,
         }
 
+    def ask_knowledge_base_question(self, knowledge_base_id: str, question: str) -> dict:
+        """在当前知识库所有已构建 PageIndex 文档中提问，并保存问答历史。"""
+
+        normalized_question = str(question or "").strip()
+        if not normalized_question:
+            raise ValidationAppError("问题不能为空")
+        records = self._list_index_records(knowledge_base_id)
+        if not records:
+            raise NotFoundAppError("当前知识库尚未构建 PageIndex")
+        retrieval_result = self._answer_knowledge_base_with_reasoning_or_fallback(records, normalized_question)
+        evidence = retrieval_result["evidence"]
+        answer_text = retrieval_result["answer"]
+        history_doc_uid = self._resolve_history_doc_uid(records, evidence)
+        query_id = f"piq_{uuid4().hex[:12]}"
+        created_at = utc_now_iso()
+
+        with transaction(self.settings.sqlite_db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO pageindex_query_history (
+                    query_id,
+                    knowledge_base_id,
+                    doc_uid,
+                    question,
+                    answer,
+                    evidence_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    query_id,
+                    records[0]["knowledge_base_id"],
+                    history_doc_uid,
+                    normalized_question,
+                    answer_text,
+                    json.dumps(evidence, ensure_ascii=False),
+                    created_at,
+                ),
+            )
+
+        return {
+            "query_id": query_id,
+            "knowledge_base_id": records[0]["knowledge_base_id"],
+            "doc_uid": history_doc_uid,
+            "question": normalized_question,
+            "answer": answer_text,
+            "evidence": evidence,
+            "retrieval_mode": retrieval_result["retrieval_mode"],
+            "llm_error": retrieval_result.get("llm_error", ""),
+            "debug": retrieval_result.get("debug", {}),
+            "created_at": created_at,
+        }
+
     def list_query_history(self, knowledge_base_id: str, doc_uid: str, *, limit: int = 50) -> list[dict]:
         """读取当前知识库与文档下的 PageIndex 问答历史。"""
 
@@ -298,6 +352,26 @@ class PageIndexService:
             items.append(item)
         return items
 
+    def list_knowledge_base_query_history(self, knowledge_base_id: str, *, limit: int = 50) -> list[dict]:
+        """读取当前知识库下所有 PageIndex 问答历史。"""
+
+        resolved_knowledge_base_id = self._require_knowledge_base_id(knowledge_base_id)
+        try:
+            with create_connection(self.settings.sqlite_db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    FROM pageindex_query_history
+                    WHERE knowledge_base_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (resolved_knowledge_base_id, max(1, int(limit))),
+                ).fetchall()
+        except sqlite3.DatabaseError as exc:
+            raise DatabaseAppError("读取 PageIndex 历史失败", details={"reason": str(exc)}) from exc
+        return self._parse_history_rows(rows)
+
     def get_query_history_record(self, knowledge_base_id: str, doc_uid: str, query_id: str) -> dict:
         """按记录 ID 读取当前知识库与文档下的一条 PageIndex 问答历史。"""
 
@@ -328,10 +402,44 @@ class PageIndexService:
         item["evidence"] = evidence if isinstance(evidence, list) else []
         return item
 
+    def get_knowledge_base_query_history_record(self, knowledge_base_id: str, query_id: str) -> dict:
+        """按记录 ID 读取当前知识库下的一条 PageIndex 问答历史。"""
+
+        resolved_knowledge_base_id = self._require_knowledge_base_id(knowledge_base_id)
+        resolved_query_id = str(query_id or "").strip()
+        if not resolved_query_id:
+            raise ValidationAppError("请先从历史记录中选择要下载的结果")
+        try:
+            with create_connection(self.settings.sqlite_db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    FROM pageindex_query_history
+                    WHERE knowledge_base_id = ? AND query_id = ?
+                    """,
+                    (resolved_knowledge_base_id, resolved_query_id),
+                ).fetchall()
+        except sqlite3.DatabaseError as exc:
+            raise DatabaseAppError("读取 PageIndex 历史记录失败", details={"reason": str(exc)}) from exc
+        items = self._parse_history_rows(rows)
+        if not items:
+            raise NotFoundAppError("未找到选中的 PageIndex 历史记录")
+        return items[0]
+
     def export_query_markdown(self, knowledge_base_id: str, doc_uid: str, query_id: str) -> str:
         """将当前激活的 PageIndex 历史记录导出为 Markdown。"""
 
         record = self.get_query_history_record(knowledge_base_id, doc_uid, query_id)
+        return self._format_history_markdown(
+            knowledge_base_id=str(record.get("knowledge_base_id") or ""),
+            doc_uid=str(record.get("doc_uid") or ""),
+            history=[record],
+        )
+
+    def export_knowledge_base_query_markdown(self, knowledge_base_id: str, query_id: str) -> str:
+        """将当前知识库下激活的 PageIndex 历史记录导出为 Markdown。"""
+
+        record = self.get_knowledge_base_query_history_record(knowledge_base_id, query_id)
         return self._format_history_markdown(
             knowledge_base_id=str(record.get("knowledge_base_id") or ""),
             doc_uid=str(record.get("doc_uid") or ""),
@@ -351,6 +459,21 @@ class PageIndexService:
             doc_uid=resolved_doc_uid,
             history=history,
         )
+
+    @staticmethod
+    def _parse_history_rows(rows: list[sqlite3.Row]) -> list[dict]:
+        """将 PageIndex 历史查询行转换为前端结构。"""
+
+        items: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                evidence = json.loads(str(item.pop("evidence_json") or "[]"))
+            except json.JSONDecodeError:
+                evidence = []
+            item["evidence"] = evidence if isinstance(evidence, list) else []
+            items.append(item)
+        return items
 
     def _format_history_markdown(self, *, knowledge_base_id: str, doc_uid: str, history: list[dict]) -> str:
         """格式化 PageIndex 历史导出内容，供全量与单条导出复用。"""
@@ -457,12 +580,64 @@ class PageIndexService:
             raise NotFoundAppError("当前知识库下未找到指定文档", details={"knowledge_base_id": knowledge_base_id, "doc_uid": doc_uid})
         return dict(row)
 
+    def _answer_knowledge_base_with_reasoning_or_fallback(self, records: list[dict], question: str) -> dict:
+        """聚合当前知识库内多篇 PageIndex 文档的问答证据。"""
+
+        evidence: list[dict] = []
+        candidate_nodes: list[dict] = []
+        rag_evidence: list[dict] = []
+        llm_errors: list[str] = []
+        for record in records:
+            try:
+                structure = self._load_structure(record)
+                result = self._answer_with_reasoning_or_fallback(record, structure, question)
+            except AppError as exc:
+                llm_errors.append(exc.message)
+                continue
+            evidence = self._merge_evidence(evidence, result.get("evidence") if isinstance(result.get("evidence"), list) else [])
+            evidence = self._classify_evidence_items(question, evidence)
+            debug = result.get("debug") if isinstance(result.get("debug"), dict) else {}
+            for item in debug.get("candidate_nodes") or []:
+                if isinstance(item, dict):
+                    candidate_nodes.append(item)
+            for item in debug.get("rag_evidence") or []:
+                if isinstance(item, dict):
+                    rag_evidence.append(item)
+            if result.get("llm_error"):
+                llm_errors.append(str(result.get("llm_error") or ""))
+
+        if not evidence and llm_errors:
+            raise ValidationAppError("当前知识库 PageIndex 检索失败", details={"reason": "；".join(llm_errors)})
+        return {
+            "evidence": evidence,
+            "answer": self._build_local_answer(question, evidence),
+            "retrieval_mode": "知识库多文档检索",
+            "llm_error": "；".join(dict.fromkeys(item for item in llm_errors if item)),
+            "debug": {
+                "retrieval_mode": "知识库多文档检索",
+                "candidate_nodes": candidate_nodes,
+                "rag_evidence": rag_evidence,
+                "selected_nodes": candidate_nodes[: len(evidence)],
+            },
+        }
+
+    @staticmethod
+    def _resolve_history_doc_uid(records: list[dict], evidence: list[dict]) -> str:
+        """历史表仍需 doc_uid，优先挂到首条证据所属文档。"""
+
+        for item in evidence:
+            doc_uid = str(item.get("doc_uid") or "").strip()
+            if doc_uid:
+                return doc_uid
+        return str(records[0].get("doc_uid") or "")
+
     def _answer_with_reasoning_or_fallback(self, record: dict, structure: list[dict], question: str) -> dict:
         """优先用 LLM 对 PageIndex 树做语义推理，失败时回退到本地关键词。"""
 
         question_analysis = self._analyze_question(question)
         try:
             evidence, answer, debug = self._answer_with_llm_tree_reasoning(record, structure, question, question_analysis)
+            evidence = self._classify_evidence_items(question, evidence)
             if evidence:
                 debug["retrieval_mode"] = "LLM 语义树推理"
                 debug["question_analysis"] = question_analysis
@@ -490,6 +665,7 @@ class PageIndexService:
         evidence, candidate_nodes = self._rank_evidence(record, structure, question, question_analysis)
         rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis)
         evidence = self._merge_evidence(evidence, rag_evidence)
+        evidence = self._classify_evidence_items(question, evidence)
         return {
             "evidence": evidence,
             "answer": self._build_local_answer(question, evidence),
@@ -544,11 +720,14 @@ class PageIndexService:
                     "content": self._load_node_content(client, str(record["pageindex_doc_id"]), line_num),
                     "reason": str(selected.get("reason") or "LLM 语义推理选中"),
                     "source_type": "PageIndex 节点",
+                    "doc_uid": str(record.get("doc_uid") or ""),
+                    "pageindex_doc_id": str(record.get("pageindex_doc_id") or ""),
                 }
             )
 
         rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis)
         evidence = self._merge_evidence(evidence, rag_evidence)
+        evidence = self._classify_evidence_items(question, evidence)
         answer = str(selection.get("answer") or "").strip()
         if evidence:
             try:
@@ -727,11 +906,12 @@ class PageIndexService:
                 "",
                 "请按以下结构写中文回答：",
                 "结论：直接回答问题。",
+                "证据判断：说明哪些证据是直接支持、间接相关、风险提醒或仅定位信息；间接相关不能当作直接支持。",
                 "依据：列出支持结论的证据要点。",
                 "来源：列出证据标题、位置或 chunk 来源。",
                 "不确定点：说明证据不足或需要复核之处；如果没有，写“无”。",
                 "",
-                '请返回 JSON：{"answer":"结论：...\\n\\n依据：...\\n\\n来源：...\\n\\n不确定点：..."}',
+                '请返回 JSON：{"answer":"结论：...\\n\\n证据判断：...\\n\\n依据：...\\n\\n来源：...\\n\\n不确定点：..."}',
             ]
         )
         result = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
@@ -861,6 +1041,25 @@ class PageIndexService:
             raise NotFoundAppError("当前文档尚未构建 PageIndex", details={"knowledge_base_id": resolved_knowledge_base_id, "doc_uid": resolved_doc_uid})
         return dict(row)
 
+    def _list_index_records(self, knowledge_base_id: str) -> list[dict]:
+        """读取当前知识库下所有已构建 PageIndex 索引记录。"""
+
+        resolved_knowledge_base_id = self._require_knowledge_base_id(knowledge_base_id)
+        try:
+            with create_connection(self.settings.sqlite_db_path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT knowledge_base_id, doc_uid, pageindex_doc_id, workspace_path, source_hash, status
+                    FROM pageindex_indexes
+                    WHERE knowledge_base_id = ?
+                    ORDER BY updated_at DESC, doc_uid COLLATE NOCASE
+                    """,
+                    (resolved_knowledge_base_id,),
+                ).fetchall()
+        except sqlite3.DatabaseError as exc:
+            raise DatabaseAppError("读取 PageIndex 索引记录失败", details={"reason": str(exc)}) from exc
+        return [dict(row) for row in rows]
+
     def _load_structure(self, record: dict) -> list[dict]:
         """通过 vendor PageIndex 读取文档结构。"""
 
@@ -901,12 +1100,14 @@ class PageIndexService:
                     "content": content,
                     "reason": "本地候选召回",
                     "source_type": "PageIndex 节点",
+                    "doc_uid": str(record.get("doc_uid") or ""),
+                    "pageindex_doc_id": str(record.get("pageindex_doc_id") or ""),
                 }
             )
         return evidence, [self._candidate_to_debug(item) for item in candidates]
 
     def _search_rag_fts_evidence(self, record: dict, question: str, question_analysis: dict | None = None) -> list[dict]:
-        """在当前文档的 RAG/FTS chunk 中补充细粒度原文证据。"""
+        """在当前 PageIndex 文档关联的 RAG/FTS chunk 中补充细粒度原文证据。"""
 
         terms = self._analysis_terms(question_analysis or {})
         if not terms:
@@ -927,7 +1128,9 @@ class PageIndexService:
                 try:
                     result_rows = connection.execute(
                         """
-                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.content
+                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
+                               c.source_start_line, c.source_end_line, c.source_anchor,
+                               c.chunk_type, c.content
                         FROM chunk_fts f
                         JOIN chunks c ON c.chunk_id = f.chunk_id
                         WHERE chunk_fts MATCH ?
@@ -941,7 +1144,9 @@ class PageIndexService:
                 if not result_rows:
                     result_rows = connection.execute(
                         """
-                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.content
+                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
+                               c.source_start_line, c.source_end_line, c.source_anchor,
+                               c.chunk_type, c.content
                         FROM chunks c
                         WHERE c.content LIKE ?
                           AND c.doc_uid = ?
@@ -975,10 +1180,15 @@ class PageIndexService:
                     "position": str(row.get("source_span") or ""),
                     "summary": "",
                     "content": str(row.get("content") or ""),
-                    "reason": "当前文档 RAG/FTS 补充命中",
+                    "reason": "当前知识库 RAG/FTS 补充命中",
                     "source_type": "RAG/FTS 原文",
                     "chunk_id": str(row.get("chunk_id") or ""),
                     "doc_uid": str(row.get("doc_uid") or ""),
+                    "heading_path": str(row.get("heading_path") or ""),
+                    "source_start_line": row.get("source_start_line"),
+                    "source_end_line": row.get("source_end_line"),
+                    "source_anchor": str(row.get("source_anchor") or row.get("source_span") or ""),
+                    "chunk_type": str(row.get("chunk_type") or ""),
                 }
             )
         return evidence
@@ -1005,12 +1215,19 @@ class PageIndexService:
             normalized = str(term or "").strip()
             if not normalized or normalized in seen:
                 continue
-            if cls._normalize_rag_text(normalized) not in normalized_question:
-                continue
-            if cls._is_generic_rag_term(normalized):
-                continue
-            seen.add(normalized)
-            specific_terms.append(normalized)
+            expanded_terms = [normalized]
+            for expanded in cls._expand_meaningful_segment(normalized):
+                if expanded not in expanded_terms:
+                    expanded_terms.append(expanded)
+            for expanded in expanded_terms:
+                if expanded in seen:
+                    continue
+                if cls._normalize_rag_text(expanded) not in normalized_question:
+                    continue
+                if cls._is_generic_rag_term(expanded):
+                    continue
+                seen.add(expanded)
+                specific_terms.append(expanded)
         specific_terms.sort(key=len, reverse=True)
         return specific_terms[:8]
 
@@ -1076,10 +1293,14 @@ class PageIndexService:
         """合并 PageIndex 节点证据和 RAG/FTS 证据，并按来源去重。"""
 
         merged: list[dict] = []
-        seen: set[tuple[str, str]] = set()
-        source_items = primary if primary else supplemental
+        seen: set[tuple[str, str, str]] = set()
+        source_items = [*primary, *supplemental]
         for item in source_items:
-            key = (str(item.get("source_type") or "PageIndex 节点"), str(item.get("chunk_id") or item.get("position") or item.get("title") or ""))
+            key = (
+                str(item.get("source_type") or "PageIndex 节点"),
+                str(item.get("doc_uid") or ""),
+                str(item.get("chunk_id") or item.get("position") or item.get("title") or ""),
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -1107,18 +1328,129 @@ class PageIndexService:
         """基于已定位证据生成本地摘要回答。"""
 
         if not evidence:
-            return f"未在 PageIndex 文档结构中找到与“{question}”直接相关的证据。"
-        top = next((item for item in evidence if item.get("source_type") == "PageIndex 节点"), evidence[0])
-        content = str(top.get("content") or top.get("summary") or "").strip()
-        if len(content) > 600:
-            content = content[:600].rstrip() + "..."
-        source_label = str(top.get("source_type") or "PageIndex")
+            return "\n\n".join(
+                [
+                    f"结论：证据不足，不能回答“{question}”。",
+                    "依据：未在当前知识库的 PageIndex 结构或原文片段中找到直接相关证据。",
+                    "来源：无。",
+                    "不确定点：需要补充相关文档或重新构建索引后再判断。",
+                ]
+            )
+        evidence_points = PageIndexService._build_local_evidence_points(evidence)
+        judgement_points = PageIndexService._build_local_evidence_judgement(evidence)
+        source_points = PageIndexService._build_local_source_points(evidence)
+        conclusion = PageIndexService._infer_local_conclusion(question, evidence)
+        uncertainty = PageIndexService._infer_local_uncertainty(question, evidence)
         return "\n\n".join(
             [
-                f"根据{source_label}定位，最相关位置是“{top.get('title', '')}”（{top.get('position', '')}）。",
-                content,
+                f"结论：{conclusion}",
+                f"证据判断：{judgement_points}",
+                f"依据：{evidence_points}",
+                f"来源：{source_points}",
+                f"不确定点：{uncertainty}",
             ]
         ).strip()
+
+    @staticmethod
+    def _classify_evidence_items(question: str, evidence: list[dict]) -> list[dict]:
+        """为证据标注用途，区分支持结论、间接相关和风险提醒。"""
+
+        classified: list[dict] = []
+        for item in evidence:
+            copied = dict(item)
+            evidence_type, evidence_label = PageIndexService._classify_single_evidence(question, copied)
+            copied["evidence_type"] = evidence_type
+            copied["evidence_label"] = evidence_label
+            classified.append(copied)
+        return classified
+
+    @staticmethod
+    def _classify_single_evidence(question: str, evidence: dict) -> tuple[str, str]:
+        """按问题和证据正文判断单条证据类型。"""
+
+        normalized_question = str(question or "")
+        content = str(evidence.get("content") or evidence.get("summary") or "")
+        title = str(evidence.get("title") or "")
+        combined = f"{title}\n{content}"
+        if "禁忌" in title or any(marker in content for marker in ("禁忌", "不良反应", "必须在医师指导", "医师指导下正确服用")):
+            return "risk_warning", "风险提醒"
+        benefit_question = any(marker in normalized_question for marker in ("有好处", "有没有好处", "有作用", "有没有作用", "能不能", "是否可以"))
+        if benefit_question and re.search(r"心脏相关病证用[^，。；\s]{2,20}(汤|方|丸|散)", content):
+            return "indirect_related", "间接相关"
+        if benefit_question and any(marker in combined for marker in ("有效", "改善", "显著", "降低", "提高", "治疗")):
+            if any(subject in combined for subject in PageIndexService._extract_question_terms(normalized_question)):
+                return "direct_support", "直接支持"
+        if content:
+            return "indirect_related", "间接相关"
+        return "locator_only", "仅定位信息"
+
+    @staticmethod
+    def _build_local_evidence_judgement(evidence: list[dict]) -> str:
+        """汇总证据类型，帮助用户理解结论为何保守。"""
+
+        labels: list[str] = []
+        for item in evidence[:4]:
+            label = str(item.get("evidence_label") or "未分类")
+            title = str(item.get("title") or item.get("source_type") or "证据")
+            labels.append(f"{label}：{title}")
+        return "；".join(labels) if labels else "未找到可判断证据。"
+
+    @staticmethod
+    def _build_local_evidence_points(evidence: list[dict]) -> str:
+        """提炼本地证据要点，避免把命中位置当作回答。"""
+
+        points: list[str] = []
+        for item in evidence[:4]:
+            content = str(item.get("content") or item.get("summary") or "").strip()
+            if not content:
+                continue
+            if len(content) > 180:
+                content = content[:180].rstrip() + "..."
+            points.append(content)
+        return "；".join(points) if points else "当前证据只有命中位置，缺少可判断的正文内容。"
+
+    @staticmethod
+    def _build_local_source_points(evidence: list[dict]) -> str:
+        """格式化本地证据来源。"""
+
+        sources: list[str] = []
+        for item in evidence[:4]:
+            title = str(item.get("title") or item.get("source_type") or "证据").strip()
+            position = str(item.get("source_anchor") or item.get("position") or "").strip()
+            doc_uid = str(item.get("doc_uid") or "").strip()
+            label = title
+            if position:
+                label = f"{label}（{position}）"
+            if doc_uid:
+                label = f"{label}，文档：{doc_uid}"
+            sources.append(label)
+        return "；".join(sources) if sources else "无。"
+
+    @staticmethod
+    def _infer_local_conclusion(question: str, evidence: list[dict]) -> str:
+        """按问题类型给出保守结论，避免把相关证据误判成肯定答案。"""
+
+        normalized_question = str(question or "").strip()
+        joined_evidence = "\n".join(str(item.get("content") or item.get("summary") or "") for item in evidence)
+        evidence_types = {str(item.get("evidence_type") or "") for item in evidence}
+        benefit_question = any(marker in normalized_question for marker in ("有好处", "有没有好处", "有作用", "有没有作用", "能不能", "是否可以"))
+        cautious_markers = ("医师指导", "辨证", "不良反应", "禁忌", "注意", "证据不足", "不能直接", "需由医师")
+        if benefit_question and "direct_support" not in evidence_types:
+            return f"当前证据不足，不能直接得出“{normalized_question}”的结论；现有证据主要是间接相关或风险提醒。"
+        if benefit_question and any(marker in joined_evidence for marker in cautious_markers):
+            return f"当前证据不足，不能直接得出“{normalized_question}”的结论；证据更支持需由医师辨证或指导使用。"
+        if benefit_question:
+            return f"当前证据只能说明存在相关内容，不能直接得出“{normalized_question}”的明确结论。"
+        return "当前知识库中找到相关证据，具体判断需结合下列依据。"
+
+    @staticmethod
+    def _infer_local_uncertainty(question: str, evidence: list[dict]) -> str:
+        """说明本地降级答案的判断边界。"""
+
+        joined_evidence = "\n".join(str(item.get("content") or item.get("summary") or "") for item in evidence)
+        if any(marker in joined_evidence for marker in ("医师指导", "辨证", "不良反应", "禁忌", "注意")):
+            return "现有证据没有提供针对具体疾病人群的明确疗效结论，且涉及用药指导或禁忌，不能替代医生判断。"
+        return "本地降级回答只基于当前命中的文档证据，未做外部医学事实补充。"
 
     @staticmethod
     def _extract_question_terms(question: str) -> list[str]:
@@ -1186,6 +1518,8 @@ class PageIndexService:
                 terms.extend(["癌症患者", "癌症"])
             if "不孕不育" in segment:
                 terms.append("不孕不育")
+        if "心脏病" in segment:
+            terms.extend(["心脏病", "心脏"])
         return [term for term in terms if not PageIndexService._is_generic_tree_term(term)]
 
     @staticmethod

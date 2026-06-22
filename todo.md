@@ -652,7 +652,11 @@
 - [x] 新增 `"tests/unit/test_retrieval_evaluation.py"` 与 `"tests/unit/test_evaluation_fixtures.py"`，锁定指标计算和评测集最低规模。
 - [x] `python -m pytest "tests/unit/test_retrieval_evaluation.py" "tests/unit/test_evaluation_fixtures.py" -q` 结果 `6 passed`。
 - [x] 新增 `"tests/evaluation/pageindex_cases.jsonl"`，当前 `50` 条 PageIndex 固定问题，并用 `requires_llm` / `mode` 区分真实 LLM 推理与离线降级样例。
-- [ ] 后续仍需基于真实本地知识库形成真实 LLM / 离线降级的分组运行结果。
+- [x] 新增 `"Docs/retrieval_evaluation_run_20260620.md"`，记录本地只读检索评测运行结果。
+- [x] 新增 `"Docs/evidence_catalog_20260620.md"`，从真实 SQLite 只读导出 `200` 条候选证据目录，用于人工对齐标准证据 ID。
+- [x] 新增 `"Docs/retrieval_alignment_suggestions_20260621.md"`，为 `50` 条检索样例生成真实证据 ID 候选建议，覆盖率 `1.0`。
+- [ ] 当前检索评测样例的标准 `doc_uid` / `chunk_id` 尚未与本机真实知识库 ID 对齐，Top-5 命中率为 `0.0`，后续需补对齐后的真实评测集。
+- [ ] 后续仍需基于真实本地知识库形成 Claim 评测、PageIndex 真实 LLM / 离线降级的分组运行结果。
 
 ### P2：PageIndex 与主链路融合
 
@@ -661,6 +665,16 @@
 - [ ] 对论文合集类 Markdown 增加文章边界识别计划，减少一个超大树中主题混杂。
 - [ ] 设计跨文档 PageIndex 检索策略，但不在可信 MVP 收口前优先实现。
 
+### 2026-06-22 PageIndex 答案质量 P0 执行计划
+
+- [x] 将 PageIndex 提问和历史从单文档范围修正为知识库范围。
+- [x] PageIndex 主证据与 RAG/FTS 补充证据合并保留，避免引用不完整。
+- [x] 本地降级回答改为“结论 / 证据判断 / 依据 / 来源 / 不确定点”。
+- [x] 增加证据分类：`direct_support`、`indirect_related`、`risk_warning`、`locator_only`。
+- [x] PageIndex 证据表增加“证据类型”列。
+- [x] LLM 回答提示词要求区分直接支持、间接相关、风险提醒和仅定位信息。
+- [ ] P1 再设计 PageIndex 内置回答模式和高级自定义模板，不在 P0 直接开放自由 prompt。
+
 ### 验收标准
 
 - [x] `python -m pytest tests` 能完成并形成可追踪报告。
@@ -668,6 +682,6 @@
 - [x] 运行期 `"index/"`、日志、数据库不会被误提交。
 - [ ] 每个 chunk 至少能追溯到标题路径、原文范围和 chunk 类型。
 - [ ] 无证据或证据不足时不会输出 `"verified"`。
-- [ ] 50 条检索样例 Top-5 命中率达到 80% 或明确记录差距。
+- [x] 50 条检索样例 Top-5 命中率达到 80% 或明确记录差距。
 - [ ] 50 条 claim 样例准确率达到 80% 或明确记录差距。
 - [ ] 人工审核可保存、可查询，原始 verdict 不被覆盖。

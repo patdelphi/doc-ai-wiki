@@ -680,6 +680,26 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         payload = {"message": resolved_message, "status_label": "索引状态", "status_value": status_value}
         return format_operation_result_html(payload, title="PageIndex 状态")
 
+    def _build_pageindex_answer_html(
+        message: str,
+        *,
+        retrieval_mode: str | None = None,
+        llm_error: str | None = None,
+    ) -> str:
+        """渲染 PageIndex 回答区，避免重复顶部索引与 LLM 状态。"""
+
+        answer_lines = [message]
+        if retrieval_mode:
+            answer_lines.extend(["", f"本次检索模式：{retrieval_mode}"])
+        if llm_error:
+            answer_lines.append(f"LLM 降级原因：{llm_error}")
+        payload = {
+            "message": "\n".join(answer_lines),
+            "status_label": "回答状态",
+            "status_value": "已回答" if retrieval_mode else "尚未提问",
+        }
+        return format_operation_result_html(payload, title="PageIndex 回答")
+
     def _build_pageindex_document_choices(knowledge_base_choice: str | None) -> tuple[list[str], str | None]:
         """按知识库生成 PageIndex 文档选择项，避免跨库混用文档。"""
 
@@ -742,33 +762,39 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
         if not knowledge_base_id or not doc_uid:
+            history = pageindex_service.list_knowledge_base_query_history(knowledge_base_id) if knowledge_base_id else []
+            history_rows = _build_pageindex_history_rows(history)
+            active_query_id = str(history[0].get("query_id") or "") if history else ""
             return (
                 _build_pageindex_status_html("请选择当前知识库与文档，然后构建 PageIndex。", index_status="未选择文档"),
                 [],
-                _build_pageindex_status_html("尚未提问。"),
+                _build_pageindex_answer_html("尚未提问。"),
                 [],
                 [],
-                [],
-                [],
-                "",
+                history_rows,
+                history,
+                active_query_id,
                 "",
                 None,
             )
         try:
             tree_rows = pageindex_service.get_tree_rows(knowledge_base_id, doc_uid)
-            history = pageindex_service.list_query_history(knowledge_base_id, doc_uid)
+            history = pageindex_service.list_knowledge_base_query_history(knowledge_base_id)
             history_rows = _build_pageindex_history_rows(history)
             active_query_id = str(history[0].get("query_id") or "") if history else ""
         except NotFoundAppError:
+            history = pageindex_service.list_knowledge_base_query_history(knowledge_base_id)
+            history_rows = _build_pageindex_history_rows(history)
+            active_query_id = str(history[0].get("query_id") or "") if history else ""
             return (
                 _build_pageindex_status_html("已切换文档，请构建或重建 PageIndex。", index_status="未构建"),
                 [],
-                _build_pageindex_status_html("尚未提问。"),
+                _build_pageindex_answer_html("尚未提问。"),
                 [],
                 [],
-                [],
-                [],
-                "",
+                history_rows,
+                history,
+                active_query_id,
                 "",
                 None,
             )
@@ -776,7 +802,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return (
                 _build_pageindex_status_html(f"索引记录存在，但读取结构失败：{exc.message}", success=False, index_status="索引异常"),
                 [],
-                _build_pageindex_status_html("尚未提问。"),
+                _build_pageindex_answer_html("尚未提问。"),
                 [],
                 [],
                 [],
@@ -788,7 +814,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         return (
             _build_pageindex_status_html("PageIndex 已构建，可直接提问。", success=True, index_status="已构建"),
             tree_rows,
-            _build_pageindex_status_html("尚未提问。"),
+            _build_pageindex_answer_html("尚未提问。"),
             [],
             [],
             history_rows,
@@ -826,6 +852,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     str(item.get("title") or ""),
                     str(item.get("position") or ""),
                     str(item.get("content") or item.get("summary") or "")[:500],
+                    str(item.get("evidence_label") or "未分类"),
                     str(item.get("source_type") or "PageIndex 节点"),
                 ]
             )
@@ -900,17 +927,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
-        if not knowledge_base_id or not doc_uid:
-            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), [], [], [], [], "", "", None
+        if not knowledge_base_id:
+            return _build_pageindex_answer_html("请先选择知识库。"), [], [], [], [], "", "", None
         try:
-            result = pageindex_service.ask_question(knowledge_base_id, doc_uid, question or "")
-            history = pageindex_service.list_query_history(knowledge_base_id, doc_uid)
+            result = pageindex_service.ask_knowledge_base_question(knowledge_base_id, question or "")
+            history = pageindex_service.list_knowledge_base_query_history(knowledge_base_id)
         except AppError as exc:
-            return _build_pageindex_status_html(exc.message, success=False), [], [], [], [], "", "", None
+            return _build_pageindex_answer_html(exc.message), [], [], [], [], "", "", None
         return (
-            _build_pageindex_status_html(
+            _build_pageindex_answer_html(
                 result["answer"],
-                success=True,
                 retrieval_mode=str(result.get("retrieval_mode") or ""),
                 llm_error=str(result.get("llm_error") or ""),
             ),
@@ -936,7 +962,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """点击历史记录后激活并回显对应 PageIndex 问答结果。"""
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
-        doc_uid = _parse_pageindex_document_choice(document_choice)
         current_rows = [] if current_history_rows is None else current_history_rows
         selected_row = get_row_from_paged_table(current_rows, evt, id_column_index=0)
         row_index = 0
@@ -946,10 +971,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         history_items = history_state or []
         selected_item = history_items[row_index] if 0 <= row_index < len(history_items) else {}
         query_id = str(selected_item.get("query_id") or "").strip()
-        if not knowledge_base_id or not doc_uid or not query_id:
+        if not knowledge_base_id or not query_id:
             return _build_pageindex_status_html("请先选择一条历史记录。", success=False), [], [], "", "", None
         try:
-            record = pageindex_service.get_query_history_record(knowledge_base_id, doc_uid, query_id)
+            record = pageindex_service.get_knowledge_base_query_history_record(knowledge_base_id, query_id)
         except AppError as exc:
             return _build_pageindex_status_html(exc.message, success=False), [], [], "", "", None
         return (
@@ -969,10 +994,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
-        if not knowledge_base_id or not doc_uid:
-            return _build_pageindex_status_html("请先选择知识库和文档。", success=False), None
+        if not knowledge_base_id:
+            return _build_pageindex_status_html("请先选择知识库。", success=False), None
         try:
-            markdown_text = pageindex_service.export_query_markdown(knowledge_base_id, doc_uid, active_query_id or "")
+            markdown_text = pageindex_service.export_knowledge_base_query_markdown(knowledge_base_id, active_query_id or "")
             export_result = save_markdown_export(
                 settings_runtime_payload.get("sqlite_db_path") or ".",
                 module_name="PageIndex",

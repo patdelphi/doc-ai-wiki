@@ -386,6 +386,51 @@ def test_pageindex_service_should_answer_with_local_pageindex_evidence_and_save_
     assert other_history == []
 
 
+def test_pageindex_service_should_answer_across_all_indexed_documents_in_knowledge_base(tmp_path: Path) -> None:
+    """知识库级 PageIndex 提问应检索当前知识库下所有已构建文档。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    first_document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    second_document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="beta.md")
+    other_document = seed_markdown_document(settings, knowledge_base_id="kb_beta", file_name="gamma.md")
+    service = PageIndexService(settings)
+    first_pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=first_document["doc_uid"],
+        file_name="alpha.md",
+    )
+    second_pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=second_document["doc_uid"],
+        file_name="beta.md",
+    )
+    other_pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_beta",
+        doc_uid=other_document["doc_uid"],
+        file_name="gamma.md",
+    )
+    service.upsert_index_record("kb_alpha", first_document["doc_uid"], first_pageindex_doc_id, source_hash="hash_alpha")
+    service.upsert_index_record("kb_alpha", second_document["doc_uid"], second_pageindex_doc_id, source_hash="hash_beta")
+    service.upsert_index_record("kb_beta", other_document["doc_uid"], other_pageindex_doc_id, source_hash="hash_gamma")
+
+    answer = service.ask_knowledge_base_question("kb_alpha", "风险 属于哪个知识库")
+    history = service.list_knowledge_base_query_history("kb_alpha")
+    first_doc_history = service.list_query_history("kb_alpha", first_document["doc_uid"])
+    second_doc_history = service.list_query_history("kb_alpha", second_document["doc_uid"])
+    other_history = service.list_knowledge_base_query_history("kb_beta")
+
+    assert "风险" in answer["answer"]
+    assert {item["doc_uid"] for item in answer["evidence"]} == {first_document["doc_uid"], second_document["doc_uid"]}
+    assert len(history) == 1
+    assert history[0]["question"] == "风险 属于哪个知识库"
+    assert first_doc_history or second_doc_history
+    assert other_history == []
+
+
 def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback(tmp_path: Path) -> None:
     """PageIndex 提问应优先让 LLM 基于树结构语义选择证据节点，而不是只匹配关键词。"""
 
@@ -539,7 +584,8 @@ def test_pageindex_service_should_not_use_keyword_or_rag_fallback_when_llm_selec
 
     assert answer["retrieval_mode"] == "LLM 语义树推理"
     assert answer["evidence"] == []
-    assert "未在 PageIndex 文档结构中找到" in answer["answer"]
+    assert answer["answer"].startswith("结论：证据不足")
+    assert "依据：" in answer["answer"]
     assert answer["debug"]["selected_nodes"] == []
 
 
@@ -965,6 +1011,224 @@ def test_pageindex_rag_evidence_should_keep_question_specific_term_over_broad_co
     )
 
     assert [item["chunk_id"] for item in rag_items] == ["chunk_fertility"]
+
+
+def test_pageindex_rag_evidence_should_expand_heart_disease_to_heart_related_chunks(tmp_path: Path) -> None:
+    """心脏病问法应能补召回“心脏相关病证”原文片段，并带出可追溯引用字段。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    with transaction(settings.sqlite_db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO chunks (
+                chunk_id, doc_uid, section_id, chunk_index, content, source_span,
+                heading_path, source_start_line, source_end_line, source_anchor, chunk_type,
+                token_count, created_at, updated_at
+            )
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00')
+            """,
+            (
+                "chunk_heart",
+                document["doc_uid"],
+                0,
+                "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。",
+                "section-2:chunk-0",
+                "临床应用 > 心脏相关病证",
+                20,
+                22,
+                "L20-L22",
+                "paragraph",
+                32,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO chunk_fts (chunk_id, doc_uid, content) VALUES (?, ?, ?)",
+            ("chunk_heart", document["doc_uid"], "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。"),
+        )
+
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "心脏病吃阿胶有好处",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "心脏病", "好处"], "expanded_terms": []},
+    )
+
+    assert [item["chunk_id"] for item in rag_items] == ["chunk_heart"]
+    assert rag_items[0]["heading_path"] == "临床应用 > 心脏相关病证"
+    assert rag_items[0]["source_anchor"] == "L20-L22"
+    assert rag_items[0]["chunk_type"] == "paragraph"
+
+
+def test_pageindex_local_answer_should_return_conclusion_not_hit_description() -> None:
+    """本地降级答案应先给结论，不能只说明命中了哪个节点。"""
+
+    answer = PageIndexService._build_local_answer(
+        "心脏病吃阿胶有好处",
+        [
+            {
+                "title": "阿胶应用的注意点（禁忌）",
+                "position": "line 5946",
+                "content": "阿胶有较高药用价值，但必须在医师指导下正确服用，否则会有不良反应。",
+                "source_type": "PageIndex 节点",
+            },
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-445:chunk-1822",
+                "content": "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。",
+                "source_type": "RAG/FTS 原文",
+            },
+        ],
+    )
+
+    assert answer.startswith("结论：")
+    assert "不能直接得出“心脏病吃阿胶有好处”的结论" in answer
+    assert "依据：" in answer
+    assert "来源：" in answer
+    assert "不确定点：" in answer
+    assert "根据PageIndex 节点定位" not in answer
+
+
+def test_pageindex_evidence_should_be_classified_before_answering() -> None:
+    """PageIndex 证据应标注直接支持、间接相关或风险提醒，供结论判断使用。"""
+
+    classified = PageIndexService._classify_evidence_items(
+        "心脏病吃阿胶有好处",
+        [
+            {
+                "title": "阿胶应用的注意点（禁忌）",
+                "position": "line 5946",
+                "content": "阿胶有较高药用价值，但必须在医师指导下正确服用，否则会有不良反应。",
+                "source_type": "PageIndex 节点",
+            },
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-445:chunk-1822",
+                "content": "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。",
+                "source_type": "RAG/FTS 原文",
+            },
+        ],
+    )
+
+    assert [item["evidence_type"] for item in classified] == ["risk_warning", "indirect_related"]
+    assert [item["evidence_label"] for item in classified] == ["风险提醒", "间接相关"]
+
+
+def test_pageindex_formula_context_should_not_be_direct_support_for_benefit_claim() -> None:
+    """方剂语境中的“心脏相关病证”不能当作“吃阿胶有好处”的直接支持。"""
+
+    classified = PageIndexService._classify_evidence_items(
+        "心脏病吃阿胶有好处",
+        [
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-445:chunk-1822",
+                "content": "阿胶有良好的组织器官修复作用。阿胶养血滋阴。如心脏相关病证用炙甘草汤，月经病、皮肤黏膜疾病的治疗中亦常用阿胶。",
+                "source_type": "RAG/FTS 原文",
+            }
+        ],
+    )
+
+    assert classified[0]["evidence_type"] == "indirect_related"
+    assert classified[0]["evidence_label"] == "间接相关"
+
+
+def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
+    """PageIndex 本地答案应展示证据判断，说明为什么不能直接下肯定结论。"""
+
+    classified = PageIndexService._classify_evidence_items(
+        "心脏病吃阿胶有好处",
+        [
+            {
+                "title": "阿胶应用的注意点（禁忌）",
+                "position": "line 5946",
+                "content": "阿胶有较高药用价值，但必须在医师指导下正确服用，否则会有不良反应。",
+                "source_type": "PageIndex 节点",
+            },
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-445:chunk-1822",
+                "content": "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。",
+                "source_type": "RAG/FTS 原文",
+            },
+        ],
+    )
+
+    answer = PageIndexService._build_local_answer("心脏病吃阿胶有好处", classified)
+
+    assert "证据判断：" in answer
+    assert "风险提醒" in answer
+    assert "间接相关" in answer
+    assert "直接支持" not in answer
+
+
+def test_pageindex_merge_evidence_should_keep_primary_and_rag_supplemental_items() -> None:
+    """PageIndex 主证据存在时，也应保留 RAG/FTS 补充证据，避免引用不完整。"""
+
+    merged = PageIndexService._merge_evidence(
+        [
+            {
+                "title": "阿胶应用的注意点（禁忌）",
+                "position": "line 5946",
+                "source_type": "PageIndex 节点",
+            }
+        ],
+        [
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-2:chunk-0",
+                "chunk_id": "chunk_heart",
+                "source_type": "RAG/FTS 原文",
+            }
+        ],
+    )
+
+    assert [item["source_type"] for item in merged] == ["PageIndex 节点", "RAG/FTS 原文"]
+    assert merged[1]["chunk_id"] == "chunk_heart"
+
+
+def test_pageindex_rag_evidence_should_use_source_span_as_anchor_fallback(tmp_path: Path) -> None:
+    """历史 chunk 缺少 source_anchor 时，应用 source_span 作为引用位置兜底。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_legacy_heart",
+        content="阿胶养血滋阴。如心脏相关病证用炙甘草汤。",
+        source_span="section-9:chunk-3",
+    )
+
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+
+    rag_items = service._search_rag_fts_evidence(
+        record,
+        "心脏病吃阿胶有好处",
+        {"entities": ["阿胶"], "keywords": ["阿胶", "心脏病"], "expanded_terms": []},
+    )
+
+    assert rag_items[0]["source_anchor"] == "section-9:chunk-3"
+    assert rag_items[0]["position"] == "section-9:chunk-3"
 
 
 def test_pageindex_llm_answer_prompt_should_require_evidence_bound_format(tmp_path: Path) -> None:

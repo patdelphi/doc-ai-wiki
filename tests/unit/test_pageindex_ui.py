@@ -88,8 +88,11 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
 
     assert "风险" in answer_html
     assert "本次检索模式" in answer_html
-    assert "本地关键词降级" in answer_html
+    assert "知识库多文档检索" in answer_html
+    assert "LLM 状态" not in answer_html
+    assert "索引状态" not in answer_html
     assert evidence_rows[0][1] == "风险"
+    assert evidence_rows[0][4] in {"直接支持", "间接相关", "风险提醒", "仅定位信息"}
     assert debug_rows[0][1] == "风险"
     assert "本地候选召回" in debug_rows[0][5]
     assert history_rows[0][2] == "风险"
@@ -127,6 +130,35 @@ def test_pageindex_status_should_show_llm_availability(tmp_path) -> None:
     assert "未选择文档" in status_html
     assert "状态说明" not in status_html
     assert "失败" not in status_html
+
+
+def test_pageindex_answer_placeholder_should_not_duplicate_status_card(tmp_path) -> None:
+    """PageIndex 回答区占位不应重复显示顶部状态卡中的索引与 LLM 状态。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="disabled")
+    initialize_database(settings.sqlite_db_path)
+
+    demo = create_ui_app(settings)
+    change_handler = next(
+        (
+            block_fn.fn
+            for block_fn in demo.fns.values()
+            if getattr(block_fn.fn, "__name__", "") == "change_pageindex_document_ui"
+        ),
+        None,
+    )
+    assert change_handler is not None
+
+    status_html, _tree_rows, answer_html, _evidence_rows, _debug_rows, _history_rows, _history_state, _active_query_id, _export_result_html, _download_file = change_handler(
+        "default | 默认知识库",
+        "",
+    )
+
+    assert "LLM 状态" in status_html
+    assert "索引状态" in status_html
+    assert "LLM 状态" not in answer_html
+    assert "索引状态" not in answer_html
+    assert "尚未提问" in answer_html
 
 
 def test_pageindex_document_change_should_show_ready_when_index_already_exists(tmp_path) -> None:
@@ -175,6 +207,54 @@ def test_pageindex_document_change_should_show_ready_when_index_already_exists(t
     assert debug_rows == []
     assert history_rows[0][2] == "风险"
     assert history_state[0]["question"] == "风险"
+    assert active_query_id == history_state[0]["query_id"]
+
+
+def test_pageindex_document_change_should_show_knowledge_base_history(tmp_path) -> None:
+    """PageIndex 历史应展示当前知识库历史，而不是只展示当前选中文档。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
+    settings.llm_api_key = "test-key"
+    settings.llm_model = "gpt-test"
+    initialize_database(settings.sqlite_db_path)
+    first_document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    second_document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="beta.md")
+    first_pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=first_document["doc_uid"],
+        file_name="alpha.md",
+    )
+    second_pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=second_document["doc_uid"],
+        file_name="beta.md",
+    )
+    pageindex_service = PageIndexService(settings)
+    pageindex_service.upsert_index_record("kb_alpha", first_document["doc_uid"], first_pageindex_doc_id, source_hash="hash_alpha")
+    pageindex_service.upsert_index_record("kb_alpha", second_document["doc_uid"], second_pageindex_doc_id, source_hash="hash_beta")
+    pageindex_service.ask_question("kb_alpha", second_document["doc_uid"], "风险")
+
+    demo = create_ui_app(settings)
+    change_handler = next(
+        (
+            block_fn.fn
+            for block_fn in demo.fns.values()
+            if getattr(block_fn.fn, "__name__", "") == "change_pageindex_document_ui"
+        ),
+        None,
+    )
+    assert change_handler is not None
+
+    _status_html, _tree_rows, _answer_html, _evidence_rows, _debug_rows, history_rows, history_state, active_query_id, _export_result_html, _download_file = change_handler(
+        "kb_alpha | kb_alpha 知识库",
+        f'{first_document["doc_uid"]} | alpha',
+    )
+
+    assert history_rows[0][1] == second_document["doc_uid"]
+    assert history_rows[0][2] == "风险"
+    assert history_state[0]["doc_uid"] == second_document["doc_uid"]
     assert active_query_id == history_state[0]["query_id"]
 
 

@@ -475,6 +475,8 @@ MVP 文档要求：
 - `tests/evaluation/rule_cases.jsonl`：覆盖规则命中与非命中样例。
 - `tests/evaluation/pageindex_cases.jsonl`：50 条 PageIndex 固定问题，区分真实 LLM 推理与离线降级样例。
 - `src/retrieval/evaluation.py`：输出 Top-K 命中率、证据追溯率、Claim verdict 准确率、无证据 verified 率。
+- `Docs/retrieval_evaluation_run_20260620.md`：已记录一次本地只读检索评测运行结果，当前 Top-K 命中率为 `0.0`，原因是标准证据 ID 尚未与本机真实知识库对齐。
+- `Docs/retrieval_alignment_suggestions_20260621.md`：已为 50 条检索样例生成真实证据 ID 候选建议，等待人工确认后写回金标。
 
 后续建议基于真实本地知识库输出完整固定指标报告，并区分 PageIndex 真实 LLM 与离线降级结果。
 

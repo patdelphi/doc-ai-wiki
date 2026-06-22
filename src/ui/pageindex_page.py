@@ -82,11 +82,11 @@ def build_pageindex_tab(
             elem_id="pageindex-answer",
         )
         pageindex_evidence_table = gr.Dataframe(
-            headers=["序号", "标题", "位置", "证据摘要", "来源"],
-            datatype=["number", "markdown", "str", "markdown", "str"],
+            headers=["序号", "标题", "位置", "证据摘要", "证据类型", "来源"],
+            datatype=["number", "markdown", "str", "markdown", "str", "str"],
             interactive=False,
             row_count=0,
-            column_count=5,
+            column_count=6,
             label="定位证据",
             buttons=[],
             elem_id="pageindex-evidence-table",
