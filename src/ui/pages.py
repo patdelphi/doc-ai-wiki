@@ -922,15 +922,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
         return rows
 
-    def ask_pageindex_question_ui(knowledge_base_choice: str | None, document_choice: str | None, question: str | None):
+    def ask_pageindex_question_ui(
+        knowledge_base_choice: str | None,
+        document_choice: str | None,
+        template_choice: str | None,
+        question: str | None,
+    ):
         """基于 PageIndex 本地结构提问，并刷新证据与历史。"""
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
         doc_uid = _parse_pageindex_document_choice(document_choice)
+        template_id = parse_template_choice(template_choice or "")
         if not knowledge_base_id:
             return _build_pageindex_answer_html("请先选择知识库。"), [], [], [], [], "", "", None
         try:
-            result = pageindex_service.ask_knowledge_base_question(knowledge_base_id, question or "")
+            result = pageindex_service.ask_knowledge_base_question(knowledge_base_id, question or "", template_id=template_id or None)
             history = pageindex_service.list_knowledge_base_query_history(knowledge_base_id)
         except AppError as exc:
             return _build_pageindex_answer_html(exc.message), [], [], [], [], "", "", None
@@ -3509,10 +3515,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         return page_rows, new_page, format_table_pagination_html(page_info)
 
-    def refresh_settings_workspace_ui(selected_template_id: str | None) -> tuple:
+    def refresh_settings_workspace_ui(template_kind: str | None, selected_template_id: str | None) -> tuple:
         """刷新功能设置页并返回分页后的模板列表。"""
 
-        return build_settings_workspace_ui_outputs(refresh_settings_workspace(selected_template_id))
+        return build_settings_workspace_ui_outputs(refresh_settings_workspace(template_kind, selected_template_id))
 
     def refresh_settings_knowledge_base_workspace_ui(
         selected_knowledge_base_id: str | None,
@@ -3946,6 +3952,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         detail_html = render_quality_template(selected_choice or "")
         return gr.update(choices=template_choices, value=selected_choice), detail_html
+
+    def build_pageindex_template_refresh_output(selected_template_id: str | None = None) -> gr.update:
+        """构建 PageIndex 页模板下拉的刷新输出。"""
+
+        template_items = pageindex_service.template_service.list_templates()
+        template_choices = build_template_choices(template_items)
+        normalized_template_id = str(selected_template_id or "")
+        available_ids = {str(item.get("template_id") or "") for item in template_items}
+        if normalized_template_id not in available_ids:
+            normalized_template_id = "strict_qa" if "strict_qa" in available_ids else (str(template_items[0].get("template_id") or "") if template_items else "")
+        selected_choice = next(
+            (choice for choice in template_choices if parse_template_choice(choice) == normalized_template_id),
+            template_choices[0] if template_choices else None,
+        )
+        return gr.update(choices=template_choices, value=selected_choice)
 
     def build_knowledge_base_form_values(knowledge_base: dict | None) -> tuple[str, str, str, str, bool]:
         """根据知识库生成设置页表单默认值。"""
@@ -4416,7 +4437,34 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         selector_outputs = build_knowledge_base_refresh_outputs("", login_session)
         return (*outputs, *selector_outputs)
 
+    def normalize_settings_template_kind(template_kind: str | None) -> str:
+        """规范设置页模板类型。"""
+
+        return "PageIndex" if str(template_kind or "").strip().lower() == "pageindex" else "AI质检"
+
+    def list_settings_templates(template_kind: str | None) -> list[dict]:
+        """按模板类型列出设置页模板。"""
+
+        if normalize_settings_template_kind(template_kind) == "PageIndex":
+            return pageindex_service.template_service.list_templates()
+        return quality_service.list_templates()
+
+    def get_settings_template(template_kind: str | None, template_id: str | None = None) -> dict:
+        """按模板类型读取设置页模板。"""
+
+        if normalize_settings_template_kind(template_kind) == "PageIndex":
+            return pageindex_service.template_service.get_template(template_id)
+        return quality_service.get_template(template_id)
+
+    def build_default_settings_template_id(template_kind: str | None, templates: list[dict]) -> str:
+        """按模板类型决定设置页默认选中的模板。"""
+
+        template_ids = {str(item.get("template_id") or "") for item in templates}
+        preferred_id = "strict_qa" if normalize_settings_template_kind(template_kind) == "PageIndex" else "general_fact_check"
+        return preferred_id if preferred_id in template_ids else (str(templates[0].get("template_id") or "") if templates else "")
+
     def build_settings_workspace(
+        template_kind: str | None = "AI质检",
         selected_template_id: str | None = None,
         *,
         result_payload: dict | None = None,
@@ -4424,12 +4472,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool]:
         """构建功能设置页所需的模板列表、详情和表单值。"""
 
-        templates = quality_service.list_templates()
+        normalized_template_kind = normalize_settings_template_kind(template_kind)
+        templates = list_settings_templates(normalized_template_kind)
         template_ids = {str(item.get("template_id") or "") for item in templates}
         normalized_template_id = str(selected_template_id or "")
         if normalized_template_id not in template_ids:
-            normalized_template_id = "general_fact_check" if "general_fact_check" in template_ids else (str(templates[0].get("template_id") or "") if templates else "")
-        selected_template = quality_service.get_template(normalized_template_id) if normalized_template_id else None
+            normalized_template_id = build_default_settings_template_id(normalized_template_kind, templates)
+        selected_template = get_settings_template(normalized_template_kind, normalized_template_id) if normalized_template_id else None
         detail_html = format_settings_template_detail_html(selected_template)
         form_values = build_settings_form_values(selected_template)
         if form_override:
@@ -4460,13 +4509,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
 
     def refresh_settings_workspace(
+        template_kind: str | None,
         selected_template_id: str | None,
     ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool]:
         """刷新功能设置页。"""
 
-        return build_settings_workspace(selected_template_id)
+        return build_settings_workspace(template_kind, selected_template_id)
 
     def select_settings_template(
+        template_kind: str | None,
         template_items: list[dict] | None,
         evt: gr.SelectData,
         current_page_rows: list[list[object]] | None = None,
@@ -4476,14 +4527,14 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         page_rows = normalize_table_rows(current_page_rows) if current_page_rows is not None else build_settings_template_rows(template_items or [])
         items = template_items or []
         if not items or not page_rows:
-            outputs = build_settings_workspace("")
+            outputs = build_settings_workspace(template_kind, "")
             return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
         selected_row = get_row_from_paged_table(page_rows, evt, id_column_index=1)
         template_id = str(selected_row[1] if len(selected_row) > 6 else (selected_row[0] if selected_row else ""))
-        outputs = build_settings_workspace(template_id)
+        outputs = build_settings_workspace(template_kind, template_id)
         return outputs[2], outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
 
-    def prepare_new_template() -> tuple[str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, bool]:
+    def prepare_new_template(template_kind: str | None = "AI质检") -> tuple[str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, bool]:
         """清空表单，准备创建新模板。"""
 
         blank_form = {
@@ -4501,10 +4552,11 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "system_prompt": "",
             "user_prompt_template": "",
         }
-        outputs = build_settings_workspace("", form_override=blank_form)
+        outputs = build_settings_workspace(template_kind, "", form_override=blank_form)
         return "", outputs[3], outputs[4], outputs[5], outputs[6], outputs[7], outputs[8], outputs[9], outputs[10], outputs[11], outputs[12], outputs[13], outputs[14], outputs[15], outputs[16], outputs[17], outputs[19]
 
     def save_settings_template(
+        template_kind: str,
         selected_template_id: str,
         template_id: str,
         template_name: str,
@@ -4519,9 +4571,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         section_max_chars: int | float,
         system_prompt: str,
         user_prompt_template: str,
-    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str]:
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str, gr.update]:
         """保存模板并刷新设置页。"""
 
+        normalized_template_kind = normalize_settings_template_kind(template_kind)
         form_payload = {
             "template_id": template_id,
             "template_name": template_name,
@@ -4538,77 +4591,108 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             "user_prompt_template": user_prompt_template,
         }
         try:
-            saved_template = quality_service.save_template(
-                {
-                    "template_id": template_id,
-                    "template_name": template_name,
-                    "description": description,
-                    "rule_tags": parse_rule_tags_text(rule_tags_text),
-                    "system_prompt": system_prompt,
-                    "user_prompt_template": user_prompt_template,
-                    "retrieval_policy": {
-                        "fulltext_top_k": to_int_setting(fulltext_top_k, default=3),
-                        "vector_top_k": to_int_setting(vector_top_k, default=3),
-                        "final_top_k": to_int_setting(final_top_k, default=3),
-                        "use_rerank": bool(use_rerank),
-                        "neighbor_window": to_int_setting(neighbor_window, default=0),
-                        "include_section_context": bool(include_section_context),
-                        "section_max_chars": to_int_setting(section_max_chars, default=400),
-                    },
-                }
-            )
+            if normalized_template_kind == "PageIndex":
+                saved_template = pageindex_service.template_service.save_template(
+                    {
+                        "template_id": template_id,
+                        "template_name": template_name,
+                        "description": description,
+                        "answer_mode": "custom",
+                        "system_prompt": system_prompt,
+                        "user_prompt_template": user_prompt_template,
+                    }
+                )
+            else:
+                saved_template = quality_service.save_template(
+                    {
+                        "template_id": template_id,
+                        "template_name": template_name,
+                        "description": description,
+                        "rule_tags": parse_rule_tags_text(rule_tags_text),
+                        "system_prompt": system_prompt,
+                        "user_prompt_template": user_prompt_template,
+                        "retrieval_policy": {
+                            "fulltext_top_k": to_int_setting(fulltext_top_k, default=3),
+                            "vector_top_k": to_int_setting(vector_top_k, default=3),
+                            "final_top_k": to_int_setting(final_top_k, default=3),
+                            "use_rerank": bool(use_rerank),
+                            "neighbor_window": to_int_setting(neighbor_window, default=0),
+                            "include_section_context": bool(include_section_context),
+                            "section_max_chars": to_int_setting(section_max_chars, default=400),
+                        },
+                    }
+                )
         except AppError as exc:
             outputs = build_settings_workspace(
+                normalized_template_kind,
                 selected_template_id,
                 result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
                 form_override=form_payload,
             )
             quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
-            return (*outputs, *quality_outputs)
+            pageindex_output = build_pageindex_template_refresh_output(selected_template_id)
+            return (*outputs, *quality_outputs, pageindex_output)
         outputs = build_settings_workspace(
+            normalized_template_kind,
             saved_template.get("template_id"),
             result_payload={"success": True, "message": "模板已保存。", "linked_claim_id": saved_template.get("template_id")},
         )
-        quality_outputs = build_quality_template_refresh_outputs(saved_template.get("template_id"))
-        return (*outputs, *quality_outputs)
+        quality_selected_id = saved_template.get("template_id") if normalized_template_kind == "AI质检" else None
+        pageindex_selected_id = saved_template.get("template_id") if normalized_template_kind == "PageIndex" else None
+        quality_outputs = build_quality_template_refresh_outputs(quality_selected_id)
+        pageindex_output = build_pageindex_template_refresh_output(pageindex_selected_id)
+        return (*outputs, *quality_outputs, pageindex_output)
 
     def delete_settings_template(
+        template_kind: str,
         selected_template_id: str,
         template_id_input: str,
         delete_confirmed: bool,
-    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str]:
+    ) -> tuple[list[list[str]], list[dict], str, str, str, str, str, str, int, int, int, bool, int, bool, int, str, str, str, str, bool, gr.update, str, gr.update]:
         """删除当前模板并刷新设置页。"""
 
+        normalized_template_kind = normalize_settings_template_kind(template_kind)
         template_id = str(template_id_input or selected_template_id or "").strip()
         if not template_id:
             outputs = build_settings_workspace(
+                normalized_template_kind,
                 selected_template_id,
                 result_payload={"success": False, "message": "请先选择或输入模板 ID。"},
             )
             quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
-            return (*outputs, *quality_outputs)
+            pageindex_output = build_pageindex_template_refresh_output(selected_template_id)
+            return (*outputs, *quality_outputs, pageindex_output)
         if not delete_confirmed:
             outputs = build_settings_workspace(
+                normalized_template_kind,
                 selected_template_id,
                 result_payload={"success": False, "message": "请先勾选“我确认删除当前模板”。"},
             )
             quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
-            return (*outputs, *quality_outputs)
+            pageindex_output = build_pageindex_template_refresh_output(selected_template_id)
+            return (*outputs, *quality_outputs, pageindex_output)
         try:
-            deleted_template = quality_service.delete_template(template_id)
+            if normalized_template_kind == "PageIndex":
+                deleted_template = pageindex_service.template_service.delete_template(template_id)
+            else:
+                deleted_template = quality_service.delete_template(template_id)
         except AppError as exc:
             outputs = build_settings_workspace(
+                normalized_template_kind,
                 selected_template_id,
                 result_payload={"success": False, "message": exc.message, "error_code": exc.error_code},
             )
             quality_outputs = build_quality_template_refresh_outputs(selected_template_id)
-            return (*outputs, *quality_outputs)
+            pageindex_output = build_pageindex_template_refresh_output(selected_template_id)
+            return (*outputs, *quality_outputs, pageindex_output)
         outputs = build_settings_workspace(
+            normalized_template_kind,
             "",
             result_payload={"success": True, "message": f'模板“{deleted_template.get("template_name") or template_id}”已删除。'},
         )
         quality_outputs = build_quality_template_refresh_outputs("")
-        return (*outputs, *quality_outputs)
+        pageindex_output = build_pageindex_template_refresh_output("")
+        return (*outputs, *quality_outputs, pageindex_output)
 
     def normalize_review_action_value(action_value: str) -> str:
         """将中文审核动作转换为内部值。"""
@@ -5207,6 +5291,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     )
     initial_search_table_rows, initial_search_page, initial_search_page_info = reset_table_pagination([], prepend_sequence=False)
     initial_pageindex_document_choices, initial_pageindex_document_choice = _build_pageindex_document_choices(initial_knowledge_base_choice)
+    initial_pageindex_template_items = pageindex_service.template_service.list_templates()
+    initial_pageindex_template_choices = build_template_choices(initial_pageindex_template_items)
+    initial_pageindex_template_choice = next(
+        (choice for choice in initial_pageindex_template_choices if parse_template_choice(choice) == "strict_qa"),
+        initial_pageindex_template_choices[0] if initial_pageindex_template_choices else None,
+    )
     (
         initial_pageindex_status_html,
         initial_pageindex_tree_rows,
@@ -5819,6 +5909,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_knowledge_base_choice=initial_knowledge_base_choice,
                         document_choices=initial_pageindex_document_choices,
                         initial_document_choice=initial_pageindex_document_choice,
+                        template_choices=initial_pageindex_template_choices,
+                        initial_template_choice=initial_pageindex_template_choice,
                         initial_status_html=initial_pageindex_status_html,
                         initial_tree_rows=initial_pageindex_tree_rows,
                         initial_answer_html=initial_pageindex_answer_html,
@@ -5830,6 +5922,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_export_result_html=initial_pageindex_export_result_html,
                     )
                     pageindex_knowledge_base = pageindex_components["pageindex_knowledge_base"]
+                    pageindex_template = pageindex_components["pageindex_template"]
 
                 with gr.Tab("功能设置", visible=False, id=MAIN_TAB_IDS["功能设置"]) as settings_tab:
                     settings_template_state = gr.State(initial_settings_template_state)
@@ -5845,6 +5938,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             "runtime_html": initial_settings_runtime_html,
                             "template_table_rows": initial_settings_template_table_rows,
                             "template_page_info": initial_settings_template_page_info,
+                            "template_kind": "AI质检",
                             "template_detail_html": initial_settings_template_detail_html,
                             "template_id": initial_settings_template_id_value,
                             "template_name": initial_settings_template_name_value,
@@ -6040,6 +6134,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 document_target_knowledge_base=document_target_knowledge_base,
                 search_knowledge_base=search_knowledge_base,
                 pageindex_knowledge_base=pageindex_knowledge_base,
+                pageindex_template=pageindex_template,
                 quality_knowledge_base=quality_knowledge_base,
                 review_knowledge_base=review_knowledge_base,
                 quality_progress=quality_progress,

@@ -115,8 +115,16 @@ def build_settings_template_rows(templates: list[dict]) -> list[list[str]]:
             _display_text(item.get("template_id")),
             _display_text(item.get("template_name")),
             _display_text(item.get("source_label") or item.get("source_type")),
-            _display_text(item.get("rule_tags")),
-            _display_text(item.get("retrieval_policy", {}).get("final_top_k") if isinstance(item.get("retrieval_policy", {}), dict) else None),
+            _display_text(item.get("rule_tags") or item.get("answer_mode")),
+            _display_text(
+                (
+                    item.get("retrieval_policy", {}).get("final_top_k")
+                    if item.get("retrieval_policy", {}).get("final_top_k") is not None
+                    else item.get("retrieval_policy", {}).get("max_selected_nodes")
+                )
+                if isinstance(item.get("retrieval_policy", {}), dict)
+                else None
+            ),
             "是" if item.get("deletable", True) else "否",
         ]
         for item in templates

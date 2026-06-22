@@ -471,6 +471,18 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
                     "keywords": ["皮肤", "滋养", "润燥"],
                     "expanded_terms": ["皮肤状态改善", "滋养阴血"],
                 }
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "说明哪些证据能回答皮肤状态改善问题。",
+                    "target": "皮肤状态改善相关内容",
+                    "claim": "",
+                    "required_output": ["结论", "依据", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            if "Question Plan JSON" in user_prompt:
+                assert "information_extraction" in user_prompt
+                return {"answer": "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。"}
             assert "candidate_id" in user_prompt
             assert "皮肤有帮助" in user_prompt
             assert "滋养阴血" in user_prompt
@@ -500,7 +512,7 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
     assert answer["debug"]["question_analysis"]["expanded_terms"] == ["皮肤状态改善", "滋养阴血"]
     assert answer["debug"]["candidate_nodes"][0]["candidate_id"] == "node_2"
     assert answer["debug"]["selected_nodes"][0]["reason"] == "语义上对应皮肤状态改善"
-    assert len(llm_client.prompts) == 3
+    assert len(llm_client.prompts) == 4
 
 
 def test_pageindex_service_should_report_keyword_fallback_when_llm_reasoning_fails(tmp_path: Path) -> None:
@@ -1092,7 +1104,7 @@ def test_pageindex_local_answer_should_return_conclusion_not_hit_description() -
     )
 
     assert answer.startswith("结论：")
-    assert "不能直接得出“心脏病吃阿胶有好处”的结论" in answer
+    assert "不能证明“心脏病吃阿胶有好处”" in answer
     assert "依据：" in answer
     assert "来源：" in answer
     assert "不确定点：" in answer
@@ -1120,8 +1132,8 @@ def test_pageindex_evidence_should_be_classified_before_answering() -> None:
         ],
     )
 
-    assert [item["evidence_type"] for item in classified] == ["risk_warning", "indirect_related"]
-    assert [item["evidence_label"] for item in classified] == ["风险提醒", "间接相关"]
+    assert [item["evidence_type"] for item in classified] == ["risk_or_condition", "method_or_formula_context"]
+    assert [item["evidence_label"] for item in classified] == ["条件或限制", "方法/组合语境"]
 
 
 def test_pageindex_formula_context_should_not_be_direct_support_for_benefit_claim() -> None:
@@ -1139,8 +1151,8 @@ def test_pageindex_formula_context_should_not_be_direct_support_for_benefit_clai
         ],
     )
 
-    assert classified[0]["evidence_type"] == "indirect_related"
-    assert classified[0]["evidence_label"] == "间接相关"
+    assert classified[0]["evidence_type"] == "partial_support"
+    assert classified[0]["evidence_label"] == "部分支持"
 
 
 def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
@@ -1167,9 +1179,80 @@ def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
     answer = PageIndexService._build_local_answer("心脏病吃阿胶有好处", classified)
 
     assert "证据判断：" in answer
-    assert "风险提醒" in answer
-    assert "间接相关" in answer
+    assert "条件或限制" in answer
+    assert "方法/组合语境" in answer
     assert "直接支持" not in answer
+
+
+def test_pageindex_local_answer_should_give_clear_formula_context_conclusion_for_dysmenorrhea() -> None:
+    """方剂语境证据不能让用户自己判断，应明确说明不能证明单独吃阿胶可缓解痛经。"""
+
+    classified = PageIndexService._classify_evidence_items(
+        "吃阿胶能缓解痛经",
+        [
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-12:chunk-55",
+                "content": "温经汤临床中不仅应用于月经不调、痛经、崩漏等病证，方中阿胶既可止血，又兼止痛、补虚。",
+                "source_type": "RAG/FTS 原文",
+            },
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-7:chunk-29",
+                "content": "《伤寒杂病论》中含有阿胶的方剂有温经汤等 11 首，每方中阿胶功效并不完全相同。",
+                "source_type": "RAG/FTS 原文",
+            },
+        ],
+    )
+
+    answer = PageIndexService._build_local_answer("吃阿胶能缓解痛经", classified)
+
+    assert [item["evidence_type"] for item in classified] == ["partial_support", "method_or_formula_context"]
+    assert "不能证明“吃阿胶能缓解痛经”" in answer
+    assert "只支持" in answer
+    assert "具体判断需结合下列依据" not in answer
+
+
+def test_pageindex_llm_answer_should_pass_question_plan_to_final_template(tmp_path: Path) -> None:
+    """列举/方法类问题应由 LLM Question Plan 决定回答策略，并传入最终模板。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+
+    class QuestionPlanClient:
+        """测试用 LLM 客户端，验证最终回答能看到信息抽取计划。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "Question Planner" in system_prompt:
+                assert "阿胶有哪些质量检测方法" in user_prompt
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "列举证据中出现的质量检测方法。",
+                    "target": "阿胶质量检测方法",
+                    "claim": "",
+                    "required_output": ["结论", "方法清单", "依据", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            assert "Question Plan JSON" in user_prompt
+            assert "information_extraction" in user_prompt
+            assert "方法清单" in user_prompt
+            return {"answer": "结论：证据列出了真伪鉴别、重金属检测和微生物检测。\n\n来源：质量检测方法（line 580）。"}
+
+    service = PageIndexService(settings, llm_client=QuestionPlanClient())
+    answer = service._generate_llm_answer(
+        QuestionPlanClient(),
+        "阿胶有哪些质量检测方法",
+        [
+            {
+                "title": "阿胶及其制品质量检测方法研究进展",
+                "position": "line 580",
+                "content": "包括真伪鉴别、重金属检测和微生物检测。",
+                "source_type": "PageIndex 节点",
+            }
+        ],
+    )
+
+    assert "真伪鉴别" in answer
+    assert "微生物检测" in answer
 
 
 def test_pageindex_merge_evidence_should_keep_primary_and_rag_supplemental_items() -> None:
@@ -1251,8 +1334,18 @@ def test_pageindex_llm_answer_prompt_should_require_evidence_bound_format(tmp_pa
                 }
             if "树结构检索" in system_prompt:
                 return {"selected_nodes": [{"candidate_id": "node_2", "reason": "风险节点相关"}], "answer": ""}
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "claim_judgement",
+                    "answer_strategy": "判断证据是否支持问题。",
+                    "target": "风险 属于哪个知识库",
+                    "claim": "风险属于某个知识库",
+                    "required_output": ["结论", "证据判断", "依据", "来源", "不确定点"],
+                    "needs_evidence_relation": True,
+                }
             assert "只能基于给定证据回答" in system_prompt
             assert "证据不足" in system_prompt
+            assert "claim_judgement" in user_prompt
             assert "结论" in user_prompt
             assert "依据" in user_prompt
             assert "来源" in user_prompt
@@ -1272,6 +1365,74 @@ def test_pageindex_llm_answer_prompt_should_require_evidence_bound_format(tmp_pa
 
     assert "结论：" in answer["answer"]
     assert "来源：" in answer["answer"]
+
+
+def test_pageindex_service_should_use_selected_answer_template_for_llm_answer(tmp_path: Path) -> None:
+    """PageIndex LLM 回答应使用选中的 PageIndex 模板渲染最终回答提示词。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    settings.templates_dir.joinpath("pageindex").mkdir(parents=True, exist_ok=True)
+    settings.templates_dir.joinpath("pageindex", "custom_pageindex_qa.yaml").write_text(
+        """
+template_id: custom_pageindex_qa
+template_name: 自定义 PageIndex 问答
+description: 自定义模板
+answer_mode: custom
+system_prompt: 自定义 PageIndex 系统提示。
+user_prompt_template: |
+  自定义变量检查：
+  问题={question}
+  证据={evidence_json}
+  结构={structure_context}
+  判断={evidence_judgement}
+  引用={citation_rules}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class TemplateCheckingClient:
+        """测试用 LLM 客户端，确认最终回答使用自定义 PageIndex 模板。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "询问证据",
+                    "entities": ["风险"],
+                    "keywords": ["风险"],
+                    "expanded_terms": [],
+                }
+            if "树结构检索" in system_prompt:
+                return {"selected_nodes": [{"candidate_id": "node_2", "reason": "风险节点相关"}], "answer": ""}
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "claim_judgement",
+                    "answer_strategy": "判断证据是否支持问题。",
+                    "target": "风险 属于哪个知识库",
+                    "claim": "风险属于某个知识库",
+                    "required_output": ["结论", "证据判断", "依据", "来源", "不确定点"],
+                    "needs_evidence_relation": True,
+                }
+            assert system_prompt == "自定义 PageIndex 系统提示。"
+            assert "自定义变量检查" in user_prompt
+            assert "问题=风险 属于哪个知识库" in user_prompt
+            assert "判断=" in user_prompt
+            assert "引用=必须列出证据标题、位置、文档或 chunk 来源。" in user_prompt
+            return {"answer": "结论：使用了自定义 PageIndex 模板。\n\n证据判断：直接支持。\n\n依据：风险节点。\n\n来源：风险。\n\n不确定点：无。"}
+
+    service = PageIndexService(settings, llm_client=TemplateCheckingClient())
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "风险 属于哪个知识库", template_id="custom_pageindex_qa")
+
+    assert "使用了自定义 PageIndex 模板" in answer["answer"]
 
 
 def test_pageindex_service_should_export_current_document_history_as_markdown(tmp_path: Path) -> None:

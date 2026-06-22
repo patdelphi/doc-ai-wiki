@@ -4,6 +4,33 @@
 > 范围："src/ui"、"src/auth"、"src/db"、"tests/unit"
 > 目标：持续收敛登录、刷新、顶部导航、AI 质检首屏与整体交互体验问题
 
+## 2026-06-22 PageIndex Question Plan 机制优化
+
+> 范围：`src/pageindex`、`templates/pageindex`、`tests/unit`
+> 设计文档：`Docs/design/pageindex_question_plan_mechanism_20260622.md`
+> 目标：用 LLM 生成结构化 Question Plan，替代 Python 硬编码问题路由。
+
+### P0
+
+- [x] 单独编写 Question Plan 机制设计文档
+- [x] 新增 Question Plan schema、prompt 构建与归一化模块
+- [x] 移除“有哪些/方法/步骤”等硬编码信息抽取路由
+- [x] 最终回答模板注入 `{question_plan}` 变量
+- [x] 补齐假 LLM 单测，验证信息抽取类问题不会被当作命题真假判断
+
+### P1
+
+- [ ] 将 Question Plan 写入 PageIndex debug 信息，方便历史结果排查
+- [ ] 根据 Question Plan 调整候选证据选择提示词，提升召回精度
+- [ ] 将典型测试问题重新写入 DB，便于 UI 历史查看
+
+### 验收标准
+
+- “阿胶有哪些质量检测方法”应按信息抽取回答，给出方法清单和来源
+- “心脏病吃阿胶有好处吗”应按命题判断回答，明确证据是否支持
+- 测试不调用外部 API
+- PageIndex 模板编辑仍兼容旧模板
+
 ## 已完成
 
 - [x] 修复登录后顶部大块空白
@@ -673,7 +700,10 @@
 - [x] 增加证据分类：`direct_support`、`indirect_related`、`risk_warning`、`locator_only`。
 - [x] PageIndex 证据表增加“证据类型”列。
 - [x] LLM 回答提示词要求区分直接支持、间接相关、风险提醒和仅定位信息。
-- [ ] P1 再设计 PageIndex 内置回答模式和高级自定义模板，不在 P0 直接开放自由 prompt。
+- [x] P1 服务层新增 PageIndex 模板管理，复用 AI 质检模板的 YAML 管理思路，但使用独立目录和变量。
+- [x] P1 PageIndex 页新增回答模板选择，并接入 LLM 最终回答 prompt。
+- [x] P1 接入设置页 UI，实现 PageIndex 模板可视化新增、编辑、删除。
+- [ ] P2 后续按需开放 PageIndex 模板高级检索策略配置。
 
 ### 验收标准
 

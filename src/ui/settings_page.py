@@ -51,6 +51,12 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
                                 elem_id="settings-template-page-info",
                             )
                             with gr.Row(elem_id="settings-list-actions"):
+                                settings_template_kind = gr.Radio(
+                                    label="模板类型",
+                                    choices=["AI质检", "PageIndex"],
+                                    value=initial_values.get("template_kind", "AI质检"),
+                                    elem_id="settings-template-kind",
+                                )
                                 settings_new_button = ui_button("新建模板")
                                 settings_refresh_button = ui_button("刷新模板")
                         with gr.Row(elem_id="settings-main-row"):
@@ -256,6 +262,7 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
         "settings_template_prev_button": settings_template_prev_button,
         "settings_template_next_button": settings_template_next_button,
         "settings_template_page_info": settings_template_page_info,
+        "settings_template_kind": settings_template_kind,
         "settings_new_button": settings_new_button,
         "settings_refresh_button": settings_refresh_button,
         "settings_template_detail": settings_template_detail,
@@ -339,6 +346,7 @@ def bind_settings_events(
     document_target_knowledge_base,
     search_knowledge_base,
     pageindex_knowledge_base,
+    pageindex_template,
     quality_knowledge_base,
     review_knowledge_base,
     quality_progress,
@@ -408,6 +416,7 @@ def bind_settings_events(
     settings_refresh_button = components["settings_refresh_button"]
     settings_template_table = components["settings_template_table"]
     settings_template_page_info = components["settings_template_page_info"]
+    settings_template_kind = components["settings_template_kind"]
     settings_template_detail = components["settings_template_detail"]
     settings_template_id = components["settings_template_id"]
     settings_template_name = components["settings_template_name"]
@@ -463,7 +472,35 @@ def bind_settings_events(
 
     settings_refresh_button.click(
         fn=refresh_settings_workspace_ui,
-        inputs=[settings_selected_template_state],
+        inputs=[settings_template_kind, settings_selected_template_state],
+        outputs=[
+            settings_template_table,
+            settings_template_page_state,
+            settings_template_page_info,
+            settings_template_state,
+            settings_selected_template_state,
+            settings_template_detail,
+            settings_template_id,
+            settings_template_name,
+            settings_template_description,
+            settings_rule_tags,
+            settings_fulltext_top_k,
+            settings_vector_top_k,
+            settings_final_top_k,
+            settings_use_rerank,
+            settings_neighbor_window,
+            settings_include_section_context,
+            settings_section_max_chars,
+            settings_system_prompt,
+            settings_user_prompt_template,
+            settings_result,
+            settings_runtime,
+            settings_delete_confirm,
+        ],
+    )
+    settings_template_kind.change(
+        fn=refresh_settings_workspace_ui,
+        inputs=[settings_template_kind, settings_selected_template_state],
         outputs=[
             settings_template_table,
             settings_template_page_state,
@@ -491,7 +528,7 @@ def bind_settings_events(
     )
     settings_template_table.select(
         fn=select_settings_template,
-        inputs=[settings_template_state, settings_template_table],
+        inputs=[settings_template_kind, settings_template_state, settings_template_table],
         outputs=[
             settings_selected_template_state,
             settings_template_detail,
@@ -514,6 +551,7 @@ def bind_settings_events(
     )
     settings_new_button.click(
         fn=prepare_new_template,
+        inputs=[settings_template_kind],
         outputs=[
             settings_selected_template_state,
             settings_template_detail,
@@ -537,6 +575,7 @@ def bind_settings_events(
     settings_save_button.click(
         fn=save_settings_template_ui,
         inputs=[
+            settings_template_kind,
             settings_selected_template_state,
             settings_template_id,
             settings_template_name,
@@ -577,11 +616,12 @@ def bind_settings_events(
             settings_delete_confirm,
             quality_template,
             quality_template_detail,
+            pageindex_template,
         ],
     )
     settings_delete_button.click(
         fn=delete_settings_template_ui,
-        inputs=[settings_selected_template_state, settings_template_id, settings_delete_confirm],
+        inputs=[settings_template_kind, settings_selected_template_state, settings_template_id, settings_delete_confirm],
         outputs=[
             settings_template_table,
             settings_template_page_state,
@@ -607,6 +647,7 @@ def bind_settings_events(
             settings_delete_confirm,
             quality_template,
             quality_template_detail,
+            pageindex_template,
         ],
     )
     settings_template_prev_button.click(

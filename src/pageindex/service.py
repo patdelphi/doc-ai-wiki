@@ -16,6 +16,9 @@ from src.common.paths import resolve_input_path, to_input_relative_path
 from src.common.utils import utc_now_iso
 from src.db.connection import create_connection
 from src.db.transaction import transaction
+from src.pageindex.evidence_judge import classify_evidence_relation, infer_conclusion
+from src.pageindex.question_plan import build_question_plan_prompts, normalize_question_plan
+from src.pageindex.templates import PageIndexTemplateService
 
 
 PAGEINDEX_VENDOR_ROOT = Path(__file__).resolve().parents[2] / "vendor" / "pageindex"
@@ -39,6 +42,7 @@ class PageIndexService:
 
         self.settings = settings
         self.llm_client = llm_client
+        self.template_service = PageIndexTemplateService(settings.templates_dir)
         self.workspace_root = settings.sqlite_db_path.parent / "pageindex_workspace"
         self._ensure_tables()
 
@@ -215,7 +219,7 @@ class PageIndexService:
             )
         return rows
 
-    def ask_question(self, knowledge_base_id: str, doc_uid: str, question: str) -> dict:
+    def ask_question(self, knowledge_base_id: str, doc_uid: str, question: str, *, template_id: str | None = None) -> dict:
         """基于 PageIndex 本地结构定位证据，并保存问答历史。"""
 
         normalized_question = str(question or "").strip()
@@ -223,7 +227,7 @@ class PageIndexService:
             raise ValidationAppError("问题不能为空")
         record = self._get_index_record(knowledge_base_id, doc_uid)
         structure = self._load_structure(record)
-        retrieval_result = self._answer_with_reasoning_or_fallback(record, structure, normalized_question)
+        retrieval_result = self._answer_with_reasoning_or_fallback(record, structure, normalized_question, template_id=template_id)
         evidence = retrieval_result["evidence"]
         answer_text = retrieval_result["answer"]
         query_id = f"piq_{uuid4().hex[:12]}"
@@ -267,7 +271,7 @@ class PageIndexService:
             "created_at": created_at,
         }
 
-    def ask_knowledge_base_question(self, knowledge_base_id: str, question: str) -> dict:
+    def ask_knowledge_base_question(self, knowledge_base_id: str, question: str, *, template_id: str | None = None) -> dict:
         """在当前知识库所有已构建 PageIndex 文档中提问，并保存问答历史。"""
 
         normalized_question = str(question or "").strip()
@@ -276,7 +280,7 @@ class PageIndexService:
         records = self._list_index_records(knowledge_base_id)
         if not records:
             raise NotFoundAppError("当前知识库尚未构建 PageIndex")
-        retrieval_result = self._answer_knowledge_base_with_reasoning_or_fallback(records, normalized_question)
+        retrieval_result = self._answer_knowledge_base_with_reasoning_or_fallback(records, normalized_question, template_id=template_id)
         evidence = retrieval_result["evidence"]
         answer_text = retrieval_result["answer"]
         history_doc_uid = self._resolve_history_doc_uid(records, evidence)
@@ -580,7 +584,7 @@ class PageIndexService:
             raise NotFoundAppError("当前知识库下未找到指定文档", details={"knowledge_base_id": knowledge_base_id, "doc_uid": doc_uid})
         return dict(row)
 
-    def _answer_knowledge_base_with_reasoning_or_fallback(self, records: list[dict], question: str) -> dict:
+    def _answer_knowledge_base_with_reasoning_or_fallback(self, records: list[dict], question: str, *, template_id: str | None = None) -> dict:
         """聚合当前知识库内多篇 PageIndex 文档的问答证据。"""
 
         evidence: list[dict] = []
@@ -590,7 +594,7 @@ class PageIndexService:
         for record in records:
             try:
                 structure = self._load_structure(record)
-                result = self._answer_with_reasoning_or_fallback(record, structure, question)
+                result = self._answer_with_reasoning_or_fallback(record, structure, question, template_id=template_id)
             except AppError as exc:
                 llm_errors.append(exc.message)
                 continue
@@ -631,12 +635,12 @@ class PageIndexService:
                 return doc_uid
         return str(records[0].get("doc_uid") or "")
 
-    def _answer_with_reasoning_or_fallback(self, record: dict, structure: list[dict], question: str) -> dict:
+    def _answer_with_reasoning_or_fallback(self, record: dict, structure: list[dict], question: str, *, template_id: str | None = None) -> dict:
         """优先用 LLM 对 PageIndex 树做语义推理，失败时回退到本地关键词。"""
 
         question_analysis = self._analyze_question(question)
         try:
-            evidence, answer, debug = self._answer_with_llm_tree_reasoning(record, structure, question, question_analysis)
+            evidence, answer, debug = self._answer_with_llm_tree_reasoning(record, structure, question, question_analysis, template_id=template_id)
             evidence = self._classify_evidence_items(question, evidence)
             if evidence:
                 debug["retrieval_mode"] = "LLM 语义树推理"
@@ -687,6 +691,8 @@ class PageIndexService:
         structure: list[dict],
         question: str,
         question_analysis: dict,
+        *,
+        template_id: str | None = None,
     ) -> tuple[list[dict], str, dict]:
         """让 LLM 根据 PageIndex 树结构选择相关节点，并基于证据生成回答。"""
 
@@ -731,7 +737,7 @@ class PageIndexService:
         answer = str(selection.get("answer") or "").strip()
         if evidence:
             try:
-                answer = self._generate_llm_answer(llm_client, question, evidence)
+                answer = self._generate_llm_answer(llm_client, question, evidence, template_id=template_id)
             except Exception:  # noqa: BLE001
                 if not answer:
                     answer = self._build_local_answer(question, evidence)
@@ -888,34 +894,48 @@ class PageIndexService:
         )
         return system_prompt, user_prompt
 
-    @staticmethod
-    def _generate_llm_answer(llm_client: object, question: str, evidence: list[dict]) -> str:
+    def _generate_llm_answer(self, llm_client: object, question: str, evidence: list[dict], *, template_id: str | None = None) -> str:
         """让 LLM 基于已取回证据生成简短回答。"""
 
-        system_prompt = (
-            "你是严谨的文档问答助手。只能基于给定证据回答，证据不足时要明确说明证据不足，"
-            "不得编造未给出的事实。只返回 JSON。"
-        )
-        user_prompt = "\n".join(
-            [
-                "用户问题：",
-                question,
-                "",
-                "证据 JSON：",
-                json.dumps(evidence, ensure_ascii=False),
-                "",
-                "请按以下结构写中文回答：",
-                "结论：直接回答问题。",
-                "证据判断：说明哪些证据是直接支持、间接相关、风险提醒或仅定位信息；间接相关不能当作直接支持。",
-                "依据：列出支持结论的证据要点。",
-                "来源：列出证据标题、位置或 chunk 来源。",
-                "不确定点：说明证据不足或需要复核之处；如果没有，写“无”。",
-                "",
-                '请返回 JSON：{"answer":"结论：...\\n\\n证据判断：...\\n\\n依据：...\\n\\n来源：...\\n\\n不确定点：..."}',
-            ]
+        template = self.template_service.get_template(template_id)
+        question_plan = self._build_question_plan(llm_client, question, evidence)
+        system_prompt, user_prompt = self.template_service.render_answer_prompts(
+            template,
+            question=question,
+            evidence=evidence,
+            question_plan=question_plan,
+            structure_context=self._build_answer_structure_context(evidence),
+            evidence_judgement=self._build_local_evidence_judgement(evidence),
+            citation_rules="必须列出证据标题、位置、文档或 chunk 来源。",
         )
         result = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
         return str(result.get("answer") or "").strip()
+
+    @staticmethod
+    def _build_question_plan(llm_client: object, question: str, evidence: list[dict]) -> dict:
+        """调用 LLM 生成 Question Plan；失败时只做结构化兜底，不写死问题路由。"""
+
+        system_prompt, user_prompt = build_question_plan_prompts(question, evidence)
+        try:
+            payload = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
+        except Exception:  # noqa: BLE001
+            payload = {}
+        return normalize_question_plan(payload, question)
+
+    @staticmethod
+    def _build_answer_structure_context(evidence: list[dict]) -> str:
+        """基于证据生成简短结构上下文，供 PageIndex 回答模板使用。"""
+
+        contexts: list[str] = []
+        for item in evidence[:5]:
+            title = str(item.get("title") or item.get("source_type") or "").strip()
+            position = str(item.get("source_anchor") or item.get("position") or "").strip()
+            doc_uid = str(item.get("doc_uid") or "").strip()
+            if not title and not position:
+                continue
+            parts = [part for part in (doc_uid, title, position) if part]
+            contexts.append(" > ".join(parts))
+        return "\n".join(contexts)
 
     def _resolve_existing_source_path(self, document: dict) -> Path:
         """解析源文档路径；历史路径失效时修复到当前 Input 知识库目录。"""
@@ -1336,6 +1356,8 @@ class PageIndexService:
                     "不确定点：需要补充相关文档或重新构建索引后再判断。",
                 ]
             )
+        if any(not item.get("evidence_type") for item in evidence):
+            evidence = PageIndexService._classify_evidence_items(question, evidence)
         evidence_points = PageIndexService._build_local_evidence_points(evidence)
         judgement_points = PageIndexService._build_local_evidence_judgement(evidence)
         source_points = PageIndexService._build_local_source_points(evidence)
@@ -1357,32 +1379,15 @@ class PageIndexService:
 
         classified: list[dict] = []
         for item in evidence:
-            copied = dict(item)
-            evidence_type, evidence_label = PageIndexService._classify_single_evidence(question, copied)
-            copied["evidence_type"] = evidence_type
-            copied["evidence_label"] = evidence_label
-            classified.append(copied)
+            classified.append(classify_evidence_relation(question, dict(item)))
         return classified
 
     @staticmethod
     def _classify_single_evidence(question: str, evidence: dict) -> tuple[str, str]:
         """按问题和证据正文判断单条证据类型。"""
 
-        normalized_question = str(question or "")
-        content = str(evidence.get("content") or evidence.get("summary") or "")
-        title = str(evidence.get("title") or "")
-        combined = f"{title}\n{content}"
-        if "禁忌" in title or any(marker in content for marker in ("禁忌", "不良反应", "必须在医师指导", "医师指导下正确服用")):
-            return "risk_warning", "风险提醒"
-        benefit_question = any(marker in normalized_question for marker in ("有好处", "有没有好处", "有作用", "有没有作用", "能不能", "是否可以"))
-        if benefit_question and re.search(r"心脏相关病证用[^，。；\s]{2,20}(汤|方|丸|散)", content):
-            return "indirect_related", "间接相关"
-        if benefit_question and any(marker in combined for marker in ("有效", "改善", "显著", "降低", "提高", "治疗")):
-            if any(subject in combined for subject in PageIndexService._extract_question_terms(normalized_question)):
-                return "direct_support", "直接支持"
-        if content:
-            return "indirect_related", "间接相关"
-        return "locator_only", "仅定位信息"
+        relation = classify_evidence_relation(question, evidence)
+        return str(relation.get("evidence_type") or "insufficient"), str(relation.get("evidence_label") or "证据不足")
 
     @staticmethod
     def _build_local_evidence_judgement(evidence: list[dict]) -> str:
@@ -1430,18 +1435,7 @@ class PageIndexService:
     def _infer_local_conclusion(question: str, evidence: list[dict]) -> str:
         """按问题类型给出保守结论，避免把相关证据误判成肯定答案。"""
 
-        normalized_question = str(question or "").strip()
-        joined_evidence = "\n".join(str(item.get("content") or item.get("summary") or "") for item in evidence)
-        evidence_types = {str(item.get("evidence_type") or "") for item in evidence}
-        benefit_question = any(marker in normalized_question for marker in ("有好处", "有没有好处", "有作用", "有没有作用", "能不能", "是否可以"))
-        cautious_markers = ("医师指导", "辨证", "不良反应", "禁忌", "注意", "证据不足", "不能直接", "需由医师")
-        if benefit_question and "direct_support" not in evidence_types:
-            return f"当前证据不足，不能直接得出“{normalized_question}”的结论；现有证据主要是间接相关或风险提醒。"
-        if benefit_question and any(marker in joined_evidence for marker in cautious_markers):
-            return f"当前证据不足，不能直接得出“{normalized_question}”的结论；证据更支持需由医师辨证或指导使用。"
-        if benefit_question:
-            return f"当前证据只能说明存在相关内容，不能直接得出“{normalized_question}”的明确结论。"
-        return "当前知识库中找到相关证据，具体判断需结合下列依据。"
+        return infer_conclusion(question, evidence)
 
     @staticmethod
     def _infer_local_uncertainty(question: str, evidence: list[dict]) -> str:
@@ -1451,6 +1445,40 @@ class PageIndexService:
         if any(marker in joined_evidence for marker in ("医师指导", "辨证", "不良反应", "禁忌", "注意")):
             return "现有证据没有提供针对具体疾病人群的明确疗效结论，且涉及用药指导或禁忌，不能替代医生判断。"
         return "本地降级回答只基于当前命中的文档证据，未做外部医学事实补充。"
+
+    @staticmethod
+    def _is_benefit_or_treatment_question(question: str) -> bool:
+        """判断用户是否在询问疗效、改善、缓解或是否可用。"""
+
+        normalized_question = str(question or "")
+        return any(
+            marker in normalized_question
+            for marker in (
+                "有好处",
+                "有没有好处",
+                "有作用",
+                "有没有作用",
+                "能不能",
+                "是否可以",
+                "能缓解",
+                "缓解",
+                "改善",
+                "治疗",
+                "有帮助",
+            )
+        )
+
+    @staticmethod
+    def _is_formula_context_for_single_herb_question(question: str, content: str) -> bool:
+        """识别“单问阿胶”但证据只在方剂/汤方语境中出现的情况。"""
+
+        normalized_question = str(question or "")
+        normalized_content = str(content or "")
+        if "阿胶" not in normalized_question:
+            return False
+        formula_markers = ("方中阿胶", "含有阿胶的方剂", "温经汤", "炙甘草汤", "胶艾汤", "黄连阿胶汤", "猪苓汤")
+        formula_suffix_pattern = r"[^，。；\s]{1,24}(汤|方|丸|散)"
+        return any(marker in normalized_content for marker in formula_markers) or bool(re.search(formula_suffix_pattern, normalized_content))
 
     @staticmethod
     def _extract_question_terms(question: str) -> list[str]:

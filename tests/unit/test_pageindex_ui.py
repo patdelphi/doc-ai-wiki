@@ -9,11 +9,60 @@ from src.db.connection import create_connection, initialize_database
 from src.pageindex.service import PageIndexService
 from src.ui.app import create_ui_app
 from src.ui.pageindex_page import build_pageindex_tab
+from src.ui.settings_page import build_settings_tab
 from tests.unit.test_pageindex_service import (
     build_pageindex_test_settings,
     seed_markdown_document,
     seed_pageindex_workspace,
 )
+
+
+def build_settings_tab_initial_values() -> dict[str, object]:
+    """构造设置页组件测试所需的最小初始值。"""
+
+    return {
+        "runtime_html": "<div>运行配置</div>",
+        "template_table_rows": [],
+        "template_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+        "template_detail_html": "<div>模板详情</div>",
+        "template_id": "",
+        "template_name": "",
+        "template_description": "",
+        "rule_tags": "",
+        "fulltext_top_k": 3,
+        "vector_top_k": 3,
+        "final_top_k": 3,
+        "neighbor_window": 0,
+        "section_max_chars": 400,
+        "use_rerank": False,
+        "include_section_context": False,
+        "system_prompt": "",
+        "user_prompt_template": "",
+        "delete_confirm": False,
+        "knowledge_base_choices": [],
+        "knowledge_base_selected_choice": None,
+        "knowledge_base_page_info": "第 1 / 1 页，共 0 条，每页最多 10 行",
+        "knowledge_base_detail_html": "<div>知识库详情</div>",
+        "knowledge_base_id": "",
+        "knowledge_base_name": "",
+        "knowledge_base_description": "",
+        "knowledge_base_status": "active",
+        "knowledge_base_is_default": False,
+        "knowledge_base_result_html": "",
+        "result_html": "",
+        "user_choices": [],
+        "user_selected_choice": None,
+        "user_detail_html": "",
+        "user_result_html": "",
+        "permission_user_choices": [],
+        "permission_user_selected_choice": None,
+        "permission_detail_html": "",
+        "permission_tab_choices": [],
+        "permission_tab_values": [],
+        "permission_kb_choices": [],
+        "permission_kb_values": [],
+        "permission_result_html": "",
+    }
 
 
 def test_build_pageindex_tab_should_return_expected_components() -> None:
@@ -25,6 +74,8 @@ def test_build_pageindex_tab_should_return_expected_components() -> None:
             initial_knowledge_base_choice="kb_alpha | Alpha 知识库",
             document_choices=["doc_1 | Alpha 文档"],
             initial_document_choice="doc_1 | Alpha 文档",
+            template_choices=["strict_qa | 严谨问答"],
+            initial_template_choice="strict_qa | 严谨问答",
             initial_status_html="<div>未构建</div>",
             initial_tree_rows=[],
             initial_answer_html="<div>尚未提问</div>",
@@ -36,6 +87,7 @@ def test_build_pageindex_tab_should_return_expected_components() -> None:
     expected_keys = {
         "pageindex_knowledge_base",
         "pageindex_document",
+        "pageindex_template",
         "pageindex_build_button",
         "pageindex_rebuild_button",
         "pageindex_question",
@@ -55,11 +107,63 @@ def test_build_pageindex_tab_should_return_expected_components() -> None:
     assert expected_keys.issubset(components.keys())
     assert isinstance(components["pageindex_knowledge_base"], gr.Dropdown)
     assert components["pageindex_knowledge_base"].elem_id == "pageindex-knowledge-base"
+    assert isinstance(components["pageindex_template"], gr.Dropdown)
+    assert components["pageindex_template"].elem_id == "pageindex-template"
     assert isinstance(components["pageindex_tree_panel"], gr.Accordion)
     assert components["pageindex_tree_panel"].open is False
     assert isinstance(components["pageindex_tree"], gr.Dataframe)
     assert components["pageindex_tree"].elem_id == "pageindex-tree"
+    assert components["pageindex_history_table"].label == "当前知识库历史记录"
     assert "ui-button--primary" in (components["pageindex_export_button"].elem_classes or [])
+
+
+def test_build_settings_tab_should_include_pageindex_template_kind_selector() -> None:
+    """设置页模板管理应支持选择 AI 质检或 PageIndex 模板。"""
+
+    with gr.Blocks():
+        components = build_settings_tab(initial_values=build_settings_tab_initial_values())
+
+    assert "settings_template_kind" in components
+    assert isinstance(components["settings_template_kind"], gr.Radio)
+    assert components["settings_template_kind"].elem_id == "settings-template-kind"
+    assert "PageIndex" in {value for _label, value in components["settings_template_kind"].choices}
+
+
+def test_save_settings_template_should_support_pageindex_templates(tmp_path) -> None:
+    """设置页保存 PageIndex 模板后，应持久化并刷新 PageIndex 问答模板下拉。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+    save_handler = next(
+        (block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "save_settings_template_ui"),
+        None,
+    )
+    assert save_handler is not None
+
+    outputs = save_handler(
+        "PageIndex",
+        "",
+        "cardiac_safety",
+        "心脏病安全回答",
+        "面向医学安全问答的模板。",
+        "",
+        3,
+        3,
+        3,
+        False,
+        0,
+        False,
+        400,
+        "你是严谨的医学知识库问答助手。",
+        "问题：{{ question }}\n证据：{{ evidence_json }}",
+    )
+
+    saved_template = PageIndexService(settings).template_service.get_template("cardiac_safety")
+    pageindex_template_update = outputs[-1]
+    assert saved_template["template_name"] == "心脏病安全回答"
+    assert "cardiac_safety | 心脏病安全回答" in pageindex_template_update["choices"]
+    assert pageindex_template_update["value"] == "cardiac_safety | 心脏病安全回答"
 
 
 def test_pageindex_question_handler_should_return_answer_evidence_and_history(tmp_path) -> None:
@@ -83,6 +187,7 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
     answer_html, evidence_rows, debug_rows, history_rows, history_state, active_query_id, export_result_html, download_file = ask_handler(
         "kb_alpha | kb_alpha 知识库",
         f'{document["doc_uid"]} | alpha',
+        "strict_qa | 严谨问答",
         "风险",
     )
 
@@ -92,7 +197,16 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
     assert "LLM 状态" not in answer_html
     assert "索引状态" not in answer_html
     assert evidence_rows[0][1] == "风险"
-    assert evidence_rows[0][4] in {"直接支持", "间接相关", "风险提醒", "仅定位信息"}
+    assert evidence_rows[0][4] in {
+        "直接支持",
+        "直接反驳",
+        "部分支持",
+        "仅背景相关",
+        "仅案例",
+        "方法/组合语境",
+        "条件或限制",
+        "证据不足",
+    }
     assert debug_rows[0][1] == "风险"
     assert "本地候选召回" in debug_rows[0][5]
     assert history_rows[0][2] == "风险"

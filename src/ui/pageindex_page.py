@@ -24,6 +24,8 @@ def build_pageindex_tab(
     initial_history_state: list[dict] | None = None,
     initial_active_query_id: str = "",
     initial_export_result_html: str = "",
+    template_choices: list[str] | None = None,
+    initial_template_choice: str | None = None,
 ) -> dict[str, gr.components.Component]:
     """构建 PageIndex 深度检索页组件，并返回后续事件绑定所需组件。"""
 
@@ -46,6 +48,13 @@ def build_pageindex_tab(
                     value=initial_document_choice,
                     interactive=True,
                     elem_id="pageindex-document",
+                )
+                pageindex_template = gr.Dropdown(
+                    label="回答模板",
+                    choices=template_choices or [],
+                    value=initial_template_choice,
+                    interactive=True,
+                    elem_id="pageindex-template",
                 )
                 with gr.Row(elem_id="pageindex-build-row"):
                     pageindex_build_button = ui_button("构建索引", variant="primary")
@@ -105,17 +114,6 @@ def build_pageindex_tab(
         )
 
     with gr.Group(elem_id="pageindex-history-panel"):
-        pageindex_history_table = gr.Dataframe(
-            headers=["时间", "文档", "问题", "回答摘要"],
-            datatype=["str", "markdown", "markdown", "markdown"],
-            interactive=True,
-            row_count=0,
-            column_count=4,
-            label="当前文档历史",
-            buttons=[],
-            elem_id="pageindex-history-table",
-            value=initial_history_rows,
-        )
         pageindex_export_button = ui_button("下载结果", tone="primary")
         pageindex_export_result = gr.HTML(
             value=initial_export_result_html,
@@ -126,10 +124,22 @@ def build_pageindex_tab(
             interactive=False,
             elem_id="pageindex-download-file",
         )
+        pageindex_history_table = gr.Dataframe(
+            headers=["时间", "文档", "问题", "回答摘要"],
+            datatype=["str", "markdown", "markdown", "markdown"],
+            interactive=True,
+            row_count=0,
+            column_count=4,
+            label="当前知识库历史记录",
+            buttons=[],
+            elem_id="pageindex-history-table",
+            value=initial_history_rows,
+        )
 
     return {
         "pageindex_knowledge_base": pageindex_knowledge_base,
         "pageindex_document": pageindex_document,
+        "pageindex_template": pageindex_template,
         "pageindex_status": pageindex_status,
         "pageindex_build_button": pageindex_build_button,
         "pageindex_rebuild_button": pageindex_rebuild_button,
@@ -215,6 +225,7 @@ def bind_pageindex_events(
             inputs=[
                 components["pageindex_knowledge_base"],
                 components["pageindex_document"],
+                components["pageindex_template"],
                 components["pageindex_question"],
             ],
             outputs=[
