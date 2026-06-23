@@ -10,6 +10,53 @@ from src.ui.page_helpers import format_table_pagination_html, ui_button
 from src.ui.viewmodels import format_operation_result_html
 
 
+def _is_quality_template(initial_values: dict[str, object]) -> bool:
+    """判断设置页当前是否管理 AI 质检模板。"""
+
+    return str(initial_values.get("template_kind", "AI质检")) != "PageIndex"
+
+
+def _template_label(initial_values: dict[str, object], field: str) -> str:
+    """按模板类型返回设置页字段名称。"""
+
+    if not _is_quality_template(initial_values):
+        pageindex_labels = {
+            "rule_tags": "规则标签",
+            "fulltext_top_k": "树候选节点",
+            "vector_top_k": "选中节点",
+            "final_top_k": "RAG/FTS 证据",
+            "neighbor_window": "邻居窗口",
+            "section_max_chars": "章节最大字数",
+            "include_section_context": "结构上下文",
+        }
+        return pageindex_labels.get(field, field)
+    quality_labels = {
+        "rule_tags": "规则标签",
+        "fulltext_top_k": "全文召回",
+        "vector_top_k": "向量召回",
+        "final_top_k": "最终返回",
+        "neighbor_window": "邻居窗口",
+        "section_max_chars": "章节最大字数",
+        "include_section_context": "章节上下文",
+    }
+    return quality_labels.get(field, field)
+
+
+def _build_template_kind_hint(template_kind: str) -> str:
+    """生成模板类型说明，避免用户误解两套模板共用。"""
+
+    if str(template_kind or "").strip() == "PageIndex":
+        return (
+            "<div class='settings-kind-hint'>当前管理 PageIndex 回答模板，保存到 "
+            "<code>templates/pageindex</code>，用于 PageIndex 深度检索最终回答。"
+            "PageIndex 模板同时控制回答风格和默认检索策略，数值越大召回越宽，但成本和噪声也会增加。</div>"
+        )
+    return (
+        "<div class='settings-kind-hint'>当前管理 AI 质检模板，保存到 "
+        "<code>templates/quality</code>，用于 Claim 质检与证据判断。</div>"
+    )
+
+
 def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.components.Component]:
     """构建功能设置页组件，并返回后续事件绑定所需的组件集合。"""
 
@@ -20,6 +67,16 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
                 with gr.Tab("模板管理", elem_id="settings-template-tab"):
                     with gr.Group(elem_id="settings-workspace-panel"):
                         with gr.Group(elem_id="settings-template-list-panel"):
+                            settings_template_kind = gr.Radio(
+                                label="管理对象",
+                                choices=["AI质检", "PageIndex"],
+                                value=initial_values.get("template_kind", "AI质检"),
+                                elem_id="settings-template-kind",
+                            )
+                            settings_template_kind_hint = gr.HTML(
+                                value=_build_template_kind_hint(str(initial_values.get("template_kind", "AI质检"))),
+                                elem_id="settings-template-kind-hint",
+                            )
                             gr.HTML(
                                 value="""
                                                 <div class="settings-list-header">
@@ -51,12 +108,6 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
                                 elem_id="settings-template-page-info",
                             )
                             with gr.Row(elem_id="settings-list-actions"):
-                                settings_template_kind = gr.Radio(
-                                    label="模板类型",
-                                    choices=["AI质检", "PageIndex"],
-                                    value=initial_values.get("template_kind", "AI质检"),
-                                    elem_id="settings-template-kind",
-                                )
                                 settings_new_button = ui_button("新建模板")
                                 settings_refresh_button = ui_button("刷新模板")
                         with gr.Row(elem_id="settings-main-row"):
@@ -78,22 +129,23 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
                                             value=initial_values["template_description"],
                                         )
                                         settings_rule_tags = gr.Textbox(
-                                            label="规则标签",
+                                            label=_template_label(initial_values, "rule_tags"),
                                             value=initial_values["rule_tags"],
                                             placeholder="多个标签用逗号、顿号或换行分隔",
+                                            visible=_is_quality_template(initial_values),
                                         )
                                     gr.Markdown("### 检索策略")
                                     with gr.Group(elem_id="settings-policy-group"):
                                         with gr.Row():
-                                            settings_fulltext_top_k = gr.Number(label="全文召回", value=initial_values["fulltext_top_k"], precision=0)
-                                            settings_vector_top_k = gr.Number(label="向量召回", value=initial_values["vector_top_k"], precision=0)
-                                            settings_final_top_k = gr.Number(label="最终返回", value=initial_values["final_top_k"], precision=0)
+                                            settings_fulltext_top_k = gr.Number(label=_template_label(initial_values, "fulltext_top_k"), value=initial_values["fulltext_top_k"], precision=0)
+                                            settings_vector_top_k = gr.Number(label=_template_label(initial_values, "vector_top_k"), value=initial_values["vector_top_k"], precision=0)
+                                            settings_final_top_k = gr.Number(label=_template_label(initial_values, "final_top_k"), value=initial_values["final_top_k"], precision=0)
                                         with gr.Row():
-                                            settings_neighbor_window = gr.Number(label="邻居窗口", value=initial_values["neighbor_window"], precision=0)
-                                            settings_section_max_chars = gr.Number(label="章节最大字数", value=initial_values["section_max_chars"], precision=0)
+                                            settings_neighbor_window = gr.Number(label=_template_label(initial_values, "neighbor_window"), value=initial_values["neighbor_window"], precision=0, visible=_is_quality_template(initial_values))
+                                            settings_section_max_chars = gr.Number(label=_template_label(initial_values, "section_max_chars"), value=initial_values["section_max_chars"], precision=0, visible=_is_quality_template(initial_values))
                                         with gr.Row():
-                                            settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_values["use_rerank"])
-                                            settings_include_section_context = gr.Checkbox(label="章节上下文", value=initial_values["include_section_context"])
+                                            settings_use_rerank = gr.Checkbox(label="启用重排", value=initial_values["use_rerank"], visible=_is_quality_template(initial_values))
+                                            settings_include_section_context = gr.Checkbox(label=_template_label(initial_values, "include_section_context"), value=initial_values["include_section_context"])
                                     gr.Markdown("### Prompt 配置")
                                     with gr.Group(elem_id="settings-prompt-group"):
                                         settings_system_prompt = gr.Textbox(label="系统提示词", lines=8, value=initial_values["system_prompt"])
@@ -263,6 +315,7 @@ def build_settings_tab(*, initial_values: dict[str, object]) -> dict[str, gr.com
         "settings_template_next_button": settings_template_next_button,
         "settings_template_page_info": settings_template_page_info,
         "settings_template_kind": settings_template_kind,
+        "settings_template_kind_hint": settings_template_kind_hint,
         "settings_new_button": settings_new_button,
         "settings_refresh_button": settings_refresh_button,
         "settings_template_detail": settings_template_detail,
@@ -417,6 +470,7 @@ def bind_settings_events(
     settings_template_table = components["settings_template_table"]
     settings_template_page_info = components["settings_template_page_info"]
     settings_template_kind = components["settings_template_kind"]
+    settings_template_kind_hint = components["settings_template_kind_hint"]
     settings_template_detail = components["settings_template_detail"]
     settings_template_id = components["settings_template_id"]
     settings_template_name = components["settings_template_name"]
@@ -477,6 +531,7 @@ def bind_settings_events(
             settings_template_table,
             settings_template_page_state,
             settings_template_page_info,
+            settings_template_kind_hint,
             settings_template_state,
             settings_selected_template_state,
             settings_template_detail,
@@ -505,6 +560,7 @@ def bind_settings_events(
             settings_template_table,
             settings_template_page_state,
             settings_template_page_info,
+            settings_template_kind_hint,
             settings_template_state,
             settings_selected_template_state,
             settings_template_detail,
@@ -595,6 +651,7 @@ def bind_settings_events(
             settings_template_table,
             settings_template_page_state,
             settings_template_page_info,
+            settings_template_kind_hint,
             settings_template_state,
             settings_selected_template_state,
             settings_template_detail,
@@ -626,6 +683,7 @@ def bind_settings_events(
             settings_template_table,
             settings_template_page_state,
             settings_template_page_info,
+            settings_template_kind_hint,
             settings_template_state,
             settings_selected_template_state,
             settings_template_detail,

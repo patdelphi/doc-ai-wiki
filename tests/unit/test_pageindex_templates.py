@@ -38,7 +38,10 @@ user_prompt_template: |
     items = service.list_templates()
 
     template_ids = {item["template_id"] for item in items}
+    assert "general_summary" in template_ids
+    assert "balanced_qa" in template_ids
     assert "strict_qa" in template_ids
+    assert "evidence_audit_qa" in template_ids
     assert "medical_safety_qa" in template_ids
     assert "source_locator" in template_ids
     assert "custom_pageindex_qa" in template_ids
@@ -132,6 +135,31 @@ def test_pageindex_builtin_templates_should_explain_generic_evidence_relations(t
     assert "method_or_formula_context" in joined_prompt
     assert "context_only" in joined_prompt
     assert "不能证明用户命题" in joined_prompt
+
+
+def test_pageindex_builtin_templates_should_cover_answer_strictness_spectrum(tmp_path: Path) -> None:
+    """内置模板应覆盖从宽松速览到医学安全的不同回答场景。"""
+
+    from src.pageindex.templates import PageIndexTemplateService
+
+    service = PageIndexTemplateService(tmp_path / "templates")
+    templates = {item["template_id"]: service.get_template(item["template_id"]) for item in service.list_templates()}
+
+    assert templates["general_summary"]["answer_mode"] == "general_summary"
+    assert "快速概览" in templates["general_summary"]["description"]
+    assert "不做强命题审判" in templates["general_summary"]["system_prompt"]
+
+    assert templates["balanced_qa"]["answer_mode"] == "balanced_qa"
+    assert "直接回答" in templates["balanced_qa"]["system_prompt"]
+    assert "证据能说明什么" in templates["balanced_qa"]["user_prompt_template"]
+
+    assert templates["evidence_audit_qa"]["answer_mode"] == "evidence_audit"
+    assert "证据不能证明什么" in templates["evidence_audit_qa"]["user_prompt_template"]
+    assert "不能外推" in templates["evidence_audit_qa"]["user_prompt_template"]
+
+    assert templates["medical_safety_qa"]["answer_mode"] == "medical_safety"
+    assert "不得把当前知识库外的医学指南或常识伪装成已检索证据" in templates["medical_safety_qa"]["system_prompt"]
+    assert "非医疗建议" in templates["medical_safety_qa"]["user_prompt_template"]
 
 
 def test_pageindex_template_service_should_ignore_evidence_judge_rule_file(tmp_path: Path) -> None:

@@ -10,6 +10,35 @@
 > 设计文档：`Docs/design/pageindex_question_plan_mechanism_20260622.md`
 > 目标：用 LLM 生成结构化 Question Plan，替代 Python 硬编码问题路由。
 
+## 2026-06-23 PageIndex 迭代式推理检索计划
+
+> 范围：`src/pageindex/service.py`、`tests/unit/test_pageindex_service.py`、`tests/evaluation/pageindex_cases.jsonl`
+> 计划文档：`Docs/optimization-plan/pageindex_iterative_reasoning_plan_20260623.md`
+> 目标：把 PageIndex 从“候选节点 rerank + RAG/FTS 补证据”升级为最小可用的“迭代式推理检索”闭环。
+
+### P0
+
+- [ ] 新增迭代检索 prompt，要求 LLM 返回 `selected_nodes`、`sufficiency`、`missing_information`、`next_search_focus`
+- [ ] 新增单文档多轮检索闭环：选择节点、读取内容、判断充分性、不足则继续检索
+- [ ] 将 LLM PageIndex 检索入口从单轮节点选择切换为迭代式检索
+- [ ] 在 `debug_json` 中记录每轮检索节点、充分性判断、缺失信息和下一轮检索焦点
+- [ ] 知识库多文档聚合时保留每个文档的检索轮次 debug
+
+### P1
+
+- [ ] 增加最小交叉引用识别：`详见`、`参见`、`附录`、`表`、`图`、`第...章`
+- [ ] 将交叉引用匹配到 PageIndex 树节点，并作为下一轮候选
+- [ ] 增加 5-10 条 PageIndex 迭代检索评测样例
+- [ ] 更新答案质量计划，记录迭代检索验收标准
+
+### 验收标准
+
+- 问题证据不足时，检索会继续下一轮，而不是直接生成模糊答案
+- 证据充分时，检索能提前停止
+- debug 中能看到每一轮选了哪些节点、为什么选、是否充分、还缺什么
+- 知识库级检索仍覆盖当前知识库下所有已构建 PageIndex 的文档
+- 单测不调用外部 API
+
 ### P0
 
 - [x] 单独编写 Question Plan 机制设计文档
@@ -23,6 +52,7 @@
 - [x] 将 Question Plan 写入 PageIndex debug 信息，方便历史结果排查
 - [ ] 根据 Question Plan 调整候选证据选择提示词，提升召回精度
 - [x] 将典型测试问题重新写入 DB，便于 UI 历史查看
+- [x] 优化 PageIndex 内置模板梯度：宽松速览、普适问答、严谨问答、证据审查、医学安全、原文定位
 
 ### 验收标准
 

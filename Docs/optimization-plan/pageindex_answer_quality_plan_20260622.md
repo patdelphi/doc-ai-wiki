@@ -39,10 +39,20 @@
 1. 复用 AI 质检模板的管理思路：内置模板、本地 YAML 覆盖、自定义模板、删除标记。
 2. PageIndex 使用独立目录 `templates/pageindex`，避免和 `templates/quality` 混用。
 3. PageIndex 模板使用独立变量：`question`、`evidence_json`、`structure_context`、`evidence_judgement`、`citation_rules`。
-4. PageIndex 模板使用独立回答模式：`strict_qa`、`medical_safety_qa`、`source_locator`。
+4. PageIndex 模板使用独立回答模式：`general_summary`、`balanced_qa`、`strict_qa`、`evidence_audit_qa`、`medical_safety_qa`、`source_locator`。
 5. 本阶段完成服务层、单测、PageIndex 页模板选择和 LLM 回答链路接入。
 6. 设置页复用现有 AI 质检模板管理交互，支持 PageIndex 模板新增、编辑、删除。
 7. 设置页当前暴露基础模板字段；PageIndex 高级检索策略继续使用模板服务默认值，后续按需要再单独开放。
+
+## 2026-06-23 模板梯度优化
+
+- [x] 新增 `general_summary`：宽松速览，适合摘要、背景、主题概览。
+- [x] 新增 `balanced_qa`：普适问答，先直接回答，再说明证据边界。
+- [x] 保留并强化 `strict_qa`：证据关系判断仍是默认严谨模式。
+- [x] 新增 `evidence_audit_qa`：专门处理“证据是否足够证明结论”的审查问题。
+- [x] 强化 `medical_safety_qa`：医学场景从严，但不把外部医学知识伪装成已检索证据。
+- [x] 保留 `source_locator`：只做原文定位，不生成结论。
+- [x] 模板列表固定为从宽松到严谨的展示顺序。
 
 ## 2026-06-23 验证记录
 

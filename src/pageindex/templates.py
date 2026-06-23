@@ -12,6 +12,80 @@ from src.common.errors import NotFoundAppError, ValidationAppError
 
 
 BUILTIN_PAGEINDEX_TEMPLATES = {
+    "general_summary": {
+        "template_id": "general_summary",
+        "template_name": "宽松速览",
+        "description": "用于快速概览、主题摘要、背景梳理等宽松场景，不强制作命题审判。",
+        "answer_mode": "general_summary",
+        "system_prompt": """你是 PageIndex 快速概览助手。
+只能基于给定证据回答，不补充外部事实。
+适合用户想快速了解主题、定义、背景、方法概览或内容摘要的场景。
+不做强命题审判；如果问题本身是命题判断，也要说明证据强弱，避免把相关内容说成确定结论。
+回答必须包含：直接概览、主要要点、来源、不确定点。
+只返回 JSON：{"answer":"..."}。""",
+        "user_prompt_template": """用户问题：
+{question}
+
+证据 JSON：
+{evidence_json}
+
+Question Plan JSON：
+{question_plan}
+
+PageIndex 结构上下文：
+{structure_context}
+
+证据判断：
+{evidence_judgement}
+
+引用规则：
+{citation_rules}
+
+请用简洁中文给出快速概览。证据不足时说明当前知识库没有覆盖，不要编造。""",
+        "retrieval_policy": {
+            "max_tree_candidates": 24,
+            "max_selected_nodes": 3,
+            "max_rag_evidence": 2,
+            "include_structure_context": True,
+        },
+    },
+    "balanced_qa": {
+        "template_id": "balanced_qa",
+        "template_name": "普适问答",
+        "description": "用于大多数普通问答，优先给结论，同时保留证据边界。",
+        "answer_mode": "balanced_qa",
+        "system_prompt": """你是 PageIndex 普适问答助手。
+必须直接回答用户问题，再说明证据依据和边界。
+只能基于给定证据回答，不能把未检索到的外部知识写成事实。
+证据关系类型包括：direct_support、direct_refute、partial_support、context_only、example_only、method_or_formula_context、risk_or_condition、insufficient。
+回答必须包含：结论、证据能说明什么、依据、来源、不确定点。
+只返回 JSON：{"answer":"..."}。""",
+        "user_prompt_template": """用户问题：
+{question}
+
+证据 JSON：
+{evidence_json}
+
+Question Plan JSON：
+{question_plan}
+
+PageIndex 结构上下文：
+{structure_context}
+
+证据判断：
+{evidence_judgement}
+
+引用规则：
+{citation_rules}
+
+请直接回答用户问题，并说明证据能说明什么、还不能说明什么。信息抽取类问题要给清单或步骤；命题判断类问题要给明确支持/反对/证据不足结论。""",
+        "retrieval_policy": {
+            "max_tree_candidates": 30,
+            "max_selected_nodes": 4,
+            "max_rag_evidence": 3,
+            "include_structure_context": True,
+        },
+    },
     "strict_qa": {
         "template_id": "strict_qa",
         "template_name": "严谨问答",
@@ -49,6 +123,43 @@ PageIndex 结构上下文：
             "include_structure_context": True,
         },
     },
+    "evidence_audit_qa": {
+        "template_id": "evidence_audit_qa",
+        "template_name": "证据审查",
+        "description": "用于需要严格判断证据是否足以支持结论的审查场景。",
+        "answer_mode": "evidence_audit",
+        "system_prompt": """你是 PageIndex 证据审查助手。
+目标不是复述材料，而是判断材料是否足以回答用户问题或证明用户命题。
+只能基于给定证据回答；不能把相关背景、案例、方法语境或单个例子外推成普遍结论。
+证据关系类型包括：direct_support、direct_refute、partial_support、context_only、example_only、method_or_formula_context、risk_or_condition、insufficient。
+回答必须包含：审查结论、证据能证明什么、证据不能证明什么、不能外推的原因、来源、不确定点。
+只返回 JSON：{"answer":"..."}。""",
+        "user_prompt_template": """用户问题：
+{question}
+
+证据 JSON：
+{evidence_json}
+
+Question Plan JSON：
+{question_plan}
+
+PageIndex 结构上下文：
+{structure_context}
+
+证据判断：
+{evidence_judgement}
+
+引用规则：
+{citation_rules}
+
+请按证据审查方式回答：先给审查结论，再分别说明证据能证明什么、证据不能证明什么，以及哪些地方不能外推。不要让用户自己读完证据再判断。""",
+        "retrieval_policy": {
+            "max_tree_candidates": 36,
+            "max_selected_nodes": 5,
+            "max_rag_evidence": 4,
+            "include_structure_context": True,
+        },
+    },
     "medical_safety_qa": {
         "template_id": "medical_safety_qa",
         "template_name": "医学安全问答",
@@ -56,8 +167,11 @@ PageIndex 结构上下文：
         "answer_mode": "medical_safety",
         "system_prompt": """你是医学安全导向的 PageIndex 问答助手。
 涉及疾病、疗效、用药、禁忌、人群边界时必须保守回答。
+不得把当前知识库外的医学指南或常识伪装成已检索证据。
 先使用通用证据关系判断：direct_support、direct_refute、partial_support、context_only、example_only、method_or_formula_context、risk_or_condition、insufficient。
-间接相关、方剂语境、经验表述不能当作明确疗效证据；method_or_formula_context 不能证明用户问的单项命题。
+必须区分直接临床证据、理论/机制解释、方剂或方法语境、风险或禁忌提示、证据不足。
+间接相关、方剂语境、经验表述不能当作明确疗效证据；method_or_formula_context 不能证明用户问的单项医学命题。
+如果证据缺少临床终点、人群边界、剂量用法或安全性信息，必须明确说明不能据此给出医学结论。
 只返回 JSON：{"answer":"..."}。""",
         "user_prompt_template": """医学相关问题：
 {question}
@@ -77,7 +191,7 @@ Question Plan JSON：
 引用规则：
 {citation_rules}
 
-请输出：结论、证据判断、依据、来源、不确定点。不得给出替代医生诊断的建议。""",
+请输出：结论、证据能说明什么、证据不能证明什么、风险或人群边界、依据、来源、不确定点、非医疗建议。不得给出替代医生诊断的建议。""",
         "retrieval_policy": {
             "max_tree_candidates": 36,
             "max_selected_nodes": 4,
@@ -122,6 +236,15 @@ Question Plan JSON：
     },
 }
 
+BUILTIN_PAGEINDEX_TEMPLATE_ORDER = {
+    "general_summary": 10,
+    "balanced_qa": 20,
+    "strict_qa": 30,
+    "evidence_audit_qa": 40,
+    "medical_safety_qa": 50,
+    "source_locator": 60,
+}
+
 
 class PageIndexTemplateService:
     """PageIndex 回答模板管理服务。"""
@@ -164,7 +287,13 @@ class PageIndexTemplateService:
                 "deletable": bool(item.get("deletable", True)),
                 "file_path": item.get("file_path"),
             }
-            for item in sorted(templates.values(), key=lambda value: value["template_id"])
+            for item in sorted(
+                templates.values(),
+                key=lambda value: (
+                    BUILTIN_PAGEINDEX_TEMPLATE_ORDER.get(str(value["template_id"]), 1000),
+                    str(value["template_id"]),
+                ),
+            )
         ]
 
     def get_template(self, template_id: str | None = None) -> dict:

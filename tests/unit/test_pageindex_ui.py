@@ -9,6 +9,7 @@ from src.db.connection import create_connection, initialize_database
 from src.pageindex.service import PageIndexService
 from src.ui.app import create_ui_app
 from src.ui.pageindex_page import build_pageindex_tab
+from src.ui.viewmodels import format_settings_template_detail_html
 from src.ui.settings_page import build_settings_tab
 from tests.unit.test_pageindex_service import (
     build_pageindex_test_settings,
@@ -127,7 +128,66 @@ def test_build_settings_tab_should_include_pageindex_template_kind_selector() ->
     assert "settings_template_kind" in components
     assert isinstance(components["settings_template_kind"], gr.Radio)
     assert components["settings_template_kind"].elem_id == "settings-template-kind"
+    assert components["settings_template_kind"].label == "管理对象"
     assert "PageIndex" in {value for _label, value in components["settings_template_kind"].choices}
+    assert isinstance(components["settings_template_kind_hint"], gr.HTML)
+    assert "AI 质检模板" in components["settings_template_kind_hint"].value
+    assert components["settings_rule_tags"].visible is True
+    assert components["settings_fulltext_top_k"].label == "全文召回"
+
+
+def test_build_settings_tab_should_switch_pageindex_policy_labels() -> None:
+    """PageIndex 模板管理应显示 PageIndex 专用检索策略字段。"""
+
+    initial_values = build_settings_tab_initial_values()
+    initial_values.update(
+        {
+            "template_kind": "PageIndex",
+            "fulltext_top_k": 36,
+            "vector_top_k": 5,
+            "final_top_k": 4,
+            "use_rerank": False,
+            "include_section_context": True,
+        }
+    )
+
+    with gr.Blocks():
+        components = build_settings_tab(initial_values=initial_values)
+
+    assert components["settings_rule_tags"].visible is False
+    assert "PageIndex 回答模板" in components["settings_template_kind_hint"].value
+    assert "同时控制回答风格和默认检索策略" in components["settings_template_kind_hint"].value
+    assert components["settings_fulltext_top_k"].label == "树候选节点"
+    assert components["settings_vector_top_k"].label == "选中节点"
+    assert components["settings_final_top_k"].label == "RAG/FTS 证据"
+    assert components["settings_use_rerank"].visible is False
+    assert components["settings_include_section_context"].label == "结构上下文"
+
+
+def test_settings_template_detail_should_describe_pageindex_policy() -> None:
+    """PageIndex 模板详情应显示 PageIndex 专用策略，不混用 AI 质检口径。"""
+
+    html = format_settings_template_detail_html(
+        {
+            "template_id": "strict_qa",
+            "template_name": "严谨问答",
+            "description": "PageIndex 回答模板",
+            "source_label": "内置",
+            "answer_mode": "strict_qa",
+            "retrieval_policy": {
+                "max_tree_candidates": 30,
+                "max_selected_nodes": 3,
+                "max_rag_evidence": 2,
+                "include_structure_context": True,
+            },
+        }
+    )
+
+    assert "回答模式" in html
+    assert "树候选节点" in html
+    assert "RAG/FTS 证据" in html
+    assert "全文召回" not in html
+    assert "向量召回" not in html
 
 
 def test_save_settings_template_should_support_pageindex_templates(tmp_path) -> None:
@@ -163,6 +223,10 @@ def test_save_settings_template_should_support_pageindex_templates(tmp_path) -> 
     saved_template = PageIndexService(settings).template_service.get_template("cardiac_safety")
     pageindex_template_update = outputs[-1]
     assert saved_template["template_name"] == "心脏病安全回答"
+    assert saved_template["retrieval_policy"]["max_tree_candidates"] == 3
+    assert saved_template["retrieval_policy"]["max_selected_nodes"] == 3
+    assert saved_template["retrieval_policy"]["max_rag_evidence"] == 3
+    assert saved_template["retrieval_policy"]["include_structure_context"] is False
     assert "cardiac_safety | 心脏病安全回答" in pageindex_template_update["choices"]
     assert pageindex_template_update["value"] == "cardiac_safety | 心脏病安全回答"
 

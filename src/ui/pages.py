@@ -2612,11 +2612,40 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             base_outputs[1],
             page,
         )
+        template_items = base_outputs[1] if isinstance(base_outputs[1], list) else []
+        template_kind = str((template_items[0] or {}).get("settings_template_kind") or "AI质检") if template_items else "AI质检"
+        is_pageindex = template_kind == "PageIndex"
+        kind_hint = (
+            "<div class='settings-kind-hint'>当前管理 PageIndex 回答模板，保存到 "
+            "<code>templates/pageindex</code>，用于 PageIndex 深度检索最终回答。</div>"
+            if is_pageindex
+            else "<div class='settings-kind-hint'>当前管理 AI 质检模板，保存到 "
+            "<code>templates/quality</code>，用于 Claim 质检与证据判断。</div>"
+        )
         return (
             page_rows,
             page_value,
             page_info,
-            *base_outputs[1:],
+            kind_hint,
+            base_outputs[1],
+            base_outputs[2],
+            base_outputs[3],
+            base_outputs[4],
+            base_outputs[5],
+            base_outputs[6],
+            gr.update(value=base_outputs[7], label="规则标签", visible=not is_pageindex),
+            gr.update(value=base_outputs[8], label="树候选节点" if is_pageindex else "全文召回"),
+            gr.update(value=base_outputs[9], label="选中节点" if is_pageindex else "向量召回"),
+            gr.update(value=base_outputs[10], label="RAG/FTS 证据" if is_pageindex else "最终返回"),
+            gr.update(value=base_outputs[11], visible=not is_pageindex),
+            gr.update(value=base_outputs[12], label="邻居窗口", visible=not is_pageindex),
+            gr.update(value=base_outputs[13], label="结构上下文" if is_pageindex else "章节上下文"),
+            gr.update(value=base_outputs[14], label="章节最大字数", visible=not is_pageindex),
+            base_outputs[15],
+            base_outputs[16],
+            base_outputs[17],
+            base_outputs[18],
+            base_outputs[19],
         )
 
     def build_settings_knowledge_base_workspace_ui_outputs(
@@ -3924,17 +3953,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         resolved = template or {}
         retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+        is_pageindex_template = any(
+            key in retrieval_policy
+            for key in ("max_tree_candidates", "max_selected_nodes", "max_rag_evidence")
+        )
         return (
             str(resolved.get("template_id") or ""),
             str(resolved.get("template_name") or ""),
             str(resolved.get("description") or ""),
             "、".join(str(item) for item in resolved.get("rule_tags", []) if item),
-            int(retrieval_policy.get("fulltext_top_k", 3)),
-            int(retrieval_policy.get("vector_top_k", 3)),
-            int(retrieval_policy.get("final_top_k", 3)),
+            int(retrieval_policy.get("max_tree_candidates" if is_pageindex_template else "fulltext_top_k", 30 if is_pageindex_template else 3)),
+            int(retrieval_policy.get("max_selected_nodes" if is_pageindex_template else "vector_top_k", 3)),
+            int(retrieval_policy.get("max_rag_evidence" if is_pageindex_template else "final_top_k", 2 if is_pageindex_template else 3)),
             bool(retrieval_policy.get("use_rerank", False)),
             int(retrieval_policy.get("neighbor_window", 0)),
-            bool(retrieval_policy.get("include_section_context", False)),
+            bool(retrieval_policy.get("include_structure_context" if is_pageindex_template else "include_section_context", False)),
             int(retrieval_policy.get("section_max_chars", 400)),
             str(resolved.get("system_prompt") or ""),
             str(resolved.get("user_prompt_template") or ""),
@@ -4476,7 +4509,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """构建功能设置页所需的模板列表、详情和表单值。"""
 
         normalized_template_kind = normalize_settings_template_kind(template_kind)
-        templates = list_settings_templates(normalized_template_kind)
+        templates = [
+            {**item, "settings_template_kind": normalized_template_kind}
+            for item in list_settings_templates(normalized_template_kind)
+        ]
         template_ids = {str(item.get("template_id") or "") for item in templates}
         normalized_template_id = str(selected_template_id or "")
         if normalized_template_id not in template_ids:
@@ -4603,6 +4639,12 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         "answer_mode": "custom",
                         "system_prompt": system_prompt,
                         "user_prompt_template": user_prompt_template,
+                        "retrieval_policy": {
+                            "max_tree_candidates": to_int_setting(fulltext_top_k, default=30),
+                            "max_selected_nodes": to_int_setting(vector_top_k, default=3),
+                            "max_rag_evidence": to_int_setting(final_top_k, default=2),
+                            "include_structure_context": bool(include_section_context),
+                        },
                     }
                 )
             else:

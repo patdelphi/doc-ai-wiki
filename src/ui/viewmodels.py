@@ -437,21 +437,27 @@ def format_settings_template_detail_html(template: dict | None) -> str:
         )
 
     retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+    is_pageindex_template = _is_pageindex_retrieval_policy(retrieval_policy)
+    policy_notes = _format_pageindex_policy_notes(retrieval_policy) if is_pageindex_template else [
+        f'全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
+        f'向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
+        f'最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
+        f'上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+    ]
+    cards = [
+        ("模板 ID", _display_text(resolved.get("template_id"))),
+        ("模板名称", _display_text(resolved.get("template_name"))),
+        ("模板来源", _display_text(resolved.get("source_label") or resolved.get("source_type"))),
+    ]
+    if is_pageindex_template:
+        cards.append(("回答模式", _display_text(resolved.get("answer_mode"))))
+    else:
+        cards.append(("规则标签", _display_text(resolved.get("rule_tags"))))
     return _build_panel_html(
         title="模板详情",
         description=_display_text(resolved.get("description")),
-        cards=[
-            ("模板 ID", _display_text(resolved.get("template_id"))),
-            ("模板名称", _display_text(resolved.get("template_name"))),
-            ("模板来源", _display_text(resolved.get("source_label") or resolved.get("source_type"))),
-            ("规则标签", _display_text(resolved.get("rule_tags"))),
-        ],
-        notes=[
-            f'全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
-            f'向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
-            f'最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
-            f'上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
-        ],
+        cards=cards,
+        notes=policy_notes,
         tone="neutral",
     )
 
@@ -463,18 +469,31 @@ def format_settings_template_detail_markdown(template: dict | None) -> str:
     if not resolved.get("template_id"):
         return "### 模板详情\n- 当前状态：未选择模板"
     retrieval_policy = resolved.get("retrieval_policy", {}) if isinstance(resolved.get("retrieval_policy", {}), dict) else {}
+    is_pageindex_template = _is_pageindex_retrieval_policy(retrieval_policy)
+    policy_lines = (
+        [f"- {item}" for item in _format_pageindex_policy_notes(retrieval_policy)]
+        if is_pageindex_template
+        else [
+            f'- 全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
+            f'- 向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
+            f'- 最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
+            f'- 上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+        ]
+    )
+    type_line = (
+        f'- 回答模式：{_display_text(resolved.get("answer_mode"))}'
+        if is_pageindex_template
+        else f'- 规则标签：{_display_text(resolved.get("rule_tags"))}'
+    )
     return "\n".join(
         [
             "### 模板详情",
             f'- 模板 ID：{_display_text(resolved.get("template_id"))}',
             f'- 模板名称：{_display_text(resolved.get("template_name"))}',
             f'- 模板来源：{_display_text(resolved.get("source_label") or resolved.get("source_type"))}',
-            f'- 规则标签：{_display_text(resolved.get("rule_tags"))}',
+            type_line,
             f'- 模板说明：{_display_text(resolved.get("description"))}',
-            f'- 全文召回：{_display_text(retrieval_policy.get("fulltext_top_k"))}',
-            f'- 向量召回：{_display_text(retrieval_policy.get("vector_top_k"))}',
-            f'- 最终返回：{_display_text(retrieval_policy.get("final_top_k"))}',
-            f'- 上下文扩展：{_format_context_strategy_summary(retrieval_policy)}',
+            *policy_lines,
         ]
     )
 
@@ -2775,6 +2794,12 @@ def _format_retrieval_policy_summary(policy: dict) -> str:
 
     if not policy:
         return "-"
+    if _is_pageindex_retrieval_policy(policy):
+        return (
+            f'树候选 {policy.get("max_tree_candidates", "-")} / '
+            f'选中 {policy.get("max_selected_nodes", "-")} / '
+            f'RAG/FTS {policy.get("max_rag_evidence", "-")}'
+        )
     rerank_text = "启用重排" if policy.get("use_rerank") else "不重排"
     return (
         f'全文 {policy.get("fulltext_top_k", "-")} / '
@@ -2788,11 +2813,30 @@ def _format_context_strategy_summary(policy: dict) -> str:
 
     if not policy:
         return "-"
+    if _is_pageindex_retrieval_policy(policy):
+        return "包含 PageIndex 结构上下文" if policy.get("include_structure_context") else "不包含 PageIndex 结构上下文"
     return (
         f'邻居窗口 {policy.get("neighbor_window", 0)}，'
         f'{"含章节上下文" if policy.get("include_section_context") else "仅当前片段"}，'
         f'最长 {policy.get("section_max_chars", "-")} 字'
     )
+
+
+def _is_pageindex_retrieval_policy(policy: dict) -> bool:
+    """判断检索策略是否属于 PageIndex 模板。"""
+
+    return any(key in policy for key in ("max_tree_candidates", "max_selected_nodes", "max_rag_evidence"))
+
+
+def _format_pageindex_policy_notes(policy: dict) -> list[str]:
+    """格式化 PageIndex 模板检索策略说明。"""
+
+    return [
+        f'树候选节点：{_display_text(policy.get("max_tree_candidates"))}',
+        f'选中节点：{_display_text(policy.get("max_selected_nodes"))}',
+        f'RAG/FTS 证据：{_display_text(policy.get("max_rag_evidence"))}',
+        f'结构上下文：{"启用" if policy.get("include_structure_context") else "关闭"}',
+    ]
 
 
 def _format_quality_progress_stage(stage: object) -> str:
