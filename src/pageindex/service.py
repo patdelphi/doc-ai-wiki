@@ -854,6 +854,10 @@ class PageIndexService:
         answer = ""
         debug_error = ""
         retrieval_question_plan = self._build_question_plan(llm_client, question, [])
+        retrieval_policy = self._resolve_pageindex_retrieval_policy(template_id)
+        max_tree_candidates = int(retrieval_policy.get("max_tree_candidates", 30))
+        max_selected_nodes = int(retrieval_policy.get("max_selected_nodes", 3))
+        max_rag_evidence = int(retrieval_policy.get("max_rag_evidence", 2))
 
         for round_index in range(1, max(1, int(max_rounds or 3)) + 1):
             candidates = self._build_tree_candidates(
@@ -861,7 +865,7 @@ class PageIndexService:
                 structure,
                 question=question,
                 question_analysis=question_analysis,
-                limit=30,
+                limit=max_tree_candidates,
                 include_content=True,
             )
             candidates = self._merge_tree_candidates(candidates, cross_reference_candidates)
@@ -912,7 +916,7 @@ class PageIndexService:
             candidate_map = {str(item["candidate_id"]): item for item in candidates}
             round_selected_debug: list[dict] = []
 
-            for selected in selected_items[:3]:
+            for selected in selected_items[:max(0, max_selected_nodes)]:
                 if not isinstance(selected, dict):
                     continue
                 candidate_id = str(selected.get("candidate_id") or "")
@@ -965,7 +969,7 @@ class PageIndexService:
                 break
 
         # PageIndex 树摘要可能缺少用户问题中的细粒度疾病/指标词；只有树候选为 0 时才启用 RAG 兜底，避免覆盖 LLM 明确拒选的判断。
-        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis) if evidence or not candidate_debug_by_id else []
+        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis, max_results=max_rag_evidence) if evidence or not candidate_debug_by_id else []
         evidence = self._merge_evidence(evidence, rag_evidence)
         evidence = self._classify_evidence_items(question, evidence)
         question_plan: dict = {}
@@ -984,6 +988,7 @@ class PageIndexService:
             "retrieval_rounds": retrieval_rounds,
             "question_plan": question_plan or retrieval_question_plan,
             "retrieval_question_plan": retrieval_question_plan,
+            "retrieval_policy": retrieval_policy,
             "llm_error": debug_error,
         }
 
@@ -1620,9 +1625,12 @@ class PageIndexService:
             )
         return evidence, [self._candidate_to_debug(item) for item in candidates]
 
-    def _search_rag_fts_evidence(self, record: dict, question: str, question_analysis: dict | None = None) -> list[dict]:
+    def _search_rag_fts_evidence(self, record: dict, question: str, question_analysis: dict | None = None, *, max_results: int = 2) -> list[dict]:
         """在当前 PageIndex 文档关联的 RAG/FTS chunk 中补充细粒度原文证据。"""
 
+        max_results = max(0, int(max_results or 0))
+        if max_results <= 0:
+            return []
         terms = self._analysis_terms(question_analysis or {})
         if not terms:
             terms = self._extract_question_terms(question)
@@ -1634,7 +1642,7 @@ class PageIndexService:
         seen_chunks: set[str] = set()
         with create_connection(self.settings.sqlite_db_path) as connection:
             for term in query_terms:
-                if len(rows) >= 2:
+                if len(rows) >= max_results:
                     break
                 normalized_term = str(term or "").strip()
                 if not normalized_term:
@@ -1683,7 +1691,7 @@ class PageIndexService:
                         continue
                     seen_chunks.add(chunk_id)
                     rows.append(item)
-                    if len(rows) >= 2:
+                    if len(rows) >= max_results:
                         break
 
         evidence: list[dict] = []
@@ -1706,6 +1714,18 @@ class PageIndexService:
                 }
             )
         return evidence
+
+    def _resolve_pageindex_retrieval_policy(self, template_id: str | None = None) -> dict:
+        """读取 PageIndex 模板检索策略，失败时回退到严谨问答默认策略。"""
+
+        template = self.template_service.get_template(template_id)
+        policy = template.get("retrieval_policy", {}) if isinstance(template.get("retrieval_policy", {}), dict) else {}
+        return {
+            "max_tree_candidates": max(0, int(policy.get("max_tree_candidates", 30))),
+            "max_selected_nodes": max(0, int(policy.get("max_selected_nodes", 3))),
+            "max_rag_evidence": max(0, int(policy.get("max_rag_evidence", 2))),
+            "include_structure_context": bool(policy.get("include_structure_context", True)),
+        }
 
     @staticmethod
     def _required_rag_subject_terms(terms: list[str]) -> list[str]:

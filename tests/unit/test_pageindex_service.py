@@ -650,6 +650,96 @@ def test_pageindex_should_continue_iterative_retrieval_until_sufficient(tmp_path
     assert answer["debug"]["retrieval_rounds"][1]["selected_nodes"][0]["title"] == "质量检测方法"
 
 
+def test_pageindex_template_retrieval_policy_should_limit_selected_nodes(tmp_path: Path) -> None:
+    """PageIndex 模板检索策略应真正限制每轮选中节点数量。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {
+            "title": "质量检测概述",
+            "line_num": 8,
+            "level": 1,
+            "summary": "阿胶质量检测概述。",
+            "text": "# 质量检测概述\n\n阿胶质量检测概述。",
+            "nodes": [],
+        },
+        {
+            "title": "质量检测方法",
+            "line_num": 18,
+            "level": 1,
+            "summary": "阿胶质量检测方法清单。",
+            "text": "# 质量检测方法\n\n阿胶质量检测方法清单。",
+            "nodes": [],
+        },
+    ]
+
+    class PolicyClient:
+        """测试用 LLM，返回多节点选择以验证模板策略裁剪。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "询问方法",
+                    "entities": ["阿胶", "质量检测"],
+                    "keywords": ["质量检测", "方法"],
+                    "expanded_terms": [],
+                }
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "列举质量检测方法。",
+                    "target": "阿胶质量检测方法",
+                    "claim": "",
+                    "required_output": ["结论", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            if "迭代式树结构检索" in system_prompt:
+                return {
+                    "selected_nodes": [
+                        {"candidate_id": "node_1", "reason": "概述相关"},
+                        {"candidate_id": "node_2", "reason": "方法相关"},
+                    ],
+                    "sufficiency": "sufficient",
+                    "missing_information": "",
+                    "next_search_focus": "",
+                    "answer": "",
+                }
+            return {"answer": "结论：按模板策略只读取一个节点。"}
+
+    service = PageIndexService(settings, llm_client=PolicyClient())
+    service.template_service.save_template(
+        {
+            "template_id": "limited_retrieval",
+            "template_name": "限制检索",
+            "description": "限制选中节点数量",
+            "answer_mode": "strict_qa",
+            "system_prompt": "只返回 JSON。",
+            "user_prompt_template": "Question Plan JSON：{question_plan}\n证据：{evidence_json}",
+            "retrieval_policy": {
+                "max_tree_candidates": 30,
+                "max_selected_nodes": 1,
+                "max_rag_evidence": 0,
+                "include_structure_context": True,
+            },
+        }
+    )
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "阿胶有哪些质量检测方法", template_id="limited_retrieval")
+
+    assert [item["title"] for item in answer["evidence"]] == ["质量检测概述"]
+    assert [item["title"] for item in answer["debug"]["retrieval_rounds"][0]["selected_nodes"]] == ["质量检测概述"]
+
+
 def test_pageindex_should_extract_cross_reference_targets() -> None:
     """PageIndex 应识别明确的文档内交叉引用目标。"""
 

@@ -733,7 +733,7 @@
 - [x] P1 服务层新增 PageIndex 模板管理，复用 AI 质检模板的 YAML 管理思路，但使用独立目录和变量。
 - [x] P1 PageIndex 页新增回答模板选择，并接入 LLM 最终回答 prompt。
 - [x] P1 接入设置页 UI，实现 PageIndex 模板可视化新增、编辑、删除。
-- [ ] P2 后续按需开放 PageIndex 模板高级检索策略配置。
+- [x] P2 后续按需开放 PageIndex 模板高级检索策略配置。
 
 ### 验收标准
 
