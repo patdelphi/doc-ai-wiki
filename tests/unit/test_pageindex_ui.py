@@ -114,6 +114,7 @@ def test_build_pageindex_tab_should_return_expected_components() -> None:
     assert isinstance(components["pageindex_tree"], gr.Dataframe)
     assert components["pageindex_tree"].elem_id == "pageindex-tree"
     assert components["pageindex_history_table"].label == "当前知识库历史记录"
+    assert components["pageindex_history_table"].headers == ["时间", "文档", "问题", "回答摘要", "问题类型"]
     assert "ui-button--primary" in (components["pageindex_export_button"].elem_classes or [])
 
 
@@ -210,6 +211,7 @@ def test_pageindex_question_handler_should_return_answer_evidence_and_history(tm
     assert debug_rows[0][1] == "风险"
     assert "本地候选召回" in debug_rows[0][5]
     assert history_rows[0][2] == "风险"
+    assert history_rows[0][4] == "unknown"
     assert history_state[0]["question"] == "风险"
     assert active_query_id == history_state[0]["query_id"]
     assert "已激活当前结果，可下载。" in export_result_html
@@ -475,15 +477,15 @@ def test_pageindex_history_select_should_activate_record_for_download(tmp_path) 
 
     history_state = [second, first]
     history_rows = [
-        [second["created_at"], second["doc_uid"], second["question"], second["answer"][:300]],
-        [first["created_at"], first["doc_uid"], first["question"], first["answer"][:300]],
+        [second["created_at"], second["doc_uid"], second["question"], second["answer"][:300], "unknown"],
+        [first["created_at"], first["doc_uid"], first["question"], first["answer"][:300], "unknown"],
     ]
 
     answer_html, evidence_rows, debug_rows, active_query_id, export_result_html, download_file = select_handler(
         "kb_alpha | kb_alpha 知识库",
         f'{document["doc_uid"]} | alpha',
         history_state,
-        pd.DataFrame(history_rows, columns=["时间", "文档", "问题", "回答摘要"]),
+        pd.DataFrame(history_rows, columns=["时间", "文档", "问题", "回答摘要", "问题类型"]),
         FakeSelectData(),
     )
 

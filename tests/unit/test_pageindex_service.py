@@ -9,6 +9,7 @@ import pytest
 
 from src.common.config import AppSettings
 from src.common.errors import ValidationAppError
+from src.common.utils import utc_now_iso
 from src.db.connection import initialize_database
 from src.db.transaction import transaction
 from src.ingest.service import IngestService
@@ -1457,3 +1458,229 @@ def test_pageindex_service_should_export_current_document_history_as_markdown(tm
     assert "知识库：kb_alpha" in markdown_text
     assert "问题：风险" in markdown_text
     assert "## 风险" in markdown_text
+
+
+def test_pageindex_export_should_format_dict_answer_as_markdown_sections(tmp_path: Path) -> None:
+    """导出 Markdown 时应把 dict 字符串答案格式化为可读章节。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    query_id = "piq_dict_answer"
+    answer_payload = {
+        "结论": "该命题不准确。感冒期间应停服阿胶。",
+        "证据判断": ["partial_support", "method_or_formula_context"],
+        "依据": "1. 现代用药建议明确感冒期间停服阿胶。\n2. 古代复方背景不能证明单独缓解感冒。",
+        "来源": [
+            "标题: RAG/FTS 原文片段, 位置: section-102:chunk-160, 来源: 阿胶历史文化通典_default",
+            "标题: RAG/FTS 原文片段, 位置: section-10:chunk-42, 来源: 阿胶学术论文全集_default",
+        ],
+        "不确定点": "存在特定体质和复方应用边界。",
+    }
+    with transaction(settings.sqlite_db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO pageindex_query_history (
+                query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                query_id,
+                "kb_alpha",
+                document["doc_uid"],
+                "阿胶对感冒有缓解作用吗",
+                str(answer_payload),
+                "[]",
+                "{}",
+                utc_now_iso(),
+            ),
+        )
+
+    markdown_text = service.export_query_markdown("kb_alpha", document["doc_uid"], query_id)
+
+    assert "{'结论':" not in markdown_text
+    assert "#### 结论" in markdown_text
+    assert "该命题不准确。感冒期间应停服阿胶。" in markdown_text
+    assert "#### 证据判断" in markdown_text
+    assert "- partial_support" in markdown_text
+    assert "#### 来源" in markdown_text
+    assert "- 标题: RAG/FTS 原文片段, 位置: section-102:chunk-160" in markdown_text
+
+
+def test_pageindex_export_should_format_generic_llm_dict_without_fixed_schema(tmp_path: Path) -> None:
+    """导出 Markdown 不应依赖固定中文字段，需兼容不同 LLM 的任意结构化 key。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    service = PageIndexService(settings)
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+    query_id = "piq_generic_llm_answer"
+    answer_payload = {
+        "final_answer": "Current evidence does not support using Ejiao for common cold relief.",
+        "reasoning": ["Modern guidance says stop Ejiao during cold symptoms.", "Formula context is not direct support."],
+        "citations": [{"title": "RAG chunk", "position": "section-102:chunk-160"}],
+        "confidence": "medium",
+    }
+    with transaction(settings.sqlite_db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO pageindex_query_history (
+                query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                query_id,
+                "kb_alpha",
+                document["doc_uid"],
+                "Does Ejiao relieve common cold?",
+                json.dumps(answer_payload, ensure_ascii=False),
+                "[]",
+                "{}",
+                utc_now_iso(),
+            ),
+        )
+
+    markdown_text = service.export_query_markdown("kb_alpha", document["doc_uid"], query_id)
+
+    assert '{"final_answer":' not in markdown_text
+    assert "#### final_answer" in markdown_text
+    assert "Current evidence does not support" in markdown_text
+    assert "#### reasoning" in markdown_text
+    assert "- Modern guidance says stop Ejiao during cold symptoms." in markdown_text
+    assert "#### citations" in markdown_text
+    assert "**title**：RAG chunk" in markdown_text
+    assert "#### confidence" in markdown_text
+
+
+def test_pageindex_history_should_persist_question_plan_debug(tmp_path: Path) -> None:
+    """PageIndex 历史应保存 Question Plan，方便刷新页面后复盘回答策略。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+
+    class PlanDebugClient:
+        """测试用 LLM 客户端，生成可追踪的信息抽取计划。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "询问方法",
+                    "entities": ["阿胶", "质量检测"],
+                    "keywords": ["阿胶", "质量检测"],
+                    "expanded_terms": ["检测方法"],
+                }
+            if "树结构检索" in system_prompt:
+                return {"selected_nodes": [{"candidate_id": "node_1", "reason": "质量检测相关"}], "answer": ""}
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "列举质量检测方法。",
+                    "target": "阿胶质量检测方法",
+                    "claim": "",
+                    "required_output": ["结论", "方法清单", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            return {"answer": "结论：包括真伪鉴别等方法。\n\n来源：质量检测方法。"}
+
+    service = PageIndexService(settings, llm_client=PlanDebugClient())
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=[
+            {
+                "title": "阿胶及其制品质量检测方法研究进展",
+                "line_num": 8,
+                "level": 1,
+                "summary": "真伪鉴别、重金属检测和微生物检测。",
+                "text": "# 阿胶及其制品质量检测方法研究进展\n\n包括真伪鉴别、重金属检测和微生物检测。",
+                "nodes": [],
+            }
+        ],
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    result = service.ask_question("kb_alpha", document["doc_uid"], "阿胶有哪些质量检测方法")
+    history = service.list_query_history("kb_alpha", document["doc_uid"], limit=1)
+    exported = service.export_query_markdown("kb_alpha", document["doc_uid"], result["query_id"])
+
+    assert result["debug"]["question_plan"]["question_type"] == "information_extraction"
+    assert history[0]["debug"]["question_plan"]["target"] == "阿胶质量检测方法"
+    assert "问题类型：information_extraction" in exported
+
+
+def test_pageindex_knowledge_base_question_should_use_aggregate_question_plan_answer(tmp_path: Path) -> None:
+    """知识库级提问聚合多文档证据后，仍应使用 Question Plan 生成最终答案。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+
+    class AggregatePlanClient:
+        """测试用 LLM 客户端，验证知识库级最终回答不退回本地命题判断。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "询问方法",
+                    "entities": ["阿胶", "质量检测"],
+                    "keywords": ["阿胶", "质量检测"],
+                    "expanded_terms": ["检测方法"],
+                }
+            if "树结构检索" in system_prompt:
+                return {"selected_nodes": [{"candidate_id": "node_1", "reason": "质量检测相关"}], "answer": ""}
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "列举质量检测方法。",
+                    "target": "阿胶质量检测方法",
+                    "claim": "",
+                    "required_output": ["结论", "方法清单", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            assert "information_extraction" in user_prompt
+            return {"answer": "结论：阿胶质量检测方法包括真伪鉴别、重金属检测和微生物检测。\n\n来源：质量检测方法。"}
+
+    service = PageIndexService(settings, llm_client=AggregatePlanClient())
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=[
+            {
+                "title": "阿胶及其制品质量检测方法研究进展",
+                "line_num": 8,
+                "level": 1,
+                "summary": "真伪鉴别、重金属检测和微生物检测。",
+                "text": "# 阿胶及其制品质量检测方法研究进展\n\n包括真伪鉴别、重金属检测和微生物检测。",
+                "nodes": [],
+            }
+        ],
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    result = service.ask_knowledge_base_question("kb_alpha", "阿胶有哪些质量检测方法")
+
+    assert result["debug"]["question_plan"]["question_type"] == "information_extraction"
+    assert "真伪鉴别" in result["answer"]
+    assert "不能证明" not in result["answer"]

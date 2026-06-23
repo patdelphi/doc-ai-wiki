@@ -125,11 +125,11 @@ def build_pageindex_tab(
             elem_id="pageindex-download-file",
         )
         pageindex_history_table = gr.Dataframe(
-            headers=["时间", "文档", "问题", "回答摘要"],
-            datatype=["str", "markdown", "markdown", "markdown"],
+            headers=["时间", "文档", "问题", "回答摘要", "问题类型"],
+            datatype=["str", "markdown", "markdown", "markdown", "str"],
             interactive=True,
             row_count=0,
-            column_count=4,
+            column_count=5,
             label="当前知识库历史记录",
             buttons=[],
             elem_id="pageindex-history-table",

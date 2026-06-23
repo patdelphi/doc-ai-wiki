@@ -42,12 +42,37 @@
 
 ## 数据流
 
-1. PageIndex/RAG 先召回候选证据。
-2. LLM 根据“用户问题 + 证据预览”生成 `QuestionPlan`。
-3. Python 校验 `QuestionPlan` 字段，不合法则降级为 `unknown`，不再用关键词改写意图。
-4. 回答模板同时接收 `question_plan`、证据、结构上下文、证据关系和引用规则。
-5. LLM 按模板生成最终答案。
-6. Python 保存问答历史、引用和 debug 信息。
+1. 页面提问入口调用 `PageIndexService.ask_knowledge_base_question()`，检索范围是当前知识库下所有已构建 PageIndex 的文档，不是单一文档。
+2. 服务层通过 `_list_index_records(knowledge_base_id)` 读取当前知识库下全部 `pageindex_indexes` 记录。
+3. `_answer_knowledge_base_with_reasoning_or_fallback()` 逐个文档执行 PageIndex/RAG 召回，并合并多文档证据。
+4. LLM 根据“用户问题 + 证据预览”生成 `QuestionPlan`。
+5. Python 校验 `QuestionPlan` 字段，不合法则降级为 `unknown`，不再用关键词改写意图。
+6. 回答模板同时接收 `question_plan`、证据、结构上下文、证据关系和引用规则。
+7. LLM 按模板生成最终答案。
+8. Python 保存问答历史、证据、`debug.question_plan` 和导出调试信息。
+
+## 检索范围确认
+
+当前 PageIndex 页面走知识库级检索：
+
+- UI 调用：`pageindex_service.ask_knowledge_base_question(...)`
+- 知识库索引读取：`_list_index_records(knowledge_base_id)`
+- 多文档聚合：`_answer_knowledge_base_with_reasoning_or_fallback(records, question, ...)`
+
+`ask_question(knowledge_base_id, doc_uid, question, ...)` 仍保留为单文档服务方法，但当前 PageIndex 页面提问不走该入口。
+
+截至 2026-06-23，`default` 知识库下有两个已构建 PageIndex 文档：
+
+- `阿胶历史文化通典_default`
+- `阿胶学术论文全集_default`
+
+已验证的多文档命中历史案例：
+
+| query_id | 问题 | 命中文档数 | 证据数 |
+| --- | --- | ---: | ---: |
+| `piq_09d75d5788ee` | 阿胶对感冒有一定缓解作用 | 2 | 4 |
+| `piq_14f55f1319ed` | 心脏病吃阿胶有好处吗 | 2 | 5 |
+| `piq_814bd5837669` | 阿胶制作工艺有什么特点 | 2 | 10 |
 
 ## 与模板的区别
 
@@ -67,6 +92,19 @@ LLM 不可用或 plan 生成失败时：
 
 这样不会把“质量检测方法有哪些”误判成命题真假，但在无 LLM 场景也不会伪造列表。
 
+## Markdown 导出策略
+
+PageIndex 导出 Markdown 不能依赖固定 LLM 输出 schema，因为不同模型和 API 可能返回不同字段名、不同语言或嵌套结构。
+
+当前导出层采用通用容错策略：
+
+- 如果答案是普通文本，原样输出。
+- 如果答案是 JSON 或 Python dict 字符串，解析为结构化对象后渲染为 Markdown 小节。
+- `结论`、`证据判断`、`依据`、`来源`、`不确定点` 仅作为展示排序优先级，不作为强制 schema。
+- 未知字段、英文字段、额外字段全部保留并渲染。
+- 列表、列表内嵌套 dict、dict 内嵌套 list 采用递归 Markdown 渲染，避免输出原始 Python 字符串。
+- 解析失败时回退为原文，不影响导出。
+
 ## 第一批优化计划
 
 1. 新增 `src/pageindex/question_plan.py`，负责 plan schema、默认值、prompt 构建和归一化。
@@ -81,4 +119,5 @@ LLM 不可用或 plan 生成失败时：
 - “心脏病吃阿胶有好处吗”进入 `claim_judgement` plan，最终提示词要求判断证据支持关系。
 - 自定义 PageIndex 模板可使用 `{question_plan}`。
 - LLM plan 失败时不会抛出页面错误，使用 `unknown` 兜底。
+- 导出 Markdown 不出现原始 dict 字符串，且不因结构化答案渲染丢失证据。
 - 单测通过，且测试不调用外部 API。

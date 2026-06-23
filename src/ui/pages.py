@@ -863,12 +863,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         rows: list[list[object]] = []
         for item in history_items or []:
+            debug = item.get("debug") if isinstance(item.get("debug"), dict) else {}
+            question_plan = debug.get("question_plan") if isinstance(debug.get("question_plan"), dict) else {}
             rows.append(
                 [
                     str(item.get("created_at") or ""),
                     str(item.get("doc_uid") or ""),
                     str(item.get("question") or ""),
                     str(item.get("answer") or "")[:300],
+                    str(question_plan.get("question_type") or "unknown"),
                 ]
             )
         return rows

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sqlite3
 import json
 import re
@@ -243,9 +244,10 @@ class PageIndexService:
                     question,
                     answer,
                     evidence_json,
+                    debug_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     query_id,
@@ -254,6 +256,7 @@ class PageIndexService:
                     normalized_question,
                     answer_text,
                     json.dumps(evidence, ensure_ascii=False),
+                    json.dumps(retrieval_result.get("debug", {}), ensure_ascii=False),
                     created_at,
                 ),
             )
@@ -297,9 +300,10 @@ class PageIndexService:
                     question,
                     answer,
                     evidence_json,
+                    debug_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     query_id,
@@ -308,6 +312,7 @@ class PageIndexService:
                     normalized_question,
                     answer_text,
                     json.dumps(evidence, ensure_ascii=False),
+                    json.dumps(retrieval_result.get("debug", {}), ensure_ascii=False),
                     created_at,
                 ),
             )
@@ -334,7 +339,7 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 rows = connection.execute(
                     """
-                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
                     FROM pageindex_query_history
                     WHERE knowledge_base_id = ? AND doc_uid = ?
                     ORDER BY created_at DESC
@@ -345,16 +350,7 @@ class PageIndexService:
         except sqlite3.DatabaseError as exc:
             raise DatabaseAppError("读取 PageIndex 历史失败", details={"reason": str(exc)}) from exc
 
-        items: list[dict] = []
-        for row in rows:
-            item = dict(row)
-            try:
-                evidence = json.loads(str(item.pop("evidence_json") or "[]"))
-            except json.JSONDecodeError:
-                evidence = []
-            item["evidence"] = evidence if isinstance(evidence, list) else []
-            items.append(item)
-        return items
+        return self._parse_history_rows(rows)
 
     def list_knowledge_base_query_history(self, knowledge_base_id: str, *, limit: int = 50) -> list[dict]:
         """读取当前知识库下所有 PageIndex 问答历史。"""
@@ -364,7 +360,7 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 rows = connection.execute(
                     """
-                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
                     FROM pageindex_query_history
                     WHERE knowledge_base_id = ?
                     ORDER BY created_at DESC
@@ -388,7 +384,7 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 row = connection.execute(
                     """
-                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
                     FROM pageindex_query_history
                     WHERE knowledge_base_id = ? AND doc_uid = ? AND query_id = ?
                     """,
@@ -403,7 +399,12 @@ class PageIndexService:
             evidence = json.loads(str(item.pop("evidence_json") or "[]"))
         except json.JSONDecodeError:
             evidence = []
+        try:
+            debug = json.loads(str(item.pop("debug_json", "{}") or "{}"))
+        except json.JSONDecodeError:
+            debug = {}
         item["evidence"] = evidence if isinstance(evidence, list) else []
+        item["debug"] = debug if isinstance(debug, dict) else {}
         return item
 
     def get_knowledge_base_query_history_record(self, knowledge_base_id: str, query_id: str) -> dict:
@@ -417,7 +418,7 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 rows = connection.execute(
                     """
-                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, created_at
+                    SELECT query_id, knowledge_base_id, doc_uid, question, answer, evidence_json, debug_json, created_at
                     FROM pageindex_query_history
                     WHERE knowledge_base_id = ? AND query_id = ?
                     """,
@@ -475,7 +476,12 @@ class PageIndexService:
                 evidence = json.loads(str(item.pop("evidence_json") or "[]"))
             except json.JSONDecodeError:
                 evidence = []
+            try:
+                debug = json.loads(str(item.pop("debug_json", "{}") or "{}"))
+            except json.JSONDecodeError:
+                debug = {}
             item["evidence"] = evidence if isinstance(evidence, list) else []
+            item["debug"] = debug if isinstance(debug, dict) else {}
             items.append(item)
         return items
 
@@ -499,7 +505,15 @@ class PageIndexService:
                     "",
                     "### 回答",
                     "",
-                    str(item.get("answer") or ""),
+                ]
+            )
+            lines.extend(self._format_history_answer_markdown(str(item.get("answer") or "")))
+            lines.extend(
+                [
+                    "",
+                    "### 调试信息",
+                    "",
+                    f"- 问题类型：{PageIndexService._history_question_type(item)}",
                     "",
                     "### 证据",
                     "",
@@ -522,6 +536,97 @@ class PageIndexService:
                     ]
                 )
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _format_history_answer_markdown(answer: str) -> list[str]:
+        """将历史答案格式化为 Markdown；兼容 LLM 返回的 dict 字符串。"""
+
+        normalized_answer = str(answer or "").strip()
+        structured_answer = PageIndexService._parse_structured_answer(normalized_answer)
+        if not structured_answer:
+            return [normalized_answer] if normalized_answer else ["暂无回答"]
+
+        ordered_keys = ["结论", "证据判断", "依据", "来源", "不确定点"]
+        lines: list[str] = []
+        for key in ordered_keys:
+            if key not in structured_answer:
+                continue
+            value = structured_answer.get(key)
+            lines.extend([f"#### {key}", ""])
+            lines.extend(PageIndexService._format_markdown_value(value))
+            lines.append("")
+        extra_keys = [key for key in structured_answer.keys() if key not in ordered_keys]
+        for key in extra_keys:
+            lines.extend([f"#### {key}", ""])
+            lines.extend(PageIndexService._format_markdown_value(structured_answer.get(key)))
+            lines.append("")
+        while lines and lines[-1] == "":
+            lines.pop()
+        return lines or ["暂无回答"]
+
+    @staticmethod
+    def _parse_structured_answer(answer: str) -> dict | None:
+        """解析 JSON 或 Python dict 字符串答案；失败时返回 None 保持原文。"""
+
+        text = str(answer or "").strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return None
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                payload = parser(text)
+            except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    @staticmethod
+    def _format_markdown_value(value: object) -> list[str]:
+        """将结构化字段值转换成 Markdown 段落或列表。"""
+
+        if isinstance(value, list):
+            lines: list[str] = []
+            for item in value:
+                lines.extend(PageIndexService._format_markdown_list_item(item))
+            return lines or ["- 无"]
+        if isinstance(value, dict):
+            items = [f"- **{key}**：{PageIndexService._stringify_markdown_scalar(item)}" for key, item in value.items()]
+            return items or ["- 无"]
+        text = str(value or "").strip()
+        if not text:
+            return ["无"]
+        return text.splitlines()
+
+    @staticmethod
+    def _format_markdown_list_item(item: object) -> list[str]:
+        """将列表项转换为 Markdown，支持列表中嵌套 dict。"""
+
+        if isinstance(item, dict):
+            lines: list[str] = []
+            for index, (key, value) in enumerate(item.items()):
+                prefix = "- " if index == 0 else "  "
+                lines.append(f"{prefix}**{key}**：{PageIndexService._stringify_markdown_scalar(value)}")
+            return lines
+        if isinstance(item, list):
+            return [f"- {PageIndexService._stringify_markdown_scalar(value)}" for value in item]
+        text = str(item or "").strip()
+        return [f"- {text}"] if text else []
+
+    @staticmethod
+    def _stringify_markdown_scalar(value: object) -> str:
+        """把嵌套标量转换为 Markdown 友好的字符串。"""
+
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value or "").strip()
+
+    @staticmethod
+    def _history_question_type(item: dict) -> str:
+        """从历史 debug 中读取 Question Plan 类型，供导出排查使用。"""
+
+        debug = item.get("debug") if isinstance(item.get("debug"), dict) else {}
+        question_plan = debug.get("question_plan") if isinstance(debug.get("question_plan"), dict) else {}
+        return str(question_plan.get("question_type") or "unknown")
 
     def _ensure_tables(self) -> None:
         """创建 PageIndex 本地元数据表，使用事务保证结构初始化一致。"""
@@ -554,6 +659,7 @@ class PageIndexService:
                     question TEXT NOT NULL,
                     answer TEXT NOT NULL,
                     evidence_json TEXT NOT NULL DEFAULT '[]',
+                    debug_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (knowledge_base_id, doc_uid)
                         REFERENCES pageindex_indexes (knowledge_base_id, doc_uid)
@@ -564,6 +670,18 @@ class PageIndexService:
                     ON pageindex_query_history (knowledge_base_id, doc_uid, created_at);
                 """
             )
+            self._ensure_pageindex_history_debug_column(connection)
+
+    @staticmethod
+    def _ensure_pageindex_history_debug_column(connection: sqlite3.Connection) -> None:
+        """兼容旧数据库，为 PageIndex 历史表补齐 debug_json 字段。"""
+
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(pageindex_query_history)").fetchall()
+        }
+        if "debug_json" not in columns:
+            connection.execute("ALTER TABLE pageindex_query_history ADD COLUMN debug_json TEXT NOT NULL DEFAULT '{}'")
 
     def _get_document(self, knowledge_base_id: str, doc_uid: str) -> dict:
         """读取并校验文档归属，防止跨知识库构建。"""
@@ -591,6 +709,7 @@ class PageIndexService:
         candidate_nodes: list[dict] = []
         rag_evidence: list[dict] = []
         llm_errors: list[str] = []
+        question_plans: list[dict] = []
         for record in records:
             try:
                 structure = self._load_structure(record)
@@ -607,14 +726,27 @@ class PageIndexService:
             for item in debug.get("rag_evidence") or []:
                 if isinstance(item, dict):
                     rag_evidence.append(item)
+            question_plan = debug.get("question_plan")
+            if isinstance(question_plan, dict) and question_plan:
+                question_plans.append(question_plan)
             if result.get("llm_error"):
                 llm_errors.append(str(result.get("llm_error") or ""))
 
         if not evidence and llm_errors:
             raise ValidationAppError("当前知识库 PageIndex 检索失败", details={"reason": "；".join(llm_errors)})
+        answer = self._build_local_answer(question, evidence)
+        aggregate_question_plan = question_plans[0] if question_plans else {}
+        if evidence:
+            try:
+                llm_client = self._get_llm_client()
+                answer_payload = self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id)
+                answer = str(answer_payload.get("answer") or answer)
+                aggregate_question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else aggregate_question_plan
+            except Exception as exc:  # noqa: BLE001
+                llm_errors.append(str(exc))
         return {
             "evidence": evidence,
-            "answer": self._build_local_answer(question, evidence),
+            "answer": answer,
             "retrieval_mode": "知识库多文档检索",
             "llm_error": "；".join(dict.fromkeys(item for item in llm_errors if item)),
             "debug": {
@@ -622,6 +754,8 @@ class PageIndexService:
                 "candidate_nodes": candidate_nodes,
                 "rag_evidence": rag_evidence,
                 "selected_nodes": candidate_nodes[: len(evidence)],
+                "question_plan": aggregate_question_plan,
+                "document_question_plans": question_plans,
             },
         }
 
@@ -735,9 +869,12 @@ class PageIndexService:
         evidence = self._merge_evidence(evidence, rag_evidence)
         evidence = self._classify_evidence_items(question, evidence)
         answer = str(selection.get("answer") or "").strip()
+        question_plan: dict = {}
         if evidence:
             try:
-                answer = self._generate_llm_answer(llm_client, question, evidence, template_id=template_id)
+                answer_payload = self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id)
+                answer = str(answer_payload.get("answer") or "")
+                question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else {}
             except Exception:  # noqa: BLE001
                 if not answer:
                     answer = self._build_local_answer(question, evidence)
@@ -758,6 +895,7 @@ class PageIndexService:
             "candidate_nodes": [self._candidate_to_debug(item) for item in candidates],
             "rag_evidence": rag_evidence,
             "selected_nodes": selected_debug,
+            "question_plan": question_plan,
         }
 
     def _get_llm_client(self) -> object:
@@ -897,6 +1035,11 @@ class PageIndexService:
     def _generate_llm_answer(self, llm_client: object, question: str, evidence: list[dict], *, template_id: str | None = None) -> str:
         """让 LLM 基于已取回证据生成简短回答。"""
 
+        return str(self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id).get("answer") or "").strip()
+
+    def _generate_llm_answer_payload(self, llm_client: object, question: str, evidence: list[dict], *, template_id: str | None = None) -> dict:
+        """让 LLM 基于证据生成回答，并返回 Question Plan 便于调试追踪。"""
+
         template = self.template_service.get_template(template_id)
         question_plan = self._build_question_plan(llm_client, question, evidence)
         system_prompt, user_prompt = self.template_service.render_answer_prompts(
@@ -909,7 +1052,10 @@ class PageIndexService:
             citation_rules="必须列出证据标题、位置、文档或 chunk 来源。",
         )
         result = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
-        return str(result.get("answer") or "").strip()
+        return {
+            "answer": str(result.get("answer") or "").strip(),
+            "question_plan": question_plan,
+        }
 
     @staticmethod
     def _build_question_plan(llm_client: object, question: str, evidence: list[dict]) -> dict:

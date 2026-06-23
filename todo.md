@@ -20,9 +20,9 @@
 
 ### P1
 
-- [ ] 将 Question Plan 写入 PageIndex debug 信息，方便历史结果排查
+- [x] 将 Question Plan 写入 PageIndex debug 信息，方便历史结果排查
 - [ ] 根据 Question Plan 调整候选证据选择提示词，提升召回精度
-- [ ] 将典型测试问题重新写入 DB，便于 UI 历史查看
+- [x] 将典型测试问题重新写入 DB，便于 UI 历史查看
 
 ### 验收标准
 
