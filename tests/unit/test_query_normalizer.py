@@ -24,6 +24,15 @@ def test_expand_query_texts_should_include_alias_and_canonical_queries() -> None
     assert len(queries) == len(set(queries))
 
 
+def test_expand_query_texts_should_include_population_aliases() -> None:
+    """人群类同义表达应由外部实体词表统一扩展。"""
+
+    queries = expand_query_texts("女性", limit=6)
+
+    assert queries[0] == "女性"
+    assert "妇女" in queries
+
+
 def test_build_normalized_index_text_should_keep_source_and_add_canonical_terms() -> None:
     """入库索引文本应保留原文，同时追加归一后的标准实体，避免改写原始 chunk。"""
 

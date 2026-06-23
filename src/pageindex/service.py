@@ -20,6 +20,7 @@ from src.db.transaction import transaction
 from src.pageindex.evidence_judge import classify_evidence_relation, infer_conclusion
 from src.pageindex.question_plan import build_question_plan_prompts, normalize_question_plan
 from src.pageindex.templates import PageIndexTemplateService
+from src.retrieval.query_normalizer import expand_query_texts
 
 
 PAGEINDEX_VENDOR_ROOT = Path(__file__).resolve().parents[2] / "vendor" / "pageindex"
@@ -867,6 +868,15 @@ class PageIndexService:
             for candidate in candidates:
                 candidate_debug_by_id[str(candidate.get("candidate_id") or "")] = self._candidate_to_debug(candidate)
             if not candidates:
+                retrieval_rounds.append(
+                    {
+                        "round": round_index,
+                        "selected_nodes": [],
+                        "sufficiency": "insufficient",
+                        "missing_information": "PageIndex 树标题和摘要未召回候选节点",
+                        "next_search_focus": "使用同文档 RAG/FTS 原文片段补充召回",
+                    }
+                )
                 break
 
             system_prompt, user_prompt = self._build_iterative_tree_reasoning_prompts(
@@ -952,7 +962,8 @@ class PageIndexService:
             if not round_selected_debug:
                 break
 
-        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis) if evidence else []
+        # PageIndex 树摘要可能缺少用户问题中的细粒度疾病/指标词；只有树候选为 0 时才启用 RAG 兜底，避免覆盖 LLM 明确拒选的判断。
+        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis) if evidence or not candidate_debug_by_id else []
         evidence = self._merge_evidence(evidence, rag_evidence)
         evidence = self._classify_evidence_items(question, evidence)
         question_plan: dict = {}
@@ -1708,14 +1719,15 @@ class PageIndexService:
             normalized = str(term or "").strip()
             if not normalized or normalized in seen:
                 continue
-            expanded_terms = [normalized]
+            term_in_question = cls._normalize_rag_text(normalized) in normalized_question
+            expanded_terms = [normalized] if cls._is_generic_rag_term(normalized) else cls._expand_term_with_entity_dictionary(normalized)
             for expanded in cls._expand_meaningful_segment(normalized):
                 if expanded not in expanded_terms:
                     expanded_terms.append(expanded)
             for expanded in expanded_terms:
                 if expanded in seen:
                     continue
-                if cls._normalize_rag_text(expanded) not in normalized_question:
+                if not term_in_question and cls._normalize_rag_text(expanded) not in normalized_question:
                     continue
                 if cls._is_generic_rag_term(expanded):
                     continue
@@ -1723,6 +1735,18 @@ class PageIndexService:
                 specific_terms.append(expanded)
         specific_terms.sort(key=len, reverse=True)
         return specific_terms[:8]
+
+    @staticmethod
+    def _expand_term_with_entity_dictionary(term: str) -> list[str]:
+        """复用通用实体词表扩展单个 PageIndex 查询词。"""
+
+        candidates: list[str] = []
+        for expanded in expand_query_texts(str(term or ""), limit=8):
+            if " " in expanded:
+                candidates.extend(part for part in expanded.split() if part)
+            else:
+                candidates.append(expanded)
+        return PageIndexService._normalize_term_list([str(term or ""), *candidates])
 
     @staticmethod
     def _normalize_rag_text(value: str) -> str:
@@ -1962,6 +1986,8 @@ class PageIndexService:
         if len(terms) > 1:
             return terms
         compact_question = re.sub(r"[，。！？、,.?？\s]", "", question)
+        if len(terms) == 1 and terms[0] == compact_question and PageIndexService._looks_like_compact_question(compact_question):
+            terms = []
         if "阿胶" in compact_question:
             terms.append("阿胶")
         semantic_text = compact_question
@@ -1974,10 +2000,15 @@ class PageIndexService:
             "有什么",
             "有好处吗",
             "有作用吗",
+            "有疗效吗",
+            "有疗效",
+            "有作用",
+            "有好处",
             "有帮助",
             "如何",
             "是否",
             "治疗",
+            "疗效",
             "说明",
             "帮助",
             "哪些",
@@ -1996,6 +2027,27 @@ class PageIndexService:
                 if term not in terms:
                     terms.append(term)
         return terms[:24]
+
+    @staticmethod
+    def _looks_like_compact_question(question: str) -> bool:
+        """识别无空格中文问句，避免把整句当成检索词。"""
+
+        markers = (
+            "阿胶",
+            "有没有",
+            "能不能",
+            "有哪些",
+            "有什么",
+            "有疗效",
+            "有作用",
+            "有好处",
+            "治疗",
+            "如何",
+            "是否",
+            "对",
+            "吗",
+        )
+        return any(marker in str(question or "") for marker in markers)
 
     @staticmethod
     def _expand_meaningful_segment(segment: str) -> list[str]:
@@ -2019,6 +2071,8 @@ class PageIndexService:
                 terms.extend(["癌症患者", "癌症"])
             if "不孕不育" in segment:
                 terms.append("不孕不育")
+        if "胃病" in segment:
+            terms.extend(["胃病", "胃部", "胃脘", "脾胃", "消化不良"])
         if "心脏病" in segment:
             terms.extend(["心脏病", "心脏"])
         return [term for term in terms if not PageIndexService._is_generic_tree_term(term)]

@@ -841,6 +841,71 @@ def test_pageindex_rag_query_terms_should_ignore_generic_treatment_when_specific
     assert query_terms == ["不孕不育"]
 
 
+def test_pageindex_rag_query_terms_should_expand_condition_question() -> None:
+    """疾病疗效类问题应抽出核心对象词，并补充常见同义表达用于召回。"""
+
+    terms = PageIndexService._extract_question_terms("阿胶对胃病有疗效")
+    query_terms = PageIndexService._build_rag_query_terms(terms, "阿胶对胃病有疗效")
+
+    assert "胃病" in terms
+    assert "胃病有疗效" not in terms
+    assert "脾胃" in query_terms
+    assert "消化不良" in query_terms
+
+
+def test_pageindex_rag_query_terms_should_reuse_entity_dictionary_aliases() -> None:
+    """PageIndex 召回词应复用通用实体词表扩展，避免在服务内写死同义词。"""
+
+    query_terms = PageIndexService._build_rag_query_terms(["女性"], "女性")
+
+    assert "女性" in query_terms
+    assert "妇女" in query_terms
+
+
+def test_pageindex_should_use_rag_when_tree_has_no_candidates(tmp_path: Path) -> None:
+    """PageIndex 树摘要无命中时，应允许同文档 RAG/FTS 召回细粒度证据。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {"title": "应用注意点", "line_num": 1, "level": 1, "summary": "介绍服用注意事项。", "nodes": []},
+    ]
+    seed_chunk(
+        settings,
+        doc_uid=document["doc_uid"],
+        chunk_id="chunk_stomach",
+        content="现代阿胶加工后比较滋腻，容易影响脾胃；对于胃部胀满、消化不良、纳差，属中医脾胃虚弱者应慎用阿胶。",
+        source_span="section-1:chunk-1",
+    )
+
+    class FakeLLMClient:
+        """测试用 LLM 客户端，仅用于最终回答生成。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "Question Plan" in user_prompt or "证据" in user_prompt:
+                return {"answer": "结论：证据显示胃部胀满、消化不良、脾胃虚弱者应慎用阿胶。"}
+            return {}
+
+    service = PageIndexService(settings, llm_client=FakeLLMClient())
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "阿胶对胃病有疗效")
+
+    assert answer["evidence"]
+    assert answer["evidence"][0]["source_type"] == "RAG/FTS 原文"
+    assert "脾胃" in answer["evidence"][0]["content"]
+    assert answer["debug"]["candidate_nodes"] == []
+    assert answer["debug"]["rag_evidence"]
+
+
 def test_pageindex_service_should_return_debug_candidates_for_diagnosis(tmp_path: Path) -> None:
     """PageIndex 提问结果应返回候选节点诊断信息，便于判断召回和重排质量。"""
 
