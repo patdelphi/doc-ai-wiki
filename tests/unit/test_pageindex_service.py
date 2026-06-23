@@ -1593,6 +1593,55 @@ def test_pageindex_merge_evidence_should_keep_primary_and_rag_supplemental_items
     assert merged[1]["chunk_id"] == "chunk_heart"
 
 
+def test_pageindex_merge_evidence_should_deduplicate_only_same_source_identity() -> None:
+    """证据合并只去重同一来源身份，不能让 PageIndex 节点和 RAG 片段互相覆盖。"""
+
+    merged = PageIndexService._merge_evidence(
+        [
+            {
+                "title": "同一位置的 PageIndex 节点",
+                "position": "section-2:chunk-0",
+                "doc_uid": "doc_alpha",
+                "source_type": "PageIndex 节点",
+            },
+            {
+                "title": "重复 PageIndex 节点",
+                "position": "section-2:chunk-0",
+                "doc_uid": "doc_alpha",
+                "source_type": "PageIndex 节点",
+            },
+            {
+                "title": "另一文档同位置节点",
+                "position": "section-2:chunk-0",
+                "doc_uid": "doc_beta",
+                "source_type": "PageIndex 节点",
+            },
+        ],
+        [
+            {
+                "title": "RAG/FTS 原文片段",
+                "position": "section-2:chunk-0",
+                "chunk_id": "chunk_alpha",
+                "doc_uid": "doc_alpha",
+                "source_type": "RAG/FTS 原文",
+            },
+            {
+                "title": "重复 RAG/FTS 原文片段",
+                "position": "section-2:chunk-0",
+                "chunk_id": "chunk_alpha",
+                "doc_uid": "doc_alpha",
+                "source_type": "RAG/FTS 原文",
+            },
+        ],
+    )
+
+    assert [(item["source_type"], item["doc_uid"], item["title"]) for item in merged] == [
+        ("PageIndex 节点", "doc_alpha", "同一位置的 PageIndex 节点"),
+        ("PageIndex 节点", "doc_beta", "另一文档同位置节点"),
+        ("RAG/FTS 原文", "doc_alpha", "RAG/FTS 原文片段"),
+    ]
+
+
 def test_pageindex_rag_evidence_should_use_source_span_as_anchor_fallback(tmp_path: Path) -> None:
     """历史 chunk 缺少 source_anchor 时，应用 source_span 作为引用位置兜底。"""
 
