@@ -710,6 +710,7 @@ class PageIndexService:
         rag_evidence: list[dict] = []
         llm_errors: list[str] = []
         question_plans: list[dict] = []
+        document_retrieval_rounds: list[dict] = []
         for record in records:
             try:
                 structure = self._load_structure(record)
@@ -729,6 +730,15 @@ class PageIndexService:
             question_plan = debug.get("question_plan")
             if isinstance(question_plan, dict) and question_plan:
                 question_plans.append(question_plan)
+            retrieval_rounds = debug.get("retrieval_rounds")
+            if isinstance(retrieval_rounds, list):
+                document_retrieval_rounds.append(
+                    {
+                        "doc_uid": str(record.get("doc_uid") or ""),
+                        "pageindex_doc_id": str(record.get("pageindex_doc_id") or ""),
+                        "rounds": retrieval_rounds,
+                    }
+                )
             if result.get("llm_error"):
                 llm_errors.append(str(result.get("llm_error") or ""))
 
@@ -756,6 +766,7 @@ class PageIndexService:
                 "selected_nodes": candidate_nodes[: len(evidence)],
                 "question_plan": aggregate_question_plan,
                 "document_question_plans": question_plans,
+                "document_retrieval_rounds": document_retrieval_rounds,
             },
         }
 
@@ -774,7 +785,7 @@ class PageIndexService:
 
         question_analysis = self._analyze_question(question)
         try:
-            evidence, answer, debug = self._answer_with_llm_tree_reasoning(record, structure, question, question_analysis, template_id=template_id)
+            evidence, answer, debug = self._answer_with_iterative_tree_reasoning(record, structure, question, question_analysis, template_id=template_id)
             evidence = self._classify_evidence_items(question, evidence)
             if evidence:
                 debug["retrieval_mode"] = "LLM 语义树推理"
@@ -818,6 +829,244 @@ class PageIndexService:
                 "llm_error": llm_error,
             },
         }
+
+    def _answer_with_iterative_tree_reasoning(
+        self,
+        record: dict,
+        structure: list[dict],
+        question: str,
+        question_analysis: dict,
+        *,
+        template_id: str | None = None,
+        max_rounds: int = 3,
+    ) -> tuple[list[dict], str, dict]:
+        """让 LLM 多轮选择 PageIndex 节点，证据不足时继续检索。"""
+
+        llm_client = self._get_llm_client()
+        client = PageIndexClient(workspace=str(record["workspace_path"]))
+        evidence: list[dict] = []
+        selected_debug: list[dict] = []
+        retrieval_rounds: list[dict] = []
+        candidate_debug_by_id: dict[str, dict] = {}
+        selected_candidate_ids: set[str] = set()
+        cross_reference_candidates: list[dict] = []
+        answer = ""
+        debug_error = ""
+
+        for round_index in range(1, max(1, int(max_rounds or 3)) + 1):
+            candidates = self._build_tree_candidates(
+                record,
+                structure,
+                question=question,
+                question_analysis=question_analysis,
+                limit=30,
+                include_content=True,
+            )
+            candidates = self._merge_tree_candidates(candidates, cross_reference_candidates)
+            candidates = [item for item in candidates if str(item.get("candidate_id") or "") not in selected_candidate_ids]
+            for candidate in candidates:
+                candidate_debug_by_id[str(candidate.get("candidate_id") or "")] = self._candidate_to_debug(candidate)
+            if not candidates:
+                break
+
+            system_prompt, user_prompt = self._build_iterative_tree_reasoning_prompts(
+                question,
+                question_analysis,
+                candidates,
+                evidence,
+                round_index,
+            )
+            selection = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
+            if not isinstance(selection, dict):
+                debug_error = "LLM 迭代检索返回格式无效"
+                retrieval_rounds.append(
+                    {
+                        "round": round_index,
+                        "selected_nodes": [],
+                        "sufficiency": "insufficient",
+                        "missing_information": debug_error,
+                        "next_search_focus": "",
+                    }
+                )
+                break
+
+            selected_items = selection.get("selected_nodes")
+            if not isinstance(selected_items, list):
+                selected_items = []
+            sufficiency = self._normalize_retrieval_sufficiency(selection.get("sufficiency"))
+            missing_information = str(selection.get("missing_information") or "").strip()
+            next_search_focus = str(selection.get("next_search_focus") or "").strip()
+            answer = str(selection.get("answer") or answer or "").strip()
+            candidate_map = {str(item["candidate_id"]): item for item in candidates}
+            round_selected_debug: list[dict] = []
+
+            for selected in selected_items[:3]:
+                if not isinstance(selected, dict):
+                    continue
+                candidate_id = str(selected.get("candidate_id") or "")
+                candidate = candidate_map.get(candidate_id)
+                if not candidate:
+                    continue
+                selected_candidate_ids.add(candidate_id)
+                node = candidate["node"]
+                line_num = int(node.get("line_num") or 0)
+                evidence.append(
+                    {
+                        "title": str(node.get("title") or ""),
+                        "position": self._format_node_position(node),
+                        "summary": str(node.get("summary") or node.get("prefix_summary") or ""),
+                        "content": self._load_node_content(client, str(record["pageindex_doc_id"]), line_num),
+                        "reason": str(selected.get("reason") or "LLM 迭代语义推理选中"),
+                        "source_type": "PageIndex 节点",
+                        "doc_uid": str(record.get("doc_uid") or ""),
+                        "pageindex_doc_id": str(record.get("pageindex_doc_id") or ""),
+                    }
+                )
+                debug_item = {
+                    **self._candidate_to_debug(candidate),
+                    "reason": str(selected.get("reason") or "LLM 迭代语义推理选中"),
+                }
+                round_selected_debug.append(debug_item)
+                selected_debug.append(debug_item)
+
+            new_targets: list[str] = []
+            for item in evidence[-len(round_selected_debug) :] if round_selected_debug else []:
+                new_targets.extend(self._extract_cross_reference_targets(str(item.get("content") or "")))
+            if new_targets:
+                cross_reference_candidates = self._merge_tree_candidates(
+                    cross_reference_candidates,
+                    self._find_cross_reference_candidates(structure, new_targets),
+                )
+
+            retrieval_rounds.append(
+                {
+                    "round": round_index,
+                    "selected_nodes": round_selected_debug,
+                    "sufficiency": sufficiency,
+                    "missing_information": missing_information,
+                    "next_search_focus": next_search_focus,
+                }
+            )
+            if sufficiency == "sufficient" and evidence:
+                break
+            if not round_selected_debug:
+                break
+
+        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis) if evidence else []
+        evidence = self._merge_evidence(evidence, rag_evidence)
+        evidence = self._classify_evidence_items(question, evidence)
+        question_plan: dict = {}
+        if evidence:
+            try:
+                answer_payload = self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id)
+                answer = str(answer_payload.get("answer") or answer or "")
+                question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else {}
+            except Exception:  # noqa: BLE001
+                if not answer:
+                    answer = self._build_local_answer(question, evidence)
+        return evidence, answer, {
+            "candidate_nodes": list(candidate_debug_by_id.values()),
+            "rag_evidence": rag_evidence,
+            "selected_nodes": selected_debug,
+            "retrieval_rounds": retrieval_rounds,
+            "question_plan": question_plan,
+            "llm_error": debug_error,
+        }
+
+    @staticmethod
+    def _extract_cross_reference_targets(content: str) -> list[str]:
+        """从节点原文中提取明确的交叉引用目标。"""
+
+        text = str(content or "")
+        targets: list[str] = []
+        patterns = [
+            r"(附录\s*[A-Za-z0-9一二三四五六七八九十]+)",
+            r"(表\s*\d+(?:\.\d+)*)",
+            r"(图\s*\d+(?:\.\d+)*)",
+            r"(第[一二三四五六七八九十百千万\d]+章)",
+            r"(?:详见|参见|见)[“\"《]?([^，。；;、“”\"》]{2,30})[”\"》]?",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                target = str(match.group(1) or "").strip()
+                target = re.sub(r"^(附录|表|图)([A-Za-z0-9一二三四五六七八九十])", r"\1 \2", target)
+                target = re.sub(r"\s+", " ", target).strip(" ：:，。；;、")
+                if target and target not in targets:
+                    targets.append(target)
+        return targets
+
+    @classmethod
+    def _find_cross_reference_candidates(cls, structure: list[dict], targets: list[str]) -> list[dict]:
+        """按交叉引用目标在 PageIndex 树标题和摘要中查找候选节点。"""
+
+        normalized_targets = [cls._normalize_rag_text(target) for target in targets if str(target or "").strip()]
+        candidates: list[dict] = []
+        seen_positions: set[str] = set()
+        for node in cls._flatten_structure_static(structure):
+            title = str(node.get("title") or "")
+            summary = str(node.get("summary") or node.get("prefix_summary") or "")
+            haystack = cls._normalize_rag_text(f"{title} {summary}")
+            if not haystack:
+                continue
+            if not any(target and target in haystack for target in normalized_targets):
+                continue
+            position = cls._format_node_position(node)
+            key = f"{title}|{position}"
+            if key in seen_positions:
+                continue
+            seen_positions.add(key)
+            candidates.append(
+                {
+                    "candidate_id": f"xref_{len(candidates) + 1}",
+                    "title": title,
+                    "level": int(node.get("level") or 1),
+                    "position": position,
+                    "summary": summary[:500],
+                    "content_excerpt": str(node.get("text") or "")[:900],
+                    "score": 0,
+                    "reason": "交叉引用候选",
+                    "node": node,
+                }
+            )
+        return candidates
+
+    @staticmethod
+    def _merge_tree_candidates(primary: list[dict], supplemental: list[dict]) -> list[dict]:
+        """合并树候选，按 candidate_id 和位置去重。"""
+
+        merged: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in [*(primary or []), *(supplemental or [])]:
+            title = str(item.get("title") or "")
+            position = str(item.get("position") or "")
+            key = (
+                title,
+                position,
+                "" if title or position else str(item.get("candidate_id") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    @staticmethod
+    def _flatten_structure_static(structure: list[dict]) -> list[dict]:
+        """静态展开 PageIndex 树结构，供 classmethod 使用。"""
+
+        items: list[dict] = []
+
+        def walk(nodes: list[dict]) -> None:
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                items.append(node)
+                children = node.get("nodes")
+                if isinstance(children, list):
+                    walk(children)
+
+        walk(structure)
+        return items
 
     def _answer_with_llm_tree_reasoning(
         self,
@@ -897,6 +1146,15 @@ class PageIndexService:
             "selected_nodes": selected_debug,
             "question_plan": question_plan,
         }
+
+    @staticmethod
+    def _normalize_retrieval_sufficiency(value: object) -> str:
+        """规范化 LLM 返回的信息充分性标签。"""
+
+        normalized = str(value or "").strip().lower()
+        if normalized in {"sufficient", "partial", "insufficient"}:
+            return normalized
+        return "insufficient"
 
     def _get_llm_client(self) -> object:
         """获取 PageIndex 语义推理使用的 LLM 客户端。"""
@@ -1028,6 +1286,75 @@ class PageIndexService:
                 "请返回 JSON：",
                 '{"selected_nodes":[{"candidate_id":"node_1","reason":"选择理由"}],"answer":"基于证据的简短中文回答"}',
                 "要求：最多选择 3 个节点；如果没有足够相关节点，selected_nodes 返回空数组。",
+            ]
+        )
+        return system_prompt, user_prompt
+
+    @staticmethod
+    def _build_iterative_tree_reasoning_prompts(
+        question: str,
+        question_analysis: dict,
+        candidates: list[dict],
+        retrieved_evidence: list[dict],
+        round_index: int,
+    ) -> tuple[str, str]:
+        """构建 PageIndex 迭代式树推理检索提示词。"""
+
+        system_prompt = (
+            "你是 PageIndex 迭代式树结构检索助手。请基于用户问题、已读证据和候选节点，"
+            "选择下一批最值得读取的节点，并判断当前信息是否足够回答问题。只返回 JSON，不要输出额外文本。"
+        )
+        safe_candidates = [
+            {
+                "candidate_id": str(item.get("candidate_id") or ""),
+                "title": str(item.get("title") or ""),
+                "level": int(item.get("level") or 1),
+                "position": str(item.get("position") or ""),
+                "summary": str(item.get("summary") or ""),
+                "content_excerpt": str(item.get("content_excerpt") or "")[:900],
+                "score": int(item.get("score") or 0),
+                "reason": str(item.get("reason") or ""),
+            }
+            for item in candidates
+        ]
+        evidence_preview = [
+            {
+                "title": str(item.get("title") or item.get("source_type") or ""),
+                "position": str(item.get("position") or item.get("source_anchor") or ""),
+                "content_excerpt": str(item.get("content") or item.get("summary") or "")[:700],
+                "reason": str(item.get("reason") or ""),
+            }
+            for item in retrieved_evidence[:8]
+        ]
+        user_prompt = "\n".join(
+            [
+                f"检索轮次：{max(1, int(round_index or 1))}",
+                "",
+                "用户问题：",
+                str(question or ""),
+                "",
+                "问题分析 JSON：",
+                json.dumps(question_analysis or {}, ensure_ascii=False),
+                "",
+                "已读证据 JSON：",
+                json.dumps(evidence_preview, ensure_ascii=False),
+                "",
+                "候选 PageIndex 节点 JSON：",
+                json.dumps(safe_candidates, ensure_ascii=False),
+                "",
+                "请返回 JSON：",
+                json.dumps(
+                    {
+                        "selected_nodes": [{"candidate_id": "node_1", "reason": "选择理由"}],
+                        "sufficiency": "sufficient | partial | insufficient",
+                        "missing_information": "还缺什么信息",
+                        "next_search_focus": "下一轮应该找什么",
+                        "answer": "基于当前证据的临时答案",
+                    },
+                    ensure_ascii=False,
+                ),
+                "要求：每轮最多选择 3 个节点；如果当前证据已足够回答，sufficiency 返回 sufficient；"
+                "如果仍缺关键信息，返回 partial 或 insufficient，并写清 missing_information 和 next_search_focus。",
             ]
         )
         return system_prompt, user_prompt

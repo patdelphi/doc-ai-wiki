@@ -48,3 +48,8 @@
 {"case_id":"pi_048","question":"阿胶资料中哪些内容适合作为直接证据？","expected_doc_uid":"doc_ejiao_research","expected_node_title":"证据使用","requires_llm":true,"mode":"llm_reasoning","expected_evidence":"直接证据要求"}
 {"case_id":"pi_049","question":"PageIndex 命中章节后还需要 RAG 原文吗？","expected_doc_uid":"doc_pageindex_notes","expected_node_title":"PageIndex 与 RAG","requires_llm":true,"mode":"llm_reasoning","expected_evidence":"结构定位与原文证据结合"}
 {"case_id":"pi_050","question":"不同知识库之间的 PageIndex 证据能否混用？","expected_doc_uid":"doc_pageindex_notes","expected_node_title":"知识库隔离","requires_llm":true,"mode":"llm_reasoning","expected_evidence":"不能跨知识库混用"}
+{"case_id":"pi_051","question":"阿胶有哪些质量检测方法？","expected_doc_uid":"doc_ejiao_research","expected_node_title":"质量检测方法","requires_llm":true,"mode":"iterative_reasoning","expected_evidence":"第一轮可读概述，证据不足时继续检索具体检测方法清单"}
+{"case_id":"pi_052","question":"吃阿胶能缓解感冒症状吗？","expected_doc_uid":"doc_ejiao_safety","expected_node_title":"感冒停服","requires_llm":true,"mode":"iterative_reasoning","expected_evidence":"应继续查找风险或禁忌证据，最终给出证据不足或不支持结论"}
+{"case_id":"pi_053","question":"心脏病吃阿胶有好处吗？","expected_doc_uid":"doc_ejiao_safety","expected_node_title":"医师指导与禁忌","requires_llm":true,"mode":"iterative_reasoning","expected_evidence":"应读取风险边界，不能把相关背景当作直接支持"}
+{"case_id":"pi_054","question":"阿胶应用注意事项在哪里？","expected_doc_uid":"doc_ejiao_usage","expected_node_title":"阿胶应用的注意点","requires_llm":true,"mode":"iterative_reasoning","expected_evidence":"定位类问题证据充分时应提前停止"}
+{"case_id":"pi_055","question":"递延资产总值是多少？","expected_doc_uid":"doc_financial_appendix","expected_node_title":"附录 G","requires_llm":true,"mode":"iterative_reasoning","expected_evidence":"主文若出现详见附录 G，应跟随交叉引用读取附录节点"}

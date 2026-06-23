@@ -516,6 +516,235 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
     assert len(llm_client.prompts) == 4
 
 
+def test_pageindex_iterative_prompt_should_require_sufficiency_fields() -> None:
+    """迭代式检索 prompt 应要求 LLM 返回充分性判断和下一轮检索焦点。"""
+
+    system_prompt, user_prompt = PageIndexService._build_iterative_tree_reasoning_prompts(
+        "阿胶有哪些质量检测方法",
+        {"keywords": ["质量检测", "方法"]},
+        [
+            {
+                "candidate_id": "node_1",
+                "title": "质量检测",
+                "level": 2,
+                "position": "line 10",
+                "summary": "检测方法概述",
+                "content_excerpt": "包括性状、鉴别、含量测定。",
+                "score": 10,
+            }
+        ],
+        [],
+        1,
+    )
+
+    assert "sufficiency" in user_prompt
+    assert "missing_information" in user_prompt
+    assert "next_search_focus" in user_prompt
+    assert "selected_nodes" in user_prompt
+    assert "只返回 JSON" in system_prompt
+
+
+def test_pageindex_should_continue_iterative_retrieval_until_sufficient(tmp_path: Path) -> None:
+    """PageIndex LLM 检索应在证据不足时继续下一轮，证据充分后停止。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {
+            "title": "质量检测概述",
+            "line_num": 8,
+            "level": 1,
+            "summary": "阿胶质量检测包括多类方法，需要继续查具体项目。",
+            "text": "# 质量检测概述\n\n阿胶质量检测包括多类方法，需要继续查具体项目。",
+            "nodes": [],
+        },
+        {
+            "title": "质量检测方法",
+            "line_num": 18,
+            "level": 1,
+            "summary": "包括真伪鉴别、重金属检测和微生物检测。",
+            "text": "# 质量检测方法\n\n包括真伪鉴别、重金属检测和微生物检测。",
+            "nodes": [],
+        },
+    ]
+
+    class IterativeReasoningClient:
+        """测试用 LLM，第一轮认为证据不足，第二轮认为证据充分。"""
+
+        def __init__(self) -> None:
+            self.iterative_calls = 0
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "询问方法",
+                    "entities": ["阿胶", "质量检测"],
+                    "keywords": ["质量检测", "方法"],
+                    "expanded_terms": ["真伪鉴别", "重金属检测", "微生物检测"],
+                }
+            if "迭代式树结构检索" in system_prompt:
+                self.iterative_calls += 1
+                if self.iterative_calls == 1:
+                    return {
+                        "selected_nodes": [{"candidate_id": "node_1", "reason": "先读取质量检测概述"}],
+                        "sufficiency": "partial",
+                        "missing_information": "缺少具体检测方法清单",
+                        "next_search_focus": "质量检测方法",
+                        "answer": "",
+                    }
+                return {
+                    "selected_nodes": [{"candidate_id": "node_2", "reason": "补充具体检测项目"}],
+                    "sufficiency": "sufficient",
+                    "missing_information": "",
+                    "next_search_focus": "",
+                    "answer": "",
+                }
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "列举质量检测方法。",
+                    "target": "阿胶质量检测方法",
+                    "claim": "",
+                    "required_output": ["结论", "方法清单", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            return {"answer": "结论：阿胶质量检测方法包括真伪鉴别、重金属检测和微生物检测。"}
+
+    llm_client = IterativeReasoningClient()
+    service = PageIndexService(settings, llm_client=llm_client)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "阿胶有哪些质量检测方法")
+
+    assert llm_client.iterative_calls == 2
+    assert [item["title"] for item in answer["evidence"][:2]] == ["质量检测概述", "质量检测方法"]
+    assert answer["debug"]["retrieval_rounds"][0]["sufficiency"] == "partial"
+    assert answer["debug"]["retrieval_rounds"][0]["missing_information"] == "缺少具体检测方法清单"
+    assert answer["debug"]["retrieval_rounds"][1]["sufficiency"] == "sufficient"
+    assert answer["debug"]["retrieval_rounds"][1]["selected_nodes"][0]["title"] == "质量检测方法"
+
+
+def test_pageindex_should_extract_cross_reference_targets() -> None:
+    """PageIndex 应识别明确的文档内交叉引用目标。"""
+
+    targets = PageIndexService._extract_cross_reference_targets(
+        "主文提到详见附录 G；另参见表 5.3，见第六章，并详见“质量标准”。"
+    )
+
+    assert targets == ["附录 G", "表 5.3", "第六章", "质量标准"]
+
+
+def test_pageindex_should_find_cross_reference_candidates() -> None:
+    """PageIndex 应把交叉引用目标匹配到树节点标题或摘要。"""
+
+    structure = [
+        {"title": "正文", "summary": "主章节", "line_num": 1, "level": 1, "nodes": []},
+        {"title": "附录 G", "summary": "统计表格", "line_num": 50, "level": 1, "nodes": []},
+        {"title": "质量标准", "summary": "检测依据", "line_num": 80, "level": 1, "nodes": []},
+    ]
+
+    candidates = PageIndexService._find_cross_reference_candidates(structure, ["附录 G", "质量标准"])
+
+    assert [item["title"] for item in candidates] == ["附录 G", "质量标准"]
+    assert candidates[0]["candidate_id"] == "xref_1"
+    assert candidates[0]["reason"] == "交叉引用候选"
+
+
+def test_pageindex_iterative_retrieval_should_follow_cross_reference_candidate(tmp_path: Path) -> None:
+    """迭代检索读取到明确交叉引用后，应把目标节点加入下一轮候选。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+    structure = [
+        {
+            "title": "递延资产说明",
+            "line_num": 8,
+            "level": 1,
+            "summary": "递延资产主文说明。",
+            "text": "# 递延资产说明\n\n主章节只说明资产增值额，递延资产总值详见附录 G。",
+            "nodes": [],
+        },
+        {
+            "title": "附录 G",
+            "line_num": 40,
+            "level": 1,
+            "summary": "统计表格。",
+            "text": "# 附录 G\n\n递延资产总值为 123。",
+            "nodes": [],
+        },
+    ]
+
+    class CrossReferenceClient:
+        """测试用 LLM，第二轮检查交叉引用候选是否进入 prompt。"""
+
+        def __init__(self) -> None:
+            self.iterative_calls = 0
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "查询数值",
+                    "entities": ["递延资产"],
+                    "keywords": ["递延资产", "总值"],
+                    "expanded_terms": [],
+                }
+            if "迭代式树结构检索" in system_prompt:
+                self.iterative_calls += 1
+                if self.iterative_calls == 1:
+                    return {
+                        "selected_nodes": [{"candidate_id": "node_1", "reason": "主文提到递延资产"}],
+                        "sufficiency": "partial",
+                        "missing_information": "需要附录 G 中的总值",
+                        "next_search_focus": "附录 G",
+                        "answer": "",
+                    }
+                assert "附录 G" in user_prompt
+                assert "交叉引用候选" in user_prompt
+                return {
+                    "selected_nodes": [{"candidate_id": "xref_1", "reason": "跟随主文引用到附录 G"}],
+                    "sufficiency": "sufficient",
+                    "missing_information": "",
+                    "next_search_focus": "",
+                    "answer": "",
+                }
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "information_extraction",
+                    "answer_strategy": "读取引用附录中的数值。",
+                    "target": "递延资产总值",
+                    "claim": "",
+                    "required_output": ["结论", "来源"],
+                    "needs_evidence_relation": False,
+                }
+            return {"answer": "结论：递延资产总值为 123。"}
+
+    llm_client = CrossReferenceClient()
+    service = PageIndexService(settings, llm_client=llm_client)
+    pageindex_doc_id = seed_custom_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+        structure=structure,
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "递延资产总值是多少")
+
+    assert llm_client.iterative_calls == 2
+    assert answer["evidence"][1]["title"] == "附录 G"
+    assert answer["debug"]["retrieval_rounds"][1]["selected_nodes"][0]["reason"] == "跟随主文引用到附录 G"
+
+
 def test_pageindex_service_should_report_keyword_fallback_when_llm_reasoning_fails(tmp_path: Path) -> None:
     """LLM 树推理失败时，应回退本地关键词并把本次模式返回给前端。"""
 
@@ -1682,5 +1911,7 @@ def test_pageindex_knowledge_base_question_should_use_aggregate_question_plan_an
     result = service.ask_knowledge_base_question("kb_alpha", "阿胶有哪些质量检测方法")
 
     assert result["debug"]["question_plan"]["question_type"] == "information_extraction"
+    assert result["debug"]["document_retrieval_rounds"][0]["doc_uid"] == document["doc_uid"]
+    assert result["debug"]["document_retrieval_rounds"][0]["rounds"][0]["sufficiency"] == "insufficient"
     assert "真伪鉴别" in result["answer"]
     assert "不能证明" not in result["answer"]

@@ -353,3 +353,19 @@ Expected: pass.
 
 P0 是核心收益，预计 0.5-1 天可出可测版本。P1 的复杂度取决于文档结构质量，预计 1-2 天。
 
+## 2026-06-23 Execution Result
+
+- [x] Task 1 完成：新增迭代式检索 prompt，要求返回 `selected_nodes`、`sufficiency`、`missing_information`、`next_search_focus`。
+- [x] Task 2 完成：单文档 LLM PageIndex 检索已切换为最多 3 轮迭代闭环。
+- [x] Task 3 完成：知识库多文档聚合 debug 已记录 `document_retrieval_rounds`。
+- [x] Task 4 完成：新增最小交叉引用识别与树节点候选跟随。
+- [x] Task 5 完成：新增 5 条 `iterative_reasoning` 评测样例，并更新答案质量计划和 `todo.md`。
+
+验证命令：
+
+```powershell
+python -m pytest "tests/unit/test_pageindex_service.py" "tests/unit/test_pageindex_ui.py" -q
+```
+
+已通过：`57 passed`。
+
