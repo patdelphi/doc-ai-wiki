@@ -50,7 +50,7 @@
 ### P1
 
 - [x] 将 Question Plan 写入 PageIndex debug 信息，方便历史结果排查
-- [ ] 根据 Question Plan 调整候选证据选择提示词，提升召回精度
+- [x] 根据 Question Plan 调整候选证据选择提示词，提升召回精度
 - [x] 将典型测试问题重新写入 DB，便于 UI 历史查看
 - [x] 优化 PageIndex 内置模板梯度：宽松速览、普适问答、严谨问答、证据审查、医学安全、原文定位
 

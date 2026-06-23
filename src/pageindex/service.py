@@ -853,6 +853,7 @@ class PageIndexService:
         cross_reference_candidates: list[dict] = []
         answer = ""
         debug_error = ""
+        retrieval_question_plan = self._build_question_plan(llm_client, question, [])
 
         for round_index in range(1, max(1, int(max_rounds or 3)) + 1):
             candidates = self._build_tree_candidates(
@@ -882,6 +883,7 @@ class PageIndexService:
             system_prompt, user_prompt = self._build_iterative_tree_reasoning_prompts(
                 question,
                 question_analysis,
+                retrieval_question_plan,
                 candidates,
                 evidence,
                 round_index,
@@ -980,7 +982,8 @@ class PageIndexService:
             "rag_evidence": rag_evidence,
             "selected_nodes": selected_debug,
             "retrieval_rounds": retrieval_rounds,
-            "question_plan": question_plan,
+            "question_plan": question_plan or retrieval_question_plan,
+            "retrieval_question_plan": retrieval_question_plan,
             "llm_error": debug_error,
         }
 
@@ -1305,6 +1308,7 @@ class PageIndexService:
     def _build_iterative_tree_reasoning_prompts(
         question: str,
         question_analysis: dict,
+        question_plan: dict,
         candidates: list[dict],
         retrieved_evidence: list[dict],
         round_index: int,
@@ -1347,6 +1351,9 @@ class PageIndexService:
                 "问题分析 JSON：",
                 json.dumps(question_analysis or {}, ensure_ascii=False),
                 "",
+                "Question Plan JSON：",
+                json.dumps(question_plan or {}, ensure_ascii=False),
+                "",
                 "已读证据 JSON：",
                 json.dumps(evidence_preview, ensure_ascii=False),
                 "",
@@ -1366,6 +1373,9 @@ class PageIndexService:
                 ),
                 "要求：每轮最多选择 3 个节点；如果当前证据已足够回答，sufficiency 返回 sufficient；"
                 "如果仍缺关键信息，返回 partial 或 insufficient，并写清 missing_information 和 next_search_focus。",
+                "候选选择必须服从 Question Plan：information_extraction 优先选择能列举对象、方法、步骤、类别或清单的节点；"
+                "claim_judgement 优先选择能直接支持、反对或限定命题的节点；source_location 优先选择可定位出处和原文位置的节点；"
+                "summary 优先选择覆盖面更完整的上层概述节点；comparison 优先选择同时覆盖比较对象或比较维度的节点。",
             ]
         )
         return system_prompt, user_prompt

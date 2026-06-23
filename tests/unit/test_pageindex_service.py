@@ -481,16 +481,22 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
                     "required_output": ["结论", "依据", "来源"],
                     "needs_evidence_relation": False,
                 }
+            if "迭代式树结构检索" in system_prompt:
+                assert "candidate_id" in user_prompt
+                assert "皮肤有帮助" in user_prompt
+                assert "滋养阴血" in user_prompt
+                assert "information_extraction" in user_prompt
+                return {
+                    "selected_nodes": [{"candidate_id": "node_2", "reason": "语义上对应皮肤状态改善"}],
+                    "sufficiency": "sufficient",
+                    "missing_information": "",
+                    "next_search_focus": "",
+                    "answer": "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。",
+                }
             if "Question Plan JSON" in user_prompt:
                 assert "information_extraction" in user_prompt
                 return {"answer": "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。"}
-            assert "candidate_id" in user_prompt
-            assert "皮肤有帮助" in user_prompt
-            assert "滋养阴血" in user_prompt
-            return {
-                "selected_nodes": [{"candidate_id": "node_2", "reason": "语义上对应皮肤状态改善"}],
-                "answer": "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。",
-            }
+            return {}
 
     llm_client = StubReasoningClient()
     service = PageIndexService(settings, llm_client=llm_client)
@@ -513,7 +519,7 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
     assert answer["debug"]["question_analysis"]["expanded_terms"] == ["皮肤状态改善", "滋养阴血"]
     assert answer["debug"]["candidate_nodes"][0]["candidate_id"] == "node_2"
     assert answer["debug"]["selected_nodes"][0]["reason"] == "语义上对应皮肤状态改善"
-    assert len(llm_client.prompts) == 4
+    assert len(llm_client.prompts) == 5
 
 
 def test_pageindex_iterative_prompt_should_require_sufficiency_fields() -> None:
@@ -522,6 +528,15 @@ def test_pageindex_iterative_prompt_should_require_sufficiency_fields() -> None:
     system_prompt, user_prompt = PageIndexService._build_iterative_tree_reasoning_prompts(
         "阿胶有哪些质量检测方法",
         {"keywords": ["质量检测", "方法"]},
+        {
+            "question_type": "information_extraction",
+            "answer_strategy": "列举阿胶质量检测方法。",
+            "target": "阿胶质量检测方法",
+            "claim": "",
+            "required_output": ["结论", "方法清单", "来源"],
+            "needs_evidence_relation": False,
+            "insufficient_evidence_policy": "证据不足时说明只覆盖当前知识库。",
+        },
         [
             {
                 "candidate_id": "node_1",
@@ -541,6 +556,9 @@ def test_pageindex_iterative_prompt_should_require_sufficiency_fields() -> None:
     assert "missing_information" in user_prompt
     assert "next_search_focus" in user_prompt
     assert "selected_nodes" in user_prompt
+    assert "Question Plan JSON" in user_prompt
+    assert "information_extraction" in user_prompt
+    assert "方法清单" in user_prompt
     assert "只返回 JSON" in system_prompt
 
 
