@@ -719,7 +719,7 @@
 
 - [ ] 保持 PageIndex 作为长文档结构增强，主验收仍以 RAG/FTS/质检链路为准。
 - [x] 检查 PageIndex 主证据与 RAG/FTS 补充证据是否稳定合并，而不是互相覆盖。
-- [ ] 对论文合集类 Markdown 增加文章边界识别计划，减少一个超大树中主题混杂。
+- [x] 对论文合集类 Markdown 增加文章边界识别计划，减少一个超大树中主题混杂。（见 `Docs/optimization-plan/pageindex_article_boundary_plan_20260623.md`）
 - [ ] 设计跨文档 PageIndex 检索策略，但不在可信 MVP 收口前优先实现。
 
 ### 2026-06-22 PageIndex 答案质量 P0 执行计划
