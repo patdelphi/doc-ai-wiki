@@ -3294,6 +3294,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         selected_index: int = 0,
         preferred_claim_id: str | None = None,
         history_scope_value: str | None = None,
+        replay_result: bool = True,
     ) -> tuple[str, str, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
         """根据最近质检记录构建当前页面展示状态。"""
 
@@ -3306,12 +3307,20 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 recent_rows=[],
             )
 
-        normalized_index = selected_index if 0 <= selected_index < len(results) else 0
-        selected_result = results[normalized_index]
         recent_payload = format_recent_quality_checks(results)
         recent_rows = build_recent_quality_rows(
             recent_payload,
         )
+        if not replay_result:
+            return build_quality_outputs(
+                progress_html=format_quality_progress_html(None),
+                result_html=format_quality_result_html(None),
+                recent_results=results,
+                recent_rows=recent_rows,
+            )
+
+        normalized_index = selected_index if 0 <= selected_index < len(results) else 0
+        selected_result = results[normalized_index]
         selected_formatted = format_quality_result(
             {
                 "check": selected_result,
@@ -4350,10 +4359,19 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             parse_knowledge_base_choice(knowledge_base_choice or ""),
         )
         resolved_scope_value = normalize_recent_quality_scope_value(recent_quality_scope_value)
+        recent_results = list_recent_quality_results_for_choice(
+            resolved_choice,
+            resolved_scope_value,
+            login_session,
+        )
         return (
             *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
             *build_quality_ui_outputs(
-                build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
+                build_recent_quality_view_outputs(
+                    recent_results,
+                    history_scope_value=resolved_scope_value,
+                    replay_result=False,
+                ),
             ),
         )
 
@@ -5181,26 +5199,30 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *current_outputs,
         )
 
+    def list_recent_quality_results_for_choice(
+        knowledge_base_choice: str | None = None,
+        history_scope_value: str | None = None,
+        login_session: dict[str, object] | None = None,
+    ) -> list[dict]:
+        """按知识库读取最近 AI 质检历史记录。"""
+
+        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
+        if not knowledge_base_id:
+            return []
+        try:
+            return quality_service.list_recent_results(
+                limit=RECENT_QUALITY_FETCH_LIMIT,
+                knowledge_base_id=knowledge_base_id,
+            )
+        except AppError:
+            return []
+
     def list_recent_quality_results(
         knowledge_base_choice: str | None = None,
         history_scope_value: str | None = None,
         login_session: dict[str, object] | None = None,
     ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
-        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
-        if not knowledge_base_id:
-            return build_recent_quality_view_outputs([], history_scope_value=history_scope_value)
-        try:
-            results = quality_service.list_recent_results(
-                limit=RECENT_QUALITY_FETCH_LIMIT,
-                knowledge_base_id=knowledge_base_id,
-            )
-        except AppError:
-            return build_quality_outputs(
-                progress_html=format_quality_progress_html(None),
-                result_html=format_quality_result_html(None),
-                recent_results=[],
-                recent_rows=[],
-            )
+        results = list_recent_quality_results_for_choice(knowledge_base_choice, history_scope_value, login_session)
         return build_recent_quality_view_outputs(
             results,
             selected_index=0,
@@ -5277,8 +5299,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_recent_rows,
         initial_quality_evaluation_cases,
     ) = build_recent_quality_view_outputs(
-        [],
+        list_recent_quality_results_for_choice(
+            initial_knowledge_base_choice,
+            initial_recent_quality_scope_value,
+            None,
+        ),
         history_scope_value=initial_recent_quality_scope_value,
+        replay_result=False,
     )
     initial_active_quality_check_html = format_active_quality_check_html(initial_formatted_quality_result)
     try:
@@ -5516,7 +5543,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         session: dict[str, object] | None,
         history_scope_value: str | None = None,
     ) -> tuple:
-        """按当前权限重置 AI 质检页状态，避免首屏回放旧历史结果。"""
+        """按当前权限重置 AI 质检页状态，并自动加载历史列表。"""
 
         resolved_scope_value = normalize_recent_quality_scope_value(history_scope_value)
         resolved_choice = _build_visible_knowledge_base_bundle(session)[2]
@@ -5524,11 +5551,27 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return build_quality_ui_outputs(
                 build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
             )
+        recent_results = list_recent_quality_results_for_choice(
+            resolved_choice,
+            resolved_scope_value,
+            session,
+        )
         return build_quality_ui_outputs(
-            build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
+            build_recent_quality_view_outputs(
+                recent_results,
+                history_scope_value=resolved_scope_value,
+                replay_result=False,
+            ),
         )
 
-    def _build_permission_ui_updates(session: dict[str, object] | None) -> tuple:
+    def _build_main_tabs_update(session: dict[str, object] | None, *, select_default_tab: bool = False):
+        """按登录入口需要选中默认主菜单。"""
+
+        if select_default_tab and _has_tab_access(session, "AI 质检"):
+            return gr.update(selected=MAIN_TAB_IDS["AI 质检"])
+        return gr.update()
+
+    def _build_permission_ui_updates(session: dict[str, object] | None, *, select_default_tab: bool = False) -> tuple:
         """根据登录态生成页签和知识库组件的可见性更新。"""
 
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
@@ -5556,7 +5599,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             gr.update(visible=show_pending_access_tab),
             *tab_visibility_updates,
             gr.update(value=_render_pending_access_html(session)),
-            gr.update(),
+            _build_main_tabs_update(session, select_default_tab=select_default_tab),
             knowledge_base_update,
             knowledge_base_update,
             knowledge_base_update,
@@ -6376,7 +6419,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         format_operation_result_html({"success": True, "message": "登录成功"}, title="登录成功"),
                         gr.update(visible=False),
                         gr.update(visible=True),
-                        *_build_permission_ui_updates(session),
+                        *_build_permission_ui_updates(session, select_default_tab=True),
                         *_build_quality_permission_updates(session),
                         *_build_review_permission_updates(session),
                     )
@@ -6452,7 +6495,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         _render_auth_user(str(restored_session.get("username") or "")),
                         gr.update(visible=False),
                         gr.update(visible=True),
-                        *_build_permission_ui_updates(restored_session),
+                        *_build_permission_ui_updates(restored_session, select_default_tab=True),
                         *_build_quality_permission_updates(restored_session),
                         *_build_review_permission_updates(restored_session),
                     )

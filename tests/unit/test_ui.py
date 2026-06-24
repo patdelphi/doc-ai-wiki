@@ -1082,8 +1082,7 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
         pageindex_knowledge_base_update,
     ):
         assert knowledge_base_update["value"].startswith("default | ")
-    # Gradio 6.x workaround: main_tabs 不再设置 selected，避免 Dataframe select 后 Tabs 跳转
-    assert "selected" not in main_tabs_update
+    assert main_tabs_update["selected"] == "main-tab-quality"
 
 
 def test_restore_login_session_should_clear_review_workspace_without_kb_permission(tmp_path: Path) -> None:
@@ -1590,8 +1589,8 @@ def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp
     assert "阿胶源于驴皮熬制" in str(claim_details[0].get("value", ""))
 
 
-def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path) -> None:
-    """AI 质检页首次进入时不应自动回放旧历史结果。"""
+def test_create_ui_app_should_preload_recent_quality_records_without_replaying_result(tmp_path: Path) -> None:
+    """AI 质检页首次进入时应加载历史列表，但不自动回放旧质检结果。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -1654,8 +1653,10 @@ def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path)
 
     assert recent_tables
     assert claim_selectors
-    # 历史记录需要用户主动点击加载，避免首屏把旧结果误认为本次质检结果。
-    assert recent_tables[0].get("value", {}).get("data", []) == []
+    # 历史列表可自动展示，但不能把旧结果回放成当前质检结果。
+    recent_rows = recent_tables[0].get("value", {}).get("data", [])
+    assert recent_rows
+    assert recent_rows[0][1] == "chkres_demo_001"
     assert claim_selectors[0].get("choices", []) == []
     assert result_panels
     assert "chkres_demo_001" not in result_panels[0]
