@@ -16,6 +16,30 @@
 > 计划文档：`Docs/optimization-plan/pageindex_iterative_reasoning_plan_20260623.md`
 > 目标：把 PageIndex 从“候选节点 rerank + RAG/FTS 补证据”升级为最小可用的“迭代式推理检索”闭环。
 
+## 2026-06-24 AI 质检逻辑回退与 PageIndex 解耦
+
+> 范围：`src/quality/service.py`、`tests/unit/test_quality.py`、`src/quality/verdicts.py`、`tests/unit/test_verdicts.py`
+> 计划文档：`Docs/optimization-plan/restore_ai_quality_before_683151e_plan_20260624.md`
+> 目标：按 `683151e^` 恢复 AI 质检核心逻辑，同时保留 PageIndex 的 QuestionPlan、模板和 query expansion 能力。
+
+### P0
+
+- [x] 新建安全分支 `codex/revert-ai-quality-before-683151e`
+- [x] 确认 AI 质检逻辑污染点：`683151e` 的 `verdicts` 抽象与 `3a324ef` 的 query expansion 接入
+- [x] 新增防回归测试：AI 质检不复用 PageIndex 的实体别名扩展
+- [x] 从 AI 质检调用链移除 `src.quality.verdicts`
+- [x] 从 AI 质检调用链移除 `query_normalizer` / `expand_query_texts`
+- [x] 保留 PageIndex 对 `query_normalizer` 的使用
+- [x] 标记 `Docs/claim_evaluation_run_20260623.md` 为无效评估，避免继续作为优化依据
+
+### 验收标准
+
+- AI 质检 `_build_retrieval_queries("驴皮胶能改善贫血")` 不再生成 `阿胶能改善贫血`、`阿胶 贫血`
+- `tests/unit/test_quality.py` 全量通过
+- 默认知识库下拉仍默认选中 `default`
+- PageIndex 仍可继续使用 query expansion
+- 不自动 commit，完成后等待确认
+
 ### P0
 
 - [x] 新增迭代检索 prompt，要求 LLM 返回 `selected_nodes`、`sufficiency`、`missing_information`、`next_search_focus`

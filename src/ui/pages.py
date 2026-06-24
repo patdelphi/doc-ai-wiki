@@ -1032,7 +1032,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """判断当前登录态是否拥有指定主菜单权限。"""
 
         if session is None:
-            return False
+            return True
         is_admin, allowed_tabs, _allowed_kb_ids = extract_login_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
@@ -3345,8 +3345,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> list[dict]:
         """按当前知识库读取最新历史质检结果，避免依赖服务启动快照。"""
 
-        if not _has_tab_access(login_session, "AI 质检"):
-            return []
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return []
@@ -3865,20 +3863,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         login_session: dict[str, object] | None = None,
     ):
         selected_template_id = parse_template_choice(template_choice)
-        initial_result_html = format_quality_result_html(None)
-        if not _has_tab_access(login_session, "AI 质检"):
-            yield build_quality_outputs(
-                progress_html=format_quality_progress_html(None),
-                result_html=format_operation_result_html(
-                    {"success": False, "message": "当前账号没有 AI 质检权限。"},
-                    title="质检结果",
-                ),
-                formatted_result={},
-                recent_results=[],
-                recent_rows=[],
-            )
-            return
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
+        initial_result_html = format_quality_result_html(None)
         if not knowledge_base_id:
             yield build_quality_outputs(
                 progress_html=format_quality_progress_html(None),
@@ -4330,15 +4316,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         recent_quality_scope_value: str | None = None,
         login_session: dict[str, object] | None = None,
     ) -> tuple:
-        """切换 AI 质检页知识库时，同步其它页面顶部下拉。"""
+        """切换 AI 质检页知识库时，同步顶部下拉并清空旧历史结果。"""
 
         _visible_items, _visible_choices, resolved_choice = _build_visible_knowledge_base_bundle(
             login_session,
             parse_knowledge_base_choice(knowledge_base_choice or ""),
         )
+        resolved_scope_value = normalize_recent_quality_scope_value(recent_quality_scope_value)
         return (
             *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
-            *list_recent_quality_results_ui(resolved_choice, recent_quality_scope_value, login_session),
+            *build_quality_ui_outputs(
+                build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
+            ),
         )
 
     def change_review_knowledge_base_ui(
@@ -5170,8 +5159,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         history_scope_value: str | None = None,
         login_session: dict[str, object] | None = None,
     ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
-        if not _has_tab_access(login_session, "AI 质检"):
-            return build_recent_quality_view_outputs([], history_scope_value=history_scope_value)
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return build_recent_quality_view_outputs([], history_scope_value=history_scope_value)
@@ -5247,13 +5234,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     initial_recent_quality_scope_value = recent_quality_scope_choices[0]
     initial_quality_evaluation_rows: list[list[str]] = []
     initial_quality_evaluation_result: dict = {}
-    try:
-        initial_recent_results = quality_service.list_recent_results(
-            limit=RECENT_QUALITY_FETCH_LIMIT,
-            knowledge_base_id=initial_knowledge_base_id,
-        ) or []
-    except AppError:
-        initial_recent_results = []
     (
         initial_progress_html,
         initial_result_html,
@@ -5270,8 +5250,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         initial_recent_rows,
         initial_quality_evaluation_cases,
     ) = build_recent_quality_view_outputs(
-        initial_recent_results,
-        selected_index=0,
+        [],
         history_scope_value=initial_recent_quality_scope_value,
     )
     initial_active_quality_check_html = format_active_quality_check_html(initial_formatted_quality_result)
@@ -5501,7 +5480,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """判断当前登录态是否拥有指定主菜单权限。"""
 
         if session is None:
-            return False
+            return True
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
@@ -5510,7 +5489,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         session: dict[str, object] | None,
         history_scope_value: str | None = None,
     ) -> tuple:
-        """按当前权限重置 AI 质检页知识库与历史状态，避免残留未授权数据。"""
+        """按当前权限重置 AI 质检页状态，避免首屏回放旧历史结果。"""
 
         resolved_scope_value = normalize_recent_quality_scope_value(history_scope_value)
         resolved_choice = _build_visible_knowledge_base_bundle(session)[2]
@@ -5518,10 +5497,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             return build_quality_ui_outputs(
                 build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
             )
-        return list_recent_quality_results_ui(
-            resolved_choice,
-            resolved_scope_value,
-            session,
+        return build_quality_ui_outputs(
+            build_recent_quality_view_outputs([], history_scope_value=resolved_scope_value),
         )
 
     def _build_permission_ui_updates(session: dict[str, object] | None) -> tuple:

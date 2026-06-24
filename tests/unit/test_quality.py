@@ -416,8 +416,19 @@ def test_quality_service_should_build_keyword_queries_for_chinese_sentence_claim
     assert "阿胶 治疗" in queries
 
 
+def test_quality_service_should_build_keyword_queries_for_category_claim() -> None:
+    """含“归入某类内容”的 Claim 应提取核心分类词召回证据。"""
+
+    query_specs = QualityService._build_retrieval_queries("阿胶在资料中常被归入滋补类内容")
+
+    queries = [item["query"] for item in query_specs]
+
+    assert "阿胶 滋补" in queries
+    assert "滋补" in queries
+
+
 def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
-    """质检 Claim 使用别名时，应补充标准名查询，避免各模块硬编码补丁分裂。"""
+    """质检 Claim 使用别名时，应补充标准名查询。"""
 
     query_specs = QualityService._build_retrieval_queries("驴皮胶能改善贫血")
 

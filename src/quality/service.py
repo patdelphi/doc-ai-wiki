@@ -885,6 +885,7 @@ class QualityService:
         compact = cls._sanitize_retrieval_query_text(compact)
 
         relation_terms = [term for term in cls._QUERY_RELATION_WORDS if term in query]
+        core_entity = cls._extract_core_entity_for_keyword_query(query)
         entity_terms = [
             cls._strip_relation_terms(term, relation_terms)
             for term in re.split(r"\s+", compact)
@@ -902,6 +903,10 @@ class QualityService:
         queries: list[str] = []
         head = entity_terms[0]
         tail = entity_terms[-1]
+        if core_entity and relation_terms:
+            for relation_term in relation_terms:
+                queries.append(f"{core_entity} {relation_term}")
+                queries.append(relation_term)
         if head and tail and head != tail:
             queries.append(f"{head} {tail}")
         if tail:
@@ -909,6 +914,19 @@ class QualityService:
         if head and relation_terms:
             queries.append(f"{head} {relation_terms[0]}")
         return queries
+
+    @staticmethod
+    def _extract_core_entity_for_keyword_query(query: str) -> str:
+        """从中文 Claim 中提取开头核心实体，用于组合分类/功效关键词。"""
+
+        text = str(query or "").strip()
+        if not text:
+            return ""
+        match = re.match(r"^(.{2,12}?)(?:在|被|常被|通常被|一般被|属于|归入|归为|是|为|能|可|可以|具有|用于)", text)
+        if not match:
+            return ""
+        entity = re.sub(r"\s+", "", match.group(1)).strip()
+        return entity if len(entity) >= 2 else ""
 
     @staticmethod
     def _strip_relation_terms(text: str, relation_terms: list[str]) -> str:

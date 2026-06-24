@@ -1532,8 +1532,8 @@ def test_create_ui_app_should_preload_review_candidates_from_quality_history(tmp
     assert "阿胶源于驴皮熬制" in str(claim_details[0].get("value", ""))
 
 
-def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> None:
-    """AI 质检页首次进入时应预加载历史质检记录列表供用户回看。"""
+def test_create_ui_app_should_not_preload_recent_quality_records(tmp_path: Path) -> None:
+    """AI 质检页首次进入时不应自动回放旧历史结果。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -1588,16 +1588,23 @@ def test_create_ui_app_should_preload_recent_quality_records(tmp_path: Path) -> 
         for component in components
         if component.get("type") == "radio" and component.get("props", {}).get("elem_id") == "quality-claims-table"
     ]
+    result_panels = [
+        str(component.get("props", {}).get("value", ""))
+        for component in components
+        if component.get("type") == "html" and component.get("props", {}).get("elem_id") == "quality-result-panel"
+    ]
 
     assert recent_tables
     assert claim_selectors
-    assert recent_tables[0].get("value")
-    assert len(recent_tables[0]["value"]["data"]) >= 1
-    assert claim_selectors[0].get("choices", [])
+    # 历史记录需要用户主动点击加载，避免首屏把旧结果误认为本次质检结果。
+    assert recent_tables[0].get("value", {}).get("data", []) == []
+    assert claim_selectors[0].get("choices", []) == []
+    assert result_panels
+    assert "chkres_demo_001" not in result_panels[0]
 
 
 def test_create_ui_app_should_paginate_more_than_ten_recent_quality_records(tmp_path: Path) -> None:
-    """最近质检记录超过 10 条时，应通过分页继续展示后续数据。"""
+    """主动加载最近质检记录后，超过 10 条时应通过分页继续展示后续数据。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -1644,22 +1651,18 @@ def test_create_ui_app_should_paginate_more_than_ten_recent_quality_records(tmp_
         )
 
     demo = create_ui_app(settings)
-    components = demo.config.get("components", [])
-    recent_tables = [
-        component.get("props", {})
-        for component in components
-        if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-recent-table"
-    ]
-    recent_page_infos = [
-        str(component.get("props", {}).get("value", ""))
-        for component in components
-        if component.get("type") == "html" and component.get("props", {}).get("elem_id") == "quality-recent-page-info"
-    ]
+    list_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "list_recent_quality_results_ui"
+    )
 
-    assert recent_tables
-    assert len(recent_tables[0]["value"]["data"]) == 10
-    assert recent_page_infos
-    assert "第 1 / 2 页" in recent_page_infos[0]
+    outputs = list_handler("default | 默认知识库", "全部历史", build_admin_login_session())
+    recent_state = outputs[16]
+    recent_rows = outputs[17]
+
+    assert len(recent_state) == 12
+    assert len(recent_rows) == 10
 
 
 def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path: Path) -> None:
@@ -2301,6 +2304,10 @@ def test_change_quality_knowledge_base_ui_should_sync_all_page_dropdown_values(t
         assert selector_update["value"].startswith("kb_sync_runtime | ")
         assert any(choice.startswith("default | ") for choice in selector_update["choices"])
         assert any(choice.startswith("kb_sync_runtime | ") for choice in selector_update["choices"])
+    # 切换知识库只同步选择器，不自动回放历史质检记录。
+    assert outputs[7].get("claims", []) == []
+    assert outputs[20] == []
+    assert outputs[21] == []
 
 
 def test_recent_quality_select_handler_should_restore_selected_result(tmp_path: Path) -> None:
