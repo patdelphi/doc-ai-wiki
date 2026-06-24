@@ -199,6 +199,11 @@ def build_quality_tab(
             value=format_operation_result_html(None, title="下载结果"),
             elem_id="quality-export-result",
         )
+        quality_download_file = gr.File(
+            label="下载文件",
+            interactive=False,
+            elem_id="quality-download-file",
+        )
     with gr.Accordion("效果评测", open=False, elem_id="quality-evaluation-accordion"):
         with gr.Column(scale=1, elem_id="quality-evaluation-panel"):
             quality_evaluation_help = gr.HTML(
@@ -300,6 +305,7 @@ def build_quality_tab(
         "recent_quality_page_info": recent_quality_page_info,
         "quality_export_button": quality_export_button,
         "quality_export_result": quality_export_result,
+        "quality_download_file": quality_download_file,
         "quality_evaluation_help": quality_evaluation_help,
         "quality_evaluation_cases": quality_evaluation_cases,
         "quality_evaluation_button": quality_evaluation_button,
@@ -374,6 +380,7 @@ def bind_quality_events(
     recent_quality_page_info = components["recent_quality_page_info"]
     quality_export_button = components["quality_export_button"]
     quality_export_result = components["quality_export_result"]
+    quality_download_file = components["quality_download_file"]
     quality_evaluation_cases = components["quality_evaluation_cases"]
     quality_evaluation_button = components["quality_evaluation_button"]
     quality_evaluation_export_button = components["quality_evaluation_export_button"]
@@ -626,7 +633,7 @@ def bind_quality_events(
     quality_export_button.click(
         fn=export_quality_results,
         inputs=[formatted_quality_result_state, selected_claim_state, claim_detail_state, evidence_items_state],
-        outputs=[quality_export_result],
+        outputs=[quality_export_result, quality_download_file],
     )
     quality_evaluation_button.click(
         fn=run_quality_evaluation_ui,

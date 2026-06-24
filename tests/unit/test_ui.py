@@ -430,6 +430,11 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
         for component in components
         if component.get("type") == "dataframe" and component.get("props", {}).get("elem_id") == "quality-recent-table"
     ]
+    quality_download_files = [
+        component.get("props", {})
+        for component in components
+        if component.get("type") == "file" and component.get("props", {}).get("elem_id") == "quality-download-file"
+    ]
 
     assert any("AI 质检会把输入内容拆成多条 Claim" in value for value in html_values)
     assert any("模板内容" in value for value in html_values)
@@ -460,11 +465,13 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert "quality-evidence-detail" in elem_ids
     assert "quality-recent-page-info" in elem_ids
     assert "quality-export-result" in elem_ids
+    assert "quality-download-file" in elem_ids
     assert "quality-evaluation-export-result" in elem_ids
     assert claim_selectors
     assert claim_selectors[0].get("label") == "Claim 列表"
     assert evidence_tables and evidence_tables[0].get("max_height") == 420
     assert recent_tables and recent_tables[0].get("max_height") == 420
+    assert quality_download_files and quality_download_files[0].get("label") == "下载文件"
     assert recent_tables[0].get("column_count", [])[0] == 8
     # 验证面板顺序：summary → claim → evidence → history → action → evaluation
     assert elem_ids.index("quality-summary-row") < elem_ids.index("quality-claim-row")
@@ -473,6 +480,57 @@ def test_create_ui_app_should_configure_quality_help_progress_and_template_panel
     assert elem_ids.index("quality-evidence-detail") < elem_ids.index("quality-history-panel")
     assert elem_ids.index("quality-history-panel") < elem_ids.index("quality-action-panel")
     assert elem_ids.index("quality-action-panel") < elem_ids.index("quality-evaluation-accordion")
+
+
+def test_export_quality_results_should_return_md_download_file(tmp_path: Path) -> None:
+    """AI 质检下载应返回 Markdown 文件路径，由 Gradio 文件组件下载。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+    export_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "export_quality_results"
+    )
+    formatted_result = {
+        "check": {
+            "check_id": "chk_export_quality",
+            "template_name": "通用事实核检",
+            "overall_verdict": "passed",
+            "summary": "1 条 Claim 已通过。",
+        },
+        "claims": [
+            {
+                "claim_id": "claim_export_quality",
+                "claim_text": "阿胶在资料中常被归入滋补类内容",
+                "verdict": "verified",
+                "risk_level": "low",
+                "confidence": 0.85,
+                "evidence": "滋补证据",
+                "evidence_details": [],
+            }
+        ],
+    }
+
+    result_html, download_file = export_handler(formatted_result, "claim_export_quality", {}, [])
+
+    assert "已生成 AI 质检下载文件" in result_html
+    assert "查看渲染效果" in result_html
+    assert ".preview.html" in result_html
+    assert download_file
+    assert download_file.endswith(".md")
+    with open(download_file, encoding="utf-8") as file:
+        exported_text = file.read()
+    assert "### 质检结果" in exported_text
+    assert "阿胶在资料中常被归入滋补类内容" in exported_text
 
 
 def test_create_ui_app_should_include_quality_dummy_workspace(tmp_path: Path) -> None:

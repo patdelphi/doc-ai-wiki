@@ -3081,7 +3081,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         selected_claim: str,
         claim_detail_map: dict | None,
         evidence_items: list[dict] | None,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """导出当前 AI 质检结果。"""
 
         claim_detail = format_claim_detail_for_review(selected_claim, claim_detail_map)
@@ -3091,7 +3091,34 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         claim_summary = (claim_detail or {}).get("summary") or {}
         linked_id = str(claim_summary.get("claim_id") or (formatted_result or {}).get("check", {}).get("check_id") or "")
-        return export_markdown_result("AI质检", "质检结果", markdown_text, linked_id=linked_id or None)
+        try:
+            export_result = save_markdown_export(
+                settings_runtime_payload.get("sqlite_db_path") or ".",
+                module_name="AI质检",
+                result_name="质检结果",
+                markdown_text=markdown_text,
+                linked_id=linked_id or None,
+                file_extension="md",
+            )
+            file_path = str(export_result["file_path"])
+            result_html = format_operation_result_html(
+                {
+                    "success": True,
+                    "message": f'已生成 AI 质检下载文件：{export_result["file_name"]}。请点击下方“下载文件”。',
+                    "preview_url": build_download_url(file_path=export_result["preview_file_path"]),
+                    "preview_file_name": export_result["preview_file_name"],
+                },
+                title="下载结果",
+            )
+            return result_html, file_path
+        except Exception as exc:  # pragma: no cover - 防御性导出失败提示
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": f"导出失败：{exc}"},
+                    title="下载结果",
+                ),
+                None,
+            )
 
     def export_quality_evaluation_results(evaluation_result: dict | None) -> str:
         """导出当前 AI 质检效果评测结果。"""
