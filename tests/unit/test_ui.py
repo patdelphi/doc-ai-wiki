@@ -34,6 +34,17 @@ def get_current_ui_app_module():
     return importlib.import_module("src.ui.app")
 
 
+def build_admin_login_session() -> dict[str, object]:
+    """构造 UI handler 测试用管理员登录态。"""
+
+    return {
+        "user_id": "admin-test",
+        "username": "admin",
+        "is_admin": True,
+        "permissions": {"tab_names": [], "kb_ids": []},
+    }
+
+
 def test_create_ui_app_should_return_gradio_blocks(tmp_path: Path) -> None:
     """UI 启动入口应返回可用的 Gradio Blocks。"""
 
@@ -975,7 +986,7 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
     with sqlite3.connect(settings.sqlite_db_path) as connection:
         # admin 已由 initialize_database 自动创建，只需更新密码
         connection.execute(
-            "UPDATE users SET password_hash = ?, user_id = ? WHERE username = 'admin'",
+            "UPDATE users SET password_hash = ?, user_id = ?, is_active = 1 WHERE username = 'admin'",
             ("pbkdf2_sha256$1$test$hash", "admin-user-001")
         )
         connection.commit()
@@ -994,10 +1005,25 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
     quality_tab_update = outputs[5]
     pageindex_tab_update = outputs[9]
     main_tabs_update = outputs[12]
+    document_knowledge_base_update = outputs[13]
+    document_target_knowledge_base_update = outputs[14]
+    quality_knowledge_base_update = outputs[15]
+    review_knowledge_base_update = outputs[16]
+    search_knowledge_base_update = outputs[17]
+    pageindex_knowledge_base_update = outputs[18]
 
     assert pending_tab_update["visible"] is False
     assert quality_tab_update["visible"] is True
     assert pageindex_tab_update["visible"] is True
+    for knowledge_base_update in (
+        document_knowledge_base_update,
+        document_target_knowledge_base_update,
+        quality_knowledge_base_update,
+        review_knowledge_base_update,
+        search_knowledge_base_update,
+        pageindex_knowledge_base_update,
+    ):
+        assert knowledge_base_update["value"].startswith("default | ")
     # Gradio 6.x workaround: main_tabs 不再设置 selected，避免 Dataframe select 后 Tabs 跳转
     assert "selected" not in main_tabs_update
 
@@ -1147,6 +1173,10 @@ def test_save_settings_user_permissions_ui_should_refresh_current_login_session(
     main_tabs_update = outputs[22]
     search_tab_update = outputs[19]
     settings_tab_update = outputs[20]
+    refreshed_document_rows = outputs[-43]
+    refreshed_search_state = outputs[-6]
+    refreshed_search_query = outputs[-5]
+    refreshed_search_selected = outputs[-3]
 
     assert refreshed_session["user_id"] == user_id
     assert refreshed_session["permissions"]["tab_names"] == ["知识库检索"]
@@ -1155,6 +1185,10 @@ def test_save_settings_user_permissions_ui_should_refresh_current_login_session(
     assert "selected" not in main_tabs_update
     assert settings_tab_update["visible"] is False
     assert search_tab_update["visible"] is True
+    assert refreshed_document_rows == []
+    assert refreshed_search_state == []
+    assert refreshed_search_query == ""
+    assert refreshed_search_selected == {}
 
 
 def test_login_state_should_use_browser_persistence_and_restore_handler(tmp_path: Path) -> None:
@@ -1922,8 +1956,8 @@ def test_load_document_management_state_ui_should_migrate_legacy_root_files_and_
         if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
     )
 
-    default_outputs = load_handler("default | 默认知识库")
-    isolated_outputs = load_handler("kb_isolated | 隔离知识库")
+    default_outputs = load_handler("default | 默认知识库", build_admin_login_session())
+    isolated_outputs = load_handler("kb_isolated | 隔离知识库", build_admin_login_session())
 
     migrated_file = settings.input_root / "default" / "a1.md"
     default_file_names = {row[1] for row in default_outputs[5]}
@@ -1991,7 +2025,7 @@ def test_load_document_management_state_ui_should_deduplicate_default_documents_
         if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
     )
 
-    default_outputs = load_handler("default | 默认知识库")
+    default_outputs = load_handler("default | 默认知识库", build_admin_login_session())
     default_rows = default_outputs[5]
     default_file_names = {row[1] for row in default_rows}
     registered_labels = {row[1]: row[6] for row in default_rows}
@@ -2047,7 +2081,8 @@ def test_register_all_documents_ui_should_only_register_current_knowledge_base_f
         if getattr(block_fn.fn, "__name__", "") == "register_all_documents_ui"
     )
 
-    default_outputs = register_all_handler("default | 默认知识库")
+    admin_session = build_admin_login_session()
+    default_outputs = register_all_handler("default | 默认知识库", admin_session)
     with sqlite3.connect(settings.sqlite_db_path) as connection:
         default_count = connection.execute("select count(*) from documents where knowledge_base_id = 'default'").fetchone()[0]
         other_count = connection.execute(
@@ -2059,7 +2094,7 @@ def test_register_all_documents_ui_should_only_register_current_knowledge_base_f
     assert default_count == 1
     assert other_count == 0
 
-    other_outputs = register_all_handler("kb_batch_only | 批量隔离知识库")
+    other_outputs = register_all_handler("kb_batch_only | 批量隔离知识库", admin_session)
     with sqlite3.connect(settings.sqlite_db_path) as connection:
         default_count_after = connection.execute("select count(*) from documents where knowledge_base_id = 'default'").fetchone()[0]
         other_count_after = connection.execute(
@@ -2070,6 +2105,46 @@ def test_register_all_documents_ui_should_only_register_current_knowledge_base_f
     assert "成功" in other_outputs[0]
     assert default_count_after == 1
     assert other_count_after == 1
+
+
+def test_document_management_handlers_should_reject_missing_login_session(tmp_path: Path) -> None:
+    """知识库管理页关键 handler 缺少登录态时，不应扫描或注册文档。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+    (settings.input_root / "default" / "missing_session.md").write_text(
+        "# 未登录文档\n\n缺少登录态时不应被扫描或注册。",
+        encoding="utf-8",
+    )
+
+    demo = create_ui_app(settings)
+    load_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "load_document_management_state_ui"
+    )
+    register_all_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "register_all_documents_ui"
+    )
+
+    load_outputs = load_handler("default | 默认知识库")
+    register_outputs = register_all_handler("default | 默认知识库")
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        document_count = connection.execute("select count(*) from documents").fetchone()[0]
+
+    assert load_outputs[5] == []
+    assert "当前账号没有知识库管理权限或可用知识库" in register_outputs[0]
+    assert document_count == 0
 
 
 def test_reassign_selected_document_ui_should_move_file_and_refresh_workspace(tmp_path: Path) -> None:
@@ -2114,15 +2189,17 @@ def test_reassign_selected_document_ui_should_move_file_and_refresh_workspace(tm
         if getattr(block_fn.fn, "__name__", "") == "reassign_selected_document_ui"
     )
 
-    default_workspace = load_handler("default | 默认知识库")
+    admin_session = build_admin_login_session()
+    default_workspace = load_handler("default | 默认知识库", admin_session)
     selected_choice = default_workspace[8].value
-    register_handler(selected_choice, "default | 默认知识库")
+    register_handler(selected_choice, "default | 默认知识库", admin_session)
     reassign_outputs = reassign_handler(
         selected_choice,
         "kb_reassign_target | 归属目标知识库",
         "default | 默认知识库",
+        admin_session,
     )
-    target_workspace = load_handler("kb_reassign_target | 归属目标知识库")
+    target_workspace = load_handler("kb_reassign_target | 归属目标知识库", admin_session)
 
     target_file = settings.input_root / "kb_reassign_target" / "to_move.md"
     with sqlite3.connect(settings.sqlite_db_path) as connection:
@@ -2171,9 +2248,9 @@ def test_rebuild_selected_document_ui_should_reject_uningested_document(tmp_path
         if getattr(block_fn.fn, "__name__", "") == "rebuild_selected_document_ui"
     )
 
-    default_workspace = load_handler("default | 默认知识库")
+    default_workspace = load_handler("default | 默认知识库", build_admin_login_session())
     selected_choice = default_workspace[8].value
-    rebuild_outputs = rebuild_handler(selected_choice, "default | 默认知识库")
+    rebuild_outputs = rebuild_handler(selected_choice, "default | 默认知识库", build_admin_login_session())
 
     assert "重建结果" in rebuild_outputs[0]
     assert "当前文档尚未入库，无法重建" in rebuild_outputs[0]
@@ -2539,7 +2616,7 @@ def test_list_recent_quality_results_ui_should_support_pending_history_filter(tm
         if getattr(block_fn.fn, "__name__", "") == "list_recent_quality_results_ui"
     )
 
-    outputs = list_handler(None, "仅看含待处理 Claim")
+    outputs = list_handler(None, "仅看含待处理 Claim", build_admin_login_session())
     recent_state = outputs[16]
     recent_rows = outputs[17]
 
@@ -2618,6 +2695,84 @@ def test_list_recent_quality_results_ui_should_hide_history_without_kb_permissio
     assert "处理中" not in progress_html
     assert recent_state == []
     assert recent_rows == []
+
+
+def test_list_recent_quality_results_ui_should_hide_history_without_quality_tab(tmp_path: Path) -> None:
+    """没有 AI 质检菜单权限时，即使有知识库权限也不应看到历史质检记录。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    QualityRepository(settings.sqlite_db_path).create_quality_result(
+        quality_check={
+            "check_id": "chkres_quality_tab_blocked",
+            "input_text": "默认知识库历史记录",
+            "template_id": "t1",
+            "template_name": "模板一",
+            "overall_verdict": "needs_review",
+            "risk_level": "medium",
+            "summary": "默认库中存在记录",
+            "created_at": "2026-05-01T12:00:00+00:00",
+            "updated_at": "2026-05-01T12:00:00+00:00",
+            "knowledge_base_id": "default",
+        },
+        claims=[],
+        rule_hits=[],
+    )
+
+    demo = create_ui_app(settings)
+    list_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "list_recent_quality_results_ui"
+    )
+    restricted_session = {
+        "user_id": "user_test",
+        "username": "test_user",
+        "is_admin": False,
+        "permissions": {"tab_names": ["知识库检索"], "kb_ids": ["default"]},
+    }
+
+    outputs = list_handler(None, "全部历史任务", restricted_session)
+
+    assert outputs[16] == []
+    assert outputs[17] == []
+
+
+def test_run_search_ui_should_reject_missing_login_session(tmp_path: Path) -> None:
+    """知识库检索页执行搜索必须显式带登录态。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+    sample_file = settings.input_root / "default" / "search_session.md"
+    sample_file.write_text("# 检索登录态\n\n共享检索关键词。", encoding="utf-8")
+    IngestService(settings).register_document({"file_path": str(sample_file)}, knowledge_base_id="default")
+
+    demo = create_ui_app(settings)
+    search_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "run_search_ui"
+    )
+
+    outputs = search_handler("共享检索关键词", 10, "default | 默认知识库")
+
+    assert "当前账号没有知识库检索权限" in outputs[0]
+    assert outputs[2] == []
 
 
 def test_list_review_workspace_ui_should_hide_review_data_without_kb_permission(tmp_path: Path) -> None:
@@ -3084,6 +3239,8 @@ def test_submit_review_then_switch_to_processed_scope_should_show_latest_record(
         "人工审核通过",
         "仅待处理",
         "全部风险",
+        "default | 默认知识库",
+        build_admin_login_session(),
     )
     review_candidate_state = submit_outputs[7]
     review_selected_claim_state = submit_outputs[8]
@@ -3479,11 +3636,18 @@ def test_restore_login_session_should_handle_invalid_stored_session(tmp_path: Pa
     restore_fn = next((block_fn.fn for block_fn in demo.fns.values() if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"), None)
     assert restore_fn is not None
 
-    result_session, result_label, result_login, result_menu, *_extra_outputs = restore_fn("invalid_string")
+    outputs = restore_fn("invalid_string")
+    result_session, result_label, result_login, result_menu = outputs[:4]
+    document_knowledge_base_update = outputs[13]
+    quality_knowledge_base_update = outputs[15]
+    search_knowledge_base_update = outputs[17]
     assert result_session.get("user_id") is None
     assert result_label == ""
     assert result_login.get("visible") is True
     assert result_menu.get("visible") is False
+    assert document_knowledge_base_update["value"].startswith("default | ")
+    assert quality_knowledge_base_update["value"].startswith("default | ")
+    assert search_knowledge_base_update["value"].startswith("default | ")
 
 
 def test_restore_login_session_should_handle_empty_user_id(tmp_path: Path) -> None:
@@ -3503,11 +3667,18 @@ def test_restore_login_session_should_handle_empty_user_id(tmp_path: Path) -> No
     assert restore_fn is not None
 
     stored = {"user_id": None, "username": None}
-    result_session, result_label, result_login, result_menu, *_extra_outputs = restore_fn(stored)
+    outputs = restore_fn(stored)
+    result_session, result_label, result_login, result_menu = outputs[:4]
+    document_knowledge_base_update = outputs[13]
+    quality_knowledge_base_update = outputs[15]
+    search_knowledge_base_update = outputs[17]
     assert result_session.get("user_id") is None
     assert result_label == ""
     assert result_login.get("visible") is True
     assert result_menu.get("visible") is False
+    assert document_knowledge_base_update["value"].startswith("default | ")
+    assert quality_knowledge_base_update["value"].startswith("default | ")
+    assert search_knowledge_base_update["value"].startswith("default | ")
 
 
 def test_restore_login_session_should_handle_deleted_user(tmp_path: Path) -> None:

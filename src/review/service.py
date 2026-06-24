@@ -35,6 +35,8 @@ class ReviewService:
                 "review_action 不合法",
                 details={"allowed": list(self.VALID_REVIEW_ACTIONS), "received": review_action},
             )
+        if not self.repository.get_claim_by_id(claim_id):
+            raise ValidationAppError("Claim 不存在", details={"claim_id": claim_id})
         now = utc_now_iso()
         payload = {
             "review_id": f"rev_{uuid4().hex[:12]}",

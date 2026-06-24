@@ -301,35 +301,77 @@ def _backfill_knowledge_base_columns(connection: sqlite3.Connection) -> None:
 
 
 def _ensure_default_admin(connection: sqlite3.Connection) -> None:
-    """确保存在默认 admin 用户（用户名/密码均为 admin），并开通全部权限。"""
+    """确保存在 admin 用户，但不再创建可登录的默认弱口令。"""
 
     import hashlib
+    import hmac
     import os
     import time
     import uuid
 
-    row = connection.execute("SELECT user_id, is_admin FROM users WHERE username = ?", ("admin",)).fetchone()
-    if row:
-        # admin 已存在，确保是管理员且拥有全部权限
-        user_id = row[0]
-        connection.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (user_id,))
-    else:
-        # admin 不存在，创建之
-        user_id = str(uuid.uuid4())
+    def build_password_hash(password: str) -> str:
+        """生成带盐 PBKDF2-SHA256 密码哈希。"""
+
         salt = os.urandom(16).hex()
         password_hash = hashlib.pbkdf2_hmac(
             "sha256",
-            b"admin",
+            password.encode("utf-8"),
             salt.encode("utf-8"),
             390000,
         ).hex()
-        password_hash = f"pbkdf2_sha256$390000${salt}${password_hash}"
+        return f"pbkdf2_sha256$390000${salt}${password_hash}"
+
+    def verify_password(stored_hash: str, password: str) -> bool:
+        """识别历史 SHA256 与 PBKDF2 哈希，供弱默认口令迁移使用。"""
+
+        if stored_hash.startswith("pbkdf2_sha256$"):
+            try:
+                _, iterations, salt, password_hash = stored_hash.split("$", 3)
+                candidate_hash = hashlib.pbkdf2_hmac(
+                    "sha256",
+                    password.encode("utf-8"),
+                    salt.encode("utf-8"),
+                    int(iterations),
+                ).hex()
+                return hmac.compare_digest(candidate_hash, password_hash)
+            except (ValueError, TypeError):
+                return False
+        legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(legacy_hash, str(stored_hash or ""))
+
+    initial_admin_password = str(os.environ.get("DOC_AI_WIKI_INITIAL_ADMIN_PASSWORD") or "").strip()
+    has_initial_password = bool(initial_admin_password and initial_admin_password != "admin")
+    replacement_password_hash = build_password_hash(initial_admin_password if has_initial_password else uuid.uuid4().hex)
+
+    row = connection.execute(
+        "SELECT user_id, password_hash, is_admin, is_active FROM users WHERE username = ?",
+        ("admin",),
+    ).fetchone()
+    if row:
+        # admin 已存在，确保是管理员；只有显式初始密码或弱口令迁移时才改密码。
+        user_id = row[0]
+        connection.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (user_id,))
+        if has_initial_password:
+            connection.execute(
+                "UPDATE users SET password_hash = ?, is_active = 1, updated_at = ? WHERE user_id = ?",
+                (replacement_password_hash, time.strftime("%Y-%m-%d %H:%M:%S"), user_id),
+            )
+        elif verify_password(row[1], "admin"):
+            connection.execute(
+                "UPDATE users SET password_hash = ?, is_active = 0, updated_at = ? WHERE user_id = ?",
+                (replacement_password_hash, time.strftime("%Y-%m-%d %H:%M:%S"), user_id),
+            )
+    else:
+        # admin 不存在时创建占位管理员；未显式设置初始密码则禁用，避免 admin/admin 弱口令。
+        user_id = str(uuid.uuid4())
         created_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
         connection.execute(
             "INSERT INTO users (user_id, username, password_hash, is_active, is_admin, created_at, updated_at) VALUES (?, ?, ?, 1, 1, ?, ?)",
-            (user_id, "admin", password_hash, created_at, created_at)
+            (user_id, "admin", replacement_password_hash, created_at, created_at)
         )
+        if not has_initial_password:
+            connection.execute("UPDATE users SET is_active = 0 WHERE user_id = ?", (user_id,))
 
     # 确保 admin 拥有所有 tab 和知识库的访问权限
     user_id_row = connection.execute("SELECT user_id FROM users WHERE username = ?", ("admin",)).fetchone()

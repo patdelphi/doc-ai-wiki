@@ -379,6 +379,8 @@ def bind_settings_events(
     settings_knowledge_base_page_state,
     settings_user_state,
     settings_selected_user_state,
+    document_components: dict[str, gr.components.Component],
+    search_components: dict[str, gr.components.Component],
     login_state,
     persisted_login_state,
     auth_user_display,
@@ -873,6 +875,63 @@ def bind_settings_events(
         settings_permission_kb_access,
         settings_permission_result,
     ]
+    document_permission_outputs = []
+    if document_components:
+        document_permission_outputs = [
+            document_components["document_summary"],
+            document_components["database_summary"],
+            document_components["database_summary_table"],
+            document_components["database_page_state"],
+            document_components["database_page_info"],
+            document_components["document_table"],
+            document_components["document_page_state"],
+            document_components["document_page_info"],
+            document_components["document_choices"],
+            document_components["document_detail"],
+            document_components["register_button"],
+            document_components["rebuild_button"],
+            document_components["document_quality_report"],
+            document_components["document_quality_checks"],
+            document_components["document_quality_sections"],
+            document_components["document_quality_sections_page_state"],
+            document_components["document_quality_sections_page_info"],
+            document_components["document_quality_chunks"],
+            document_components["document_quality_chunks_page_state"],
+            document_components["document_quality_chunks_page_info"],
+            document_components["document_quality_search_summary"],
+            document_components["document_quality_search_results"],
+            document_components["document_quality_search_page_state"],
+            document_components["document_quality_search_page_info"],
+            document_components["document_quality_search_state"],
+            document_components["document_quality_search_detail"],
+            document_components["document_quality_batch_summary"],
+            document_components["document_quality_batch_table"],
+            document_components["document_quality_batch_page_state"],
+            document_components["document_quality_batch_page_info"],
+            document_components["document_quality_config_panel"],
+            document_components["document_quality_sample_limit"],
+            document_components["document_quality_long_document_char_threshold"],
+            document_components["document_quality_min_sections_for_long_doc"],
+            document_components["document_quality_max_avg_chunks_per_section"],
+            document_components["document_quality_max_chunk_chars"],
+            document_components["document_quality_short_chunk_chars"],
+            document_components["document_quality_short_chunk_warn_min_chunk_count"],
+            document_components["document_quality_config_result"],
+            document_components["document_quality_csv_export_result"],
+        ]
+    search_permission_outputs = []
+    if search_components:
+        search_permission_outputs = [
+            search_components["search_result_summary"],
+            search_components["search_result"],
+            search_components["search_result_state"],
+            search_components["search_query_state"],
+            search_components["search_result_detail"],
+            search_components["search_selected_row_state"],
+            search_components["search_page_state"],
+            search_components["search_page_info"],
+        ]
+    extra_permission_outputs = [*document_permission_outputs, *search_permission_outputs]
     current_session_permission_outputs = [
         login_state,
         persisted_login_state,
@@ -942,6 +1001,7 @@ def bind_settings_events(
         review_history_state,
         review_selected_record_state,
         review_record_detail,
+        *extra_permission_outputs,
     ]
 
     settings_user_refresh_button.click(

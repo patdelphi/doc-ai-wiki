@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.common.errors import NotFoundAppError
+from src.common.errors import NotFoundAppError, ValidationAppError
 from src.db.connection import create_connection, initialize_database
 from src.db.repositories import QualityRepository
 from src.review.service import ReviewService
@@ -167,6 +167,23 @@ def test_delete_review_should_raise_not_found_for_missing_record(tmp_path: Path)
 
     with pytest.raises(NotFoundAppError, match="审核记录不存在"):
         review_service.delete_review("rev_missing")
+
+
+def test_submit_review_should_reject_missing_claim_id(tmp_path: Path) -> None:
+    """提交审核时 claim_id 不存在，应返回业务校验错误而不是数据库约束异常。"""
+
+    database_path = tmp_path / "app.db"
+    initialize_database(database_path)
+    review_service = ReviewService(database_path)
+
+    with pytest.raises(ValidationAppError, match="Claim 不存在"):
+        review_service.submit_review(
+            claim_id="claim_missing",
+            review_action="approved",
+            reviewed_verdict=None,
+            review_note="缺失 Claim",
+            reviewer="tester",
+        )
 
 
 def test_review_records_should_cascade_when_quality_check_deleted(tmp_path: Path) -> None:

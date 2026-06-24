@@ -135,7 +135,7 @@ def bind_search_events(
 
     search_button.click(
         fn=run_search_ui,
-        inputs=[search_query, search_top_k, search_knowledge_base],
+        inputs=[search_query, search_top_k, search_knowledge_base, login_state],
         outputs=[
             search_result_summary,
             search_result,

@@ -181,6 +181,47 @@ def seed_document_for_api_permission_test(
     )
 
 
+def seed_chunk_for_api_permission_test(
+    database_path: Path,
+    *,
+    chunk_id: str,
+    doc_uid: str,
+    knowledge_base_id: str,
+    content: str,
+) -> None:
+    """写入最小文档片段，供 chunk_id 对象级权限测试复用。"""
+
+    seed_document_for_api_permission_test(
+        database_path,
+        doc_uid=doc_uid,
+        knowledge_base_id=knowledge_base_id,
+        source_path=f"{knowledge_base_id}/{doc_uid}.md",
+    )
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO chunks (
+                chunk_id, doc_uid, section_id, chunk_index, content, source_span,
+                token_count, created_at, updated_at
+            )
+            VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?)
+            """,
+            (
+                chunk_id,
+                doc_uid,
+                content,
+                f"{doc_uid}:chunk-0",
+                len(content),
+                "2026-05-14T10:00:00+00:00",
+                "2026-05-14T10:00:00+00:00",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO chunk_fts (chunk_id, doc_uid, content) VALUES (?, ?, ?)",
+            (chunk_id, doc_uid, content),
+        )
+
+
 def test_health_endpoint_should_return_ok(tmp_path: Path) -> None:
     """健康检查接口应返回正常状态。"""
 
@@ -300,6 +341,53 @@ def test_restricted_user_should_not_access_unauthorized_knowledge_base(tmp_path:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_search_without_kb_should_only_return_authorized_chunks(tmp_path: Path) -> None:
+    """普通用户全局检索时，也只能看到已授权知识库的 chunk。"""
+
+    settings = build_test_settings(tmp_path)
+    app = create_app(settings)
+    with build_authenticated_test_client(app, settings.sqlite_db_path) as admin_client:
+        create_response = admin_client.post(
+            "/knowledge-bases",
+            json={
+                "knowledge_base_id": "medical",
+                "knowledge_base_name": "医学知识库",
+                "description": "用于 chunk 对象级权限测试",
+                "status": "active",
+                "is_default": False,
+            },
+        )
+    assert create_response.status_code == 200
+    seed_chunk_for_api_permission_test(
+        settings.sqlite_db_path,
+        chunk_id="chunk_api_default_only",
+        doc_uid="doc_api_default_chunk",
+        knowledge_base_id="default",
+        content="共享关键词 仅授权知识库内容。",
+    )
+    seed_chunk_for_api_permission_test(
+        settings.sqlite_db_path,
+        chunk_id="chunk_api_medical_only",
+        doc_uid="doc_api_medical_chunk",
+        knowledge_base_id="medical",
+        content="共享关键词 未授权医学知识库内容。",
+    )
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "search_default_only_user",
+        "SearchDefault#123",
+        tab_names=["知识库检索"],
+        kb_ids=["default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.get("/search/fulltext", params={"query": "共享关键词", "top_k": 10})
+
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert [item["chunk_id"] for item in items] == ["chunk_api_default_only"]
 
 
 def test_restricted_user_should_not_access_unauthorized_quality_result_by_check_id(tmp_path: Path) -> None:

@@ -156,17 +156,50 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
 
         if current_user.is_admin:
             return items
-        permissions = _get_user_permissions(current_user.user_id)
-        allowed_kb_ids = {
-            str(item_id or "").strip()
-            for item_id in (permissions.kb_ids if permissions else [])
-            if str(item_id or "").strip()
-        }
+        allowed_kb_ids = _get_allowed_knowledge_base_ids(current_user)
         return [
             item
             for item in items
             if str(item.get("knowledge_base_id") or "").strip() in allowed_kb_ids
         ]
+
+    def _get_allowed_knowledge_base_ids(current_user: User) -> set[str]:
+        """读取当前用户被授权的知识库 ID。"""
+
+        permissions = _get_user_permissions(current_user.user_id)
+        return {
+            str(item_id or "").strip()
+            for item_id in (permissions.kb_ids if permissions else [])
+            if str(item_id or "").strip()
+        }
+
+    def _search_with_knowledge_base_scope(
+        current_user: User,
+        search_func,
+        *,
+        top_k: int,
+        knowledge_base_id: str | None,
+        **kwargs,
+    ) -> list[dict]:
+        """按用户知识库权限执行检索，避免空知识库参数泄漏跨库 chunk。"""
+
+        _ensure_knowledge_base_access(current_user, knowledge_base_id)
+        if current_user.is_admin or knowledge_base_id:
+            return search_func(top_k=top_k, knowledge_base_id=knowledge_base_id, **kwargs)
+
+        items: list[dict] = []
+        seen_chunk_ids: set[str] = set()
+        for allowed_kb_id in sorted(_get_allowed_knowledge_base_ids(current_user)):
+            for item in search_func(top_k=top_k, knowledge_base_id=allowed_kb_id, **kwargs):
+                chunk_id = str(item.get("chunk_id") or "")
+                if chunk_id and chunk_id in seen_chunk_ids:
+                    continue
+                if chunk_id:
+                    seen_chunk_ids.add(chunk_id)
+                items.append(item)
+                if len(items) >= top_k:
+                    return items
+        return items
 
     def _get_document_knowledge_base_id(doc_uid: str) -> str:
         """按文档标识读取所属知识库。"""
@@ -356,8 +389,13 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     ) -> ApiResponse:
         """执行全文检索。"""
 
-        _ensure_knowledge_base_access(current_user, knowledge_base_id)
-        items = retrieval_service.fulltext_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
+        items = _search_with_knowledge_base_scope(
+            current_user,
+            retrieval_service.fulltext_search,
+            query=query,
+            top_k=top_k,
+            knowledge_base_id=knowledge_base_id,
+        )
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.get("/search/vector", response_model=ApiResponse)
@@ -369,8 +407,13 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     ) -> ApiResponse:
         """执行向量检索占位实现。"""
 
-        _ensure_knowledge_base_access(current_user, knowledge_base_id)
-        items = retrieval_service.vector_search(query, top_k=top_k, knowledge_base_id=knowledge_base_id)
+        items = _search_with_knowledge_base_scope(
+            current_user,
+            retrieval_service.vector_search,
+            query=query,
+            top_k=top_k,
+            knowledge_base_id=knowledge_base_id,
+        )
         return ApiResponse(success=True, message="ok", data={"items": items})
 
     @app.get("/search/hybrid", response_model=ApiResponse)
@@ -383,9 +426,10 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
     ) -> ApiResponse:
         """执行混合检索。"""
 
-        _ensure_knowledge_base_access(current_user, knowledge_base_id)
-        items = retrieval_service.hybrid_search(
-            query,
+        items = _search_with_knowledge_base_scope(
+            current_user,
+            retrieval_service.hybrid_search,
+            query=query,
             top_k=top_k,
             knowledge_base_id=knowledge_base_id,
             use_rerank=use_rerank,

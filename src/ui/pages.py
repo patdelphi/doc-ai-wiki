@@ -1032,7 +1032,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """判断当前登录态是否拥有指定主菜单权限。"""
 
         if session is None:
-            return True
+            return False
         is_admin, allowed_tabs, _allowed_kb_ids = extract_login_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
@@ -2724,6 +2724,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         query: str,
         top_k: int,
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
         normalized_query = normalize_search_query(query)
         if not normalized_query:
@@ -2738,11 +2739,36 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 format_search_result_detail_html(None, query_text=""),
                 {},
             )
+        if not _has_tab_access(login_session, "知识库检索"):
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": "当前账号没有知识库检索权限。"},
+                    title="检索结果",
+                ),
+                [],
+                [],
+                normalized_query,
+                format_search_result_detail_html(None, query_text=normalized_query),
+                {},
+            )
+        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
+        if not knowledge_base_id:
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": "当前账号没有可用知识库，请联系管理员开通知识库权限。"},
+                    title="检索结果",
+                ),
+                [],
+                [],
+                normalized_query,
+                format_search_result_detail_html(None, query_text=normalized_query),
+                {},
+            )
         try:
             items = retrieval_service.hybrid_search(
                 normalized_query,
                 top_k=top_k,
-                knowledge_base_id=resolve_knowledge_base_choice(knowledge_base_choice),
+                knowledge_base_id=knowledge_base_id,
                 use_rerank=True,
             )
         except AppError as exc:
@@ -2777,6 +2803,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         query: str,
         top_k: int,
         knowledge_base_choice: str | None = None,
+        login_session: dict[str, object] | None = None,
     ) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
         """执行检索并返回分页后的界面输出。"""
 
@@ -2784,6 +2811,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             query,
             top_k,
             knowledge_base_choice,
+            login_session,
         )
         page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=1)
         return summary_html, page_rows, search_rows, normalized_query, detail_html, selected_row, page_value, page_info
@@ -3317,6 +3345,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> list[dict]:
         """按当前知识库读取最新历史质检结果，避免依赖服务启动快照。"""
 
+        if not _has_tab_access(login_session, "AI 质检"):
+            return []
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return []
@@ -3835,8 +3865,20 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         login_session: dict[str, object] | None = None,
     ):
         selected_template_id = parse_template_choice(template_choice)
-        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         initial_result_html = format_quality_result_html(None)
+        if not _has_tab_access(login_session, "AI 质检"):
+            yield build_quality_outputs(
+                progress_html=format_quality_progress_html(None),
+                result_html=format_operation_result_html(
+                    {"success": False, "message": "当前账号没有 AI 质检权限。"},
+                    title="质检结果",
+                ),
+                formatted_result={},
+                recent_results=[],
+                recent_rows=[],
+            )
+            return
+        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             yield build_quality_outputs(
                 progress_html=format_quality_progress_html(None),
@@ -5128,6 +5170,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         history_scope_value: str | None = None,
         login_session: dict[str, object] | None = None,
     ) -> tuple[str, str, dict, list[list[str]], str, dict, str, list[list[str]], str, list[dict], str, list[dict], list[list[str]], str]:
+        if not _has_tab_access(login_session, "AI 质检"):
+            return build_recent_quality_view_outputs([], history_scope_value=history_scope_value)
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return build_recent_quality_view_outputs([], history_scope_value=history_scope_value)
@@ -5457,7 +5501,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """判断当前登录态是否拥有指定主菜单权限。"""
 
         if session is None:
-            return True
+            return False
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
         normalized_tab_name = normalize_auth_tab_name(tab_name)
         return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
@@ -5486,7 +5530,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
         logged_in = bool(isinstance(session, dict) and str(session.get("user_id") or "").strip())
         show_pending_access_tab = logged_in and not is_admin and allowed_tabs is not None and not allowed_tabs
-        visible_items, visible_choices, default_choice = _build_visible_knowledge_base_bundle(session)
+        knowledge_base_session = session if logged_in else None
+        visible_items, visible_choices, default_choice = _build_visible_knowledge_base_bundle(knowledge_base_session)
         selected_kb_id = parse_knowledge_base_choice(default_choice or "")
         (
             settings_choices,
@@ -5539,6 +5584,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             session,
         )
 
+    def _build_document_permission_updates(session: dict[str, object] | None) -> tuple:
+        """按当前权限刷新文档管理页，避免保留旧知识库文档状态。"""
+
+        _visible_items, _visible_choices, default_choice = _build_visible_knowledge_base_bundle(session)
+        return load_document_management_state_ui(default_choice, session)
+
+    def _build_search_permission_updates(session: dict[str, object] | None) -> tuple:
+        """按当前权限清空检索结果，避免保留旧知识库检索 state。"""
+
+        _visible_items, _visible_choices, default_choice = _build_visible_knowledge_base_bundle(session)
+        return reset_search_workspace_ui(default_choice)
+
     def _build_current_session_permission_updates(
         current_session: dict[str, object] | None,
         *,
@@ -5560,6 +5617,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 *_build_permission_ui_updates(session),
                 *_build_quality_permission_updates(session),
                 *_build_review_permission_updates(session),
+                *_build_document_permission_updates(session)[4:],
+                *_build_search_permission_updates(session),
             )
         if deleted and normalized_affected_user_id == current_user_id:
             empty_session = _empty_login_session()
@@ -5572,6 +5631,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 *_build_permission_ui_updates(empty_session),
                 *_build_quality_permission_updates(empty_session),
                 *_build_review_permission_updates(empty_session),
+                *_build_document_permission_updates(empty_session)[4:],
+                *_build_search_permission_updates(empty_session),
             )
         if normalized_affected_user_id and normalized_affected_user_id == current_user_id:
             refreshed_session = _build_login_session(current_user_id)
@@ -5584,6 +5645,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 *_build_permission_ui_updates(refreshed_session),
                 *_build_quality_permission_updates(refreshed_session),
                 *_build_review_permission_updates(refreshed_session),
+                *_build_document_permission_updates(refreshed_session)[4:],
+                *_build_search_permission_updates(refreshed_session),
             )
         return (
             session,
@@ -5594,6 +5657,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *_build_permission_ui_updates(session),
             *_build_quality_permission_updates(session),
             *_build_review_permission_updates(session),
+            *_build_document_permission_updates(session)[4:],
+            *_build_search_permission_updates(session),
         )
 
     with gr.Blocks(title="基于文档的知识库AI查询系统") as demo:
@@ -6149,6 +6214,16 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 select_history=select_pageindex_history_ui,
                 export_results=export_pageindex_results_ui,
             )
+            document_components_for_settings = {
+                **document_components,
+                "database_page_state": database_page_state,
+                "document_page_state": document_page_state,
+                "document_quality_sections_page_state": document_quality_sections_page_state,
+                "document_quality_chunks_page_state": document_quality_chunks_page_state,
+                "document_quality_search_page_state": document_quality_search_page_state,
+                "document_quality_batch_page_state": document_quality_batch_page_state,
+                "document_quality_search_state": document_quality_search_state,
+            }
             bind_settings_events(
                 components=settings_components,
                 settings_template_state=settings_template_state,
@@ -6159,6 +6234,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 settings_knowledge_base_page_state=settings_knowledge_base_page_state,
                 settings_user_state=settings_user_state,
                 settings_selected_user_state=settings_selected_user_state,
+                document_components=document_components_for_settings,
+                search_components=search_components,
                 login_state=login_state,
                 persisted_login_state=persisted_login_state,
                 auth_user_display=auth_user_display,

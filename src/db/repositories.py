@@ -668,6 +668,23 @@ class QualityRepository:
             "rule_hits": [dict(row) for row in rule_hit_rows],
         }
 
+    def get_claim_by_id(self, claim_id: str) -> dict[str, Any] | None:
+        """按 claim_id 读取单条 Claim。"""
+
+        normalized_claim_id = str(claim_id or "").strip()
+        if not normalized_claim_id:
+            return None
+        with create_connection(self.database_path) as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM quality_claims
+                WHERE claim_id = ?
+                """,
+                (normalized_claim_id,),
+            ).fetchone()
+        return self._normalize_quality_claim_row(row) if row else None
+
     def list_recent_quality_results(
         self,
         limit: int = 10,

@@ -121,6 +121,81 @@ def evaluate_claim_results(cases: list[dict], actual_results: list[dict]) -> dic
     }
 
 
+def evaluate_claim_cases(
+    quality_service: Any,
+    cases: list[dict],
+    *,
+    doc_uid: str | None = None,
+    knowledge_base_id: str | None = None,
+    template_id: str | None = None,
+) -> dict:
+    """运行真实 Claim 质检评测，并保留历史 check_id 便于 UI 回查。"""
+
+    actual_results: list[dict] = []
+    for index, case in enumerate(cases, start=1):
+        case_id = str(case.get("case_id") or f"case_{index}")
+        claim_text = str(case.get("claim_text") or case.get("input_text") or "").strip()
+        if not claim_text:
+            actual_results.append(
+                {
+                    "case_id": case_id,
+                    "actual_verdict": "",
+                    "evidence_details": [],
+                    "check_id": "",
+                    "error_message": "评测样例缺少 claim_text",
+                }
+            )
+            continue
+        try:
+            result = quality_service.run_check(
+                claim_text,
+                doc_uid=doc_uid or case.get("doc_uid"),
+                knowledge_base_id=case.get("knowledge_base_id") or knowledge_base_id,
+                template_id=case.get("template_id") or template_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            actual_results.append(
+                {
+                    "case_id": case_id,
+                    "actual_verdict": "",
+                    "evidence_details": [],
+                    "check_id": "",
+                    "error_message": str(exc),
+                }
+            )
+            continue
+
+        check = result.get("check") or {}
+        claims = result.get("claims") or []
+        first_claim = claims[0] if claims else {}
+        actual_results.append(
+            {
+                "case_id": case_id,
+                "actual_verdict": first_claim.get("verdict") or "",
+                "evidence_details": first_claim.get("evidence_details") or [],
+                "check_id": check.get("check_id") or first_claim.get("check_id") or "",
+                "error_message": "",
+            }
+        )
+
+    evaluated = evaluate_claim_results(cases, actual_results)
+    actual_by_case_id = {str(item.get("case_id") or ""): item for item in actual_results}
+    enriched_rows: list[dict] = []
+    for row in evaluated.get("rows") or []:
+        actual = actual_by_case_id.get(str(row.get("case_id") or ""), {})
+        enriched_rows.append(
+            {
+                **row,
+                "check_id": actual.get("check_id") or "",
+                "error_message": actual.get("error_message") or "",
+            }
+        )
+    return {
+        "summary": evaluated.get("summary") or {},
+        "rows": enriched_rows,
+    }
+
+
 def format_evaluation_report_markdown(
     *,
     title: str,
@@ -454,16 +529,17 @@ def _format_claim_rows(rows: list[dict]) -> list[str]:
     lines = [
         "## Claim 样例明细",
         "",
-        "| case_id | claim | expected | actual | matched |",
-        "|---|---|---|---|---:|",
+        "| case_id | check_id | claim | expected | actual | matched |",
+        "|---|---|---|---|---|---:|",
     ]
     if not rows:
-        lines.extend(["| - | - | - | - | - |", ""])
+        lines.extend(["| - | - | - | - | - | - |", ""])
         return lines
     for row in rows[:50]:
         lines.append(
-            "| {case_id} | {claim} | {expected} | {actual} | {matched} |".format(
+            "| {case_id} | {check_id} | {claim} | {expected} | {actual} | {matched} |".format(
                 case_id=_escape_markdown_cell(row.get("case_id")),
+                check_id=_escape_markdown_cell(row.get("check_id")),
                 claim=_escape_markdown_cell(row.get("claim_text")),
                 expected=_escape_markdown_cell(row.get("expected_verdict")),
                 actual=_escape_markdown_cell(row.get("actual_verdict")),

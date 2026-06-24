@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.retrieval.evaluation import (
     export_evidence_catalog,
+    evaluate_claim_cases,
     evaluate_claim_results,
     evaluate_retrieval_cases,
     format_evidence_catalog_markdown,
@@ -43,6 +44,49 @@ class _FakeRetrievalService:
                 "chunk_type": "",
             }
         ][:top_k]
+
+
+class _FakeQualityService:
+    """程序说明：用固定返回结果模拟真实质检服务。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def run_check(
+        self,
+        input_text: str,
+        *,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+        template_id: str | None = None,
+    ) -> dict:
+        self.calls.append(
+            {
+                "input_text": input_text,
+                "doc_uid": doc_uid,
+                "knowledge_base_id": knowledge_base_id,
+                "template_id": template_id,
+            }
+        )
+        if input_text == "阿胶能补血。":
+            return {
+                "check": {"check_id": "chk_1"},
+                "claims": [
+                    {
+                        "verdict": "verified",
+                        "evidence_details": [{"chunk_id": "chunk_1"}],
+                    }
+                ],
+            }
+        return {
+            "check": {"check_id": "chk_2"},
+            "claims": [
+                {
+                    "verdict": "needs_review",
+                    "evidence_details": [],
+                }
+            ],
+        }
 
 
 def test_load_jsonl_cases_should_skip_blank_lines_and_validate_objects(tmp_path: Path) -> None:
@@ -98,6 +142,32 @@ def test_evaluate_claim_results_should_report_accuracy_and_no_evidence_verified_
     assert result["summary"]["no_evidence_verified_rate"] == 0.5
 
 
+def test_evaluate_claim_cases_should_run_quality_service_and_collect_metrics() -> None:
+    """Claim 评测应逐条调用真实质检服务，并保留 check_id 便于回查历史。"""
+
+    service = _FakeQualityService()
+
+    result = evaluate_claim_cases(
+        service,
+        [
+            {"case_id": "claim_hit", "claim_text": "阿胶能补血。", "expected_verdict": "verified"},
+            {"case_id": "claim_miss", "claim_text": "阿胶能治疗未知疾病。", "expected_verdict": "rejected"},
+        ],
+        knowledge_base_id="default",
+        template_id="general_fact_check",
+    )
+
+    assert result["summary"]["case_count"] == 2
+    assert result["summary"]["verdict_match_count"] == 1
+    assert result["summary"]["verdict_accuracy"] == 0.5
+    assert result["rows"][0]["check_id"] == "chk_1"
+    assert result["rows"][0]["has_evidence"] is True
+    assert result["rows"][1]["actual_verdict"] == "needs_review"
+    assert result["rows"][1]["verdict_matched"] is False
+    assert service.calls[0]["knowledge_base_id"] == "default"
+    assert service.calls[0]["template_id"] == "general_fact_check"
+
+
 def test_format_evaluation_report_markdown_should_include_core_metrics() -> None:
     """评测报告 Markdown 应集中展示固定指标和样例明细。"""
 
@@ -130,6 +200,7 @@ def test_format_evaluation_report_markdown_should_include_core_metrics() -> None
                     "expected_verdict": "verified",
                     "actual_verdict": "verified",
                     "verdict_matched": True,
+                    "check_id": "chk_markdown_1",
                 },
             ],
         },
@@ -141,6 +212,7 @@ def test_format_evaluation_report_markdown_should_include_core_metrics() -> None
     assert "| 无证据 verified 率 | 0.5 |" in markdown
     assert "ret_001" in markdown
     assert "claim_001" in markdown
+    assert "chk_markdown_1" in markdown
 
 
 def test_export_evidence_catalog_should_read_traceable_chunks_from_sqlite(tmp_path: Path) -> None:
