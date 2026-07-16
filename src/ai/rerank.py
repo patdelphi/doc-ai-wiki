@@ -1,4 +1,4 @@
-"""程序说明：提供 Rerank 客户端抽象，支持禁用、本地降级、OpenAI 兼容接口与 DashScope。"""
+﻿"""程序说明：提供 Rerank 客户端抽象，支持禁用、本地降级、OpenAI 兼容接口与 DashScope。"""
 
 from __future__ import annotations
 
@@ -47,33 +47,29 @@ class OpenAICompatibleReranker(BaseReranker):
         self.timeout_seconds = timeout_seconds
 
     def rerank(self, *, query: str, items: list[dict], top_k: int) -> list[dict]:
-        """调用 OpenAI 风格重排接口，失败时降级为原始顺序。"""
+        """调用 OpenAI 风格重排接口，异常交由检索编排层处理。"""
 
         if len(items) <= 1:
             return items[:top_k]
 
-        try:
-            response = httpx.post(
-                self._resolve_endpoint(),
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "query": query,
-                    "documents": [item.get("content", "") for item in items],
-                    "top_n": top_k,
-                    "return_documents": False,
-                },
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            return _apply_rerank_results(items, payload.get("results", []), top_k=top_k)
-        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError):
-            # H5 修复：Rerank 服务不可用时降级为原始顺序，不阻断质检流程
-            return items[:top_k]
+        response = httpx.post(
+            self._resolve_endpoint(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "query": query,
+                "documents": [item.get("content", "") for item in items],
+                "top_n": top_k,
+                "return_documents": False,
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return _apply_rerank_results(items, payload.get("results", []), top_k=top_k)
 
     def _resolve_endpoint(self) -> str:
         """兼容传入根路径或完整 rerank 路径。"""
@@ -93,37 +89,33 @@ class DashScopeReranker(BaseReranker):
         self.timeout_seconds = timeout_seconds
 
     def rerank(self, *, query: str, items: list[dict], top_k: int) -> list[dict]:
-        """调用 DashScope 文本重排接口，失败时降级为原始顺序。"""
+        """调用 DashScope 文本重排接口，异常交由检索编排层处理。"""
 
         if len(items) <= 1:
             return items[:top_k]
 
-        try:
-            response = httpx.post(
-                self.base_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
+        response = httpx.post(
+            self.base_url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "input": {
+                    "query": query,
+                    "documents": [item.get("content", "") for item in items],
                 },
-                json={
-                    "model": self.model,
-                    "input": {
-                        "query": query,
-                        "documents": [item.get("content", "") for item in items],
-                    },
-                    "parameters": {
-                        "top_n": top_k,
-                        "return_documents": False,
-                    },
+                "parameters": {
+                    "top_n": top_k,
+                    "return_documents": False,
                 },
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            return _apply_rerank_results(items, payload.get("output", {}).get("results", []), top_k=top_k)
-        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError):
-            # H5 修复：Rerank 服务不可用时降级为原始顺序
-            return items[:top_k]
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return _apply_rerank_results(items, payload.get("output", {}).get("results", []), top_k=top_k)
 
 
 def build_reranker(settings: AppSettings) -> BaseReranker:
@@ -172,6 +164,6 @@ def _apply_rerank_results(items: list[dict], results: list[dict], *, top_k: int)
             }
         )
 
-    if reranked_items:
-        return reranked_items[:top_k]
-    return items[:top_k]
+    if not reranked_items:
+        raise ValueError("Rerank 响应未包含有效结果")
+    return reranked_items[:top_k]

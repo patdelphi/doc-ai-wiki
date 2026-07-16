@@ -189,19 +189,13 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         if current_user.is_admin or knowledge_base_id:
             return search_func(top_k=top_k, knowledge_base_id=knowledge_base_id, **kwargs)
 
-        items: list[dict] = []
-        seen_chunk_ids: set[str] = set()
-        for allowed_kb_id in sorted(_get_allowed_knowledge_base_ids(current_user)):
-            for item in search_func(top_k=top_k, knowledge_base_id=allowed_kb_id, **kwargs):
-                chunk_id = str(item.get("chunk_id") or "")
-                if chunk_id and chunk_id in seen_chunk_ids:
-                    continue
-                if chunk_id:
-                    seen_chunk_ids.add(chunk_id)
-                items.append(item)
-                if len(items) >= top_k:
-                    return items
-        return items
+        allowed_kb_ids = sorted(_get_allowed_knowledge_base_ids(current_user))
+        return search_func(
+            top_k=top_k,
+            knowledge_base_id=None,
+            knowledge_base_ids=allowed_kb_ids,
+            **kwargs,
+        )
 
     def _get_document_knowledge_base_id(doc_uid: str) -> str:
         """按文档标识读取所属知识库。"""

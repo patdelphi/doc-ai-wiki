@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Sequence
 
 from src.db.connection import create_connection
 from src.retrieval.query_normalizer import expand_query_texts
+from src.retrieval.scope import normalize_knowledge_base_scope
 
 
 class LexicalRetriever:
@@ -22,9 +24,13 @@ class LexicalRetriever:
         top_k: int = 10,
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: Sequence[str] | None = None,
     ) -> list[dict]:
         """执行中文词法检索。"""
 
+        knowledge_base_scope = normalize_knowledge_base_scope(knowledge_base_id, knowledge_base_ids)
+        if knowledge_base_scope == ():
+            return []
         limit = max(int(top_k), 1)
         collected: list[dict] = []
         seen_chunk_ids: set[str] = set()
@@ -39,7 +45,7 @@ class LexicalRetriever:
                         query_text,
                         top_k=limit,
                         doc_uid=doc_uid,
-                        knowledge_base_id=knowledge_base_id,
+                        knowledge_base_ids=knowledge_base_scope,
                     )
                 if not rows and len(compact_query) == 2:
                     rows = self._search_short_term(
@@ -47,7 +53,7 @@ class LexicalRetriever:
                         compact_query,
                         top_k=limit,
                         doc_uid=doc_uid,
-                        knowledge_base_id=knowledge_base_id,
+                        knowledge_base_ids=knowledge_base_scope,
                     )
                     match_type = "short_term_fallback"
 
@@ -76,17 +82,20 @@ class LexicalRetriever:
         *,
         top_k: int,
         doc_uid: str | None,
-        knowledge_base_id: str | None,
+        knowledge_base_ids: tuple[str, ...] | None,
     ) -> list[sqlite3.Row]:
         """使用 Trigram FTS5 和 BM25 执行相关性排序。"""
 
         doc_filter = " AND c.doc_uid = ?" if doc_uid else ""
-        kb_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
+        kb_filter = ""
+        if knowledge_base_ids:
+            kb_placeholders = ",".join("?" for _ in knowledge_base_ids)
+            kb_filter = f" AND d.knowledge_base_id IN ({kb_placeholders})"
         params: list[object] = [query]
         if doc_uid:
             params.append(doc_uid)
-        if knowledge_base_id:
-            params.append(knowledge_base_id)
+        if knowledge_base_ids:
+            params.extend(knowledge_base_ids)
         params.append(top_k)
         try:
             return connection.execute(
@@ -116,18 +125,21 @@ class LexicalRetriever:
         *,
         top_k: int,
         doc_uid: str | None,
-        knowledge_base_id: str | None,
+        knowledge_base_ids: tuple[str, ...] | None,
     ) -> list[sqlite3.Row]:
         """仅对两字短词执行受控 LIKE，并使用稳定相关性排序。"""
 
         doc_filter = " AND c.doc_uid = ?" if doc_uid else ""
-        kb_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
+        kb_filter = ""
+        if knowledge_base_ids:
+            kb_placeholders = ",".join("?" for _ in knowledge_base_ids)
+            kb_filter = f" AND d.knowledge_base_id IN ({kb_placeholders})"
         like_query = f"%{query}%"
         params: list[object] = [like_query, query, query, like_query, like_query]
         if doc_uid:
             params.append(doc_uid)
-        if knowledge_base_id:
-            params.append(knowledge_base_id)
+        if knowledge_base_ids:
+            params.extend(knowledge_base_ids)
         params.append(top_k)
         return connection.execute(
             f"""

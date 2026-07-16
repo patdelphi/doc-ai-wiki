@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any, cast
 
 import chromadb
 
 from src.ai.embedding import BaseEmbeddingClient, DeterministicEmbeddingClient
 from src.common.errors import ValidationAppError
 from src.db.repositories import DocumentRepository
+from src.retrieval.scope import normalize_knowledge_base_scope
 
 
 class VectorStore:
@@ -249,7 +251,7 @@ class VectorStore:
                 details={"persist_directory": self.persist_directory},
             )
 
-        repository = DocumentRepository(self.sqlite_db_path)
+        repository = DocumentRepository(Path(self.sqlite_db_path))
         repaired_docs = 0
         repaired_chunks = 0
         page = 1
@@ -309,8 +311,8 @@ class VectorStore:
             self.collection.upsert(
                 ids=[item["chunk_id"] for item in batch],
                 documents=documents,
-                metadatas=metadatas,
-                embeddings=self.embedding.embed_texts(documents),
+                metadatas=cast(Any, metadatas),
+                embeddings=cast(Any, self.embedding.embed_texts(documents)),
             )
             if progress_callback:
                 progress_callback(
@@ -399,32 +401,46 @@ class VectorStore:
             "index_versions": sorted(versions),
         }
 
-    def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None, knowledge_base_id: str | None = None) -> list[dict]:
-        """执行向量检索。H7 修复：支持按 knowledge_base_id 过滤。"""
+    def query(
+        self,
+        query_text: str,
+        top_k: int = 5,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict]:
+        """执行向量检索，支持单知识库或多知识库范围。"""
+
+        knowledge_base_scope = normalize_knowledge_base_scope(knowledge_base_id, knowledge_base_ids)
+        if knowledge_base_scope == ():
+            return []
 
         query_kwargs = {
             "query_embeddings": self.embedding.embed_texts([query_text]),
             "n_results": top_k,
             "include": ["documents", "metadatas", "distances"],
         }
-        # H7 修复：构建复合 where 条件，支持 doc_uid 和 knowledge_base_id 同时过滤
-        where_conditions = {}
+        # 文档范围和知识库范围同时存在时，使用 Chroma 的 $and 组合。
+        where_conditions: dict[str, object] = {}
         if doc_uid:
             where_conditions["doc_uid"] = doc_uid
-        if knowledge_base_id:
-            where_conditions["knowledge_base_id"] = knowledge_base_id
+        if knowledge_base_scope:
+            where_conditions["knowledge_base_id"] = (
+                knowledge_base_scope[0]
+                if len(knowledge_base_scope) == 1
+                else {"$in": list(knowledge_base_scope)}
+            )
         if len(where_conditions) == 1:
             query_kwargs["where"] = where_conditions
         elif len(where_conditions) > 1:
             query_kwargs["where"] = {"$and": [{k: v} for k, v in where_conditions.items()]}
 
-        result = self.collection.query(
-            **query_kwargs,
-        )
+        query_collection = cast(Any, self.collection.query)
+        result = query_collection(**query_kwargs)
 
-        documents = result.get("documents", [[]])[0]
-        metadatas = result.get("metadatas", [[]])[0]
-        distances = result.get("distances", [[]])[0]
+        documents = (result.get("documents") or [[]])[0]
+        metadatas = (result.get("metadatas") or [[]])[0]
+        distances = (result.get("distances") or [[]])[0]
 
         items: list[dict] = []
         for document, metadata, distance in zip(documents, metadatas, distances):

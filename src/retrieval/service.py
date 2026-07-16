@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from src.ai.rerank import BaseReranker, DisabledReranker
 from src.db.connection import create_connection
 from src.retrieval.fusion import reciprocal_rank_fusion
 from src.retrieval.lexical import LexicalRetriever
+from src.retrieval.scope import normalize_knowledge_base_scope
 from src.retrieval.vector_store import VectorStore
 
 
@@ -17,7 +19,7 @@ class RetrievalService:
     def __init__(self, database_path) -> None:
         self.database_path = database_path
         self.lexical = LexicalRetriever(database_path)
-        self.vector_store = None
+        self.vector_store: VectorStore | None = None
         self.reranker: BaseReranker = DisabledReranker()
 
     def set_vector_store(self, vector_store: VectorStore) -> None:
@@ -36,15 +38,18 @@ class RetrievalService:
         top_k: int = 10,
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
     ) -> list[dict]:
         """执行 Trigram/BM25 全文检索，并规范化返回元数据。"""
 
-        rows = self.lexical.search(
-            query,
-            top_k=top_k,
-            doc_uid=doc_uid,
-            knowledge_base_id=knowledge_base_id,
-        )
+        search_kwargs: dict[str, Any] = {
+            "top_k": top_k,
+            "doc_uid": doc_uid,
+            "knowledge_base_id": knowledge_base_id,
+        }
+        if knowledge_base_ids is not None:
+            search_kwargs["knowledge_base_ids"] = knowledge_base_ids
+        rows = self.lexical.search(query, **search_kwargs)
         return [self._with_source(self._normalize_metadata_fields(row), "fulltext") for row in rows]
 
     def vector_search(
@@ -53,17 +58,26 @@ class RetrievalService:
         top_k: int = 10,
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
     ) -> list[dict]:
         """H7 修复：向量检索支持按 knowledge_base_id 过滤。"""
 
         if self.vector_store is None:
             return []
         # H7 修复：将 knowledge_base_id 传递到向量存储层做元数据过滤
-        items = self.vector_store.query(query, top_k=top_k, doc_uid=doc_uid, knowledge_base_id=knowledge_base_id)
+        query_kwargs: dict[str, Any] = {
+            "top_k": top_k,
+            "doc_uid": doc_uid,
+            "knowledge_base_id": knowledge_base_id,
+        }
+        if knowledge_base_ids is not None:
+            query_kwargs["knowledge_base_ids"] = knowledge_base_ids
+        items = self.vector_store.query(query, **query_kwargs)
         return self._attach_document_metadata(
             items,
             retrieval_source="vector",
             knowledge_base_id=knowledge_base_id,
+            knowledge_base_ids=knowledge_base_ids,
         )
 
     def hybrid_search(
@@ -72,6 +86,7 @@ class RetrievalService:
         top_k: int = 10,
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
         *,
         fulltext_top_k: int | None = None,
         vector_top_k: int | None = None,
@@ -79,11 +94,11 @@ class RetrievalService:
     ) -> list[dict]:
         """使用 RRF 合并全文与向量结果，并在外部服务失败时显式降级。"""
 
+        scope_kwargs: dict[str, Any] = {"knowledge_base_id": knowledge_base_id}
+        if knowledge_base_ids is not None:
+            scope_kwargs["knowledge_base_ids"] = knowledge_base_ids
         lexical_items = self.fulltext_search(
-            query,
-            top_k=fulltext_top_k or top_k,
-            doc_uid=doc_uid,
-            knowledge_base_id=knowledge_base_id,
+            query, top_k=fulltext_top_k or top_k, doc_uid=doc_uid, **scope_kwargs
         )
         degraded_reason = ""
         try:
@@ -91,7 +106,7 @@ class RetrievalService:
                 query,
                 top_k=vector_top_k or top_k,
                 doc_uid=doc_uid,
-                knowledge_base_id=knowledge_base_id,
+                **scope_kwargs,
             )
         except Exception:  # noqa: BLE001
             # 外部 Embedding 或向量存储异常时保留本地检索结果。
@@ -121,6 +136,7 @@ class RetrievalService:
         top_k: int,
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
         fulltext_top_k: int | None = None,
         vector_top_k: int | None = None,
         use_rerank: bool = True,
@@ -144,6 +160,7 @@ class RetrievalService:
                 top_k=limit,
                 doc_uid=doc_uid,
                 knowledge_base_id=knowledge_base_id,
+                knowledge_base_ids=knowledge_base_ids,
                 fulltext_top_k=fulltext_top_k,
                 vector_top_k=vector_top_k,
                 use_rerank=False,
@@ -333,10 +350,12 @@ class RetrievalService:
         *,
         retrieval_source: str,
         knowledge_base_id: str | None = None,
+        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
     ) -> list[dict]:
         """以 SQLite 为准补全向量结果的文档与 chunk 追溯元数据。"""
 
-        if not items:
+        knowledge_base_scope = normalize_knowledge_base_scope(knowledge_base_id, knowledge_base_ids)
+        if not items or knowledge_base_scope == ():
             return []
 
         chunk_ids = sorted({str(item["chunk_id"]) for item in items if item.get("chunk_id")})
@@ -345,10 +364,12 @@ class RetrievalService:
         metadata_map: dict[str, dict] = {}
         with create_connection(self.database_path) as connection:
             placeholders = ",".join("?" for _ in chunk_ids)
-            knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
-            params: tuple = (
-                (*chunk_ids, knowledge_base_id) if knowledge_base_id else tuple(chunk_ids)
-            )
+            knowledge_base_filter = ""
+            params: tuple[object, ...] = tuple(chunk_ids)
+            if knowledge_base_scope:
+                kb_placeholders = ",".join("?" for _ in knowledge_base_scope)
+                knowledge_base_filter = f" AND d.knowledge_base_id IN ({kb_placeholders})"
+                params = (*chunk_ids, *knowledge_base_scope)
             rows = connection.execute(
                 f"""
                 SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
@@ -377,7 +398,7 @@ class RetrievalService:
                 {
                     **item,
                     # SQLite 是元数据事实源，可覆盖向量索引中的历史追溯字段。
-                    **metadata_map.get(item.get("chunk_id"), {}),
+                    **metadata_map.get(str(item.get("chunk_id") or ""), {}),
                 },
                 retrieval_source,
             )

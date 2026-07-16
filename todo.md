@@ -1,4 +1,50 @@
-﻿# UI 与认证改造 Todo
+﻿# 项目统一升级 Todo
+
+## 2026-07-16 知识库检索与代码质量升级
+
+> 范围：检索、PageIndex、质量门禁与核心模块治理
+> 设计文档：`Docs/design/p0_code_quality_remediation_design_20260716.md`
+> 实施计划：`Docs/tasks/p0_code_quality_remediation_plan_20260716.md`
+> 原则：本轮只执行 P0；P1/P2 作为后续路线，不扩大当前改动范围
+
+### P0：本轮执行
+
+- [x] 完成知识库技术成熟度评估
+- [x] 完成 Vibe Coding 代码质量审查
+- [x] 完成 P0 修复设计并获得确认
+- [x] 修复 Rerank HTTP/空响应静默降级
+- [x] 让受限用户跨知识库检索执行一次全局召回、融合和 Rerank
+- [x] 取消 `src.retrieval.service`、`src.retrieval.vector_store` 的 Mypy 精确豁免
+- [x] 增加配置门禁，禁止恢复已治理模块豁免或新增目录通配豁免
+- [x] 执行聚焦测试、Ruff、Mypy、完整 Pytest、build 和 compileall
+- [x] 更新变更、验收、评估和聊天记录文档
+
+### P1：后续治理
+
+- [ ] 按页面迁移 `src/ui/pages.py` 处理器，迁移一块删除一块
+- [ ] 清理 UI 未使用导入、变量和重复 `_has_tab_access()`
+- [ ] 将 PageIndex 拆为索引存取、树检索、回答编排、历史导出四个现有职责
+- [ ] 把阿胶、疾病、方剂和评测主题词迁入词表/YAML配置
+- [ ] 统一外部模型降级、数据库异常和用户错误码约定
+- [ ] 逐模块删除其余 Mypy 精确豁免
+
+### P2：效果与运营闭环
+
+- [ ] 建立人工金标检索与问答评测集
+- [ ] 增加 Recall@K、MRR、nDCG、拒答准确率和引用正确率门禁
+- [ ] 增加真实模型离线评测和成本、延迟报告
+- [ ] 建立用户反馈、失败查询分析和索引新鲜度监控
+- [ ] 扩展 PageIndex 多文档规模与领域泛化评测
+
+### P0 验收标准
+
+- Rerank 失败统一显示 `degraded_reason=rerank_unavailable`
+- 授权跨库检索结果不依赖知识库 ID 顺序，且只执行一次全局检索
+- 本轮修改的两个检索模块真实通过 Mypy
+- 所有新增测试完成红绿验证，完整质量命令以最新结果为准
+- 不调用外部 API，不执行数据库迁移、部署、commit、push、merge 或 pull
+
+## 历史计划
 
 > 时间：2026-05-12
 > 范围："src/ui"、"src/auth"、"src/db"、"tests/unit"

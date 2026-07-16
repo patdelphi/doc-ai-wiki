@@ -9,6 +9,25 @@ from src.db.connection import create_connection, initialize_database
 from src.retrieval.service import RetrievalService
 
 
+def test_fulltext_search_should_pass_multiple_knowledge_bases() -> None:
+    """服务层应把授权知识库集合原样传给词法检索。"""
+
+    captured: dict = {}
+
+    class StubLexical:
+        """记录检索参数的词法检索桩。"""
+
+        def search(self, query: str, **kwargs) -> list[dict]:
+            captured.update({"query": query, **kwargs})
+            return []
+
+    service = RetrievalService(Path("test.db"))
+    service.lexical = StubLexical()  # type: ignore[assignment]
+
+    assert service.fulltext_search("测试", knowledge_base_ids=["medical", "default"]) == []
+    assert captured["knowledge_base_ids"] == ["medical", "default"]
+
+
 class _FakeCursor:
     """程序说明：模拟 SQLite 游标返回 fetchall 结果。"""
 

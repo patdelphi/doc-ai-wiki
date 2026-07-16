@@ -78,7 +78,5 @@ module = [
   "src.pageindex.service",
   "src.pageindex.evidence_judge",
   "src.pageindex.templates",
-  "src.retrieval.service",
-  "src.retrieval.vector_store",
 ]
 ignore_errors = true

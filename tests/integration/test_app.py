@@ -1,4 +1,4 @@
-"""程序说明：验证应用最小接口闭环。"""
+﻿"""程序说明：验证应用最小接口闭环。"""
 
 from __future__ import annotations
 
@@ -341,6 +341,35 @@ def test_restricted_user_should_not_access_unauthorized_knowledge_base(tmp_path:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "无权限访问当前知识库"
+
+
+def test_restricted_user_search_should_use_one_global_authorized_scope(tmp_path: Path, monkeypatch) -> None:
+    """受限用户未选单库时，应一次检索全部授权知识库。"""
+
+    settings = build_test_settings(tmp_path)
+    captured_calls: list[dict] = []
+
+    def fake_fulltext_search(self, query: str, **kwargs) -> list[dict]:  # noqa: ANN001
+        captured_calls.append({"query": query, **kwargs})
+        return []
+
+    monkeypatch.setattr("src.retrieval.service.RetrievalService.fulltext_search", fake_fulltext_search)
+    app = create_app(settings)
+    headers = build_restricted_api_auth_headers(
+        settings.sqlite_db_path,
+        "scope_user",
+        "ScopeUser#123",
+        tab_names=["知识库检索"],
+        kb_ids=["medical", "default"],
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.get("/search/fulltext", params={"query": "全局检索", "top_k": 5})
+
+    assert response.status_code == 200
+    assert len(captured_calls) == 1
+    assert captured_calls[0]["knowledge_base_id"] is None
+    assert captured_calls[0]["knowledge_base_ids"] == ["default", "medical"]
 
 
 def test_restricted_user_search_without_kb_should_only_return_authorized_chunks(tmp_path: Path) -> None:

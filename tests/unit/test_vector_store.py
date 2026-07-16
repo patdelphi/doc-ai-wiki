@@ -62,6 +62,18 @@ class StubCollection:
         _ = where
 
 
+class QueryStubCollection(StubCollection):
+    """记录向量查询条件的集合桩。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.query_kwargs: dict = {}
+
+    def query(self, **kwargs) -> dict:
+        self.query_kwargs = kwargs
+        return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+
 class CountStubCollection(StubCollection):
     """测试 count_by_doc_uid() 时使用的集合桩。"""
 
@@ -93,6 +105,32 @@ class StubClient:
         """记录客户端句柄已释放。"""
 
         self.closed = True
+
+
+def test_vector_query_should_use_multiple_knowledge_base_filter() -> None:
+    """多知识库向量查询应使用 Chroma 的 $in 条件。"""
+
+    collection = QueryStubCollection()
+    store = VectorStore.__new__(VectorStore)
+    store.embedding = StubEmbeddingClient(3)
+    store.collection = collection
+
+    assert store.query("测试", knowledge_base_ids=["medical", "default"]) == []
+    assert collection.query_kwargs["where"] == {
+        "knowledge_base_id": {"$in": ["medical", "default"]}
+    }
+
+
+def test_vector_query_should_return_empty_for_explicit_empty_scope() -> None:
+    """显式空授权范围不能调用向量库并退化为全库查询。"""
+
+    collection = QueryStubCollection()
+    store = VectorStore.__new__(VectorStore)
+    store.embedding = StubEmbeddingClient(3)
+    store.collection = collection
+
+    assert store.query("测试", knowledge_base_ids=[]) == []
+    assert collection.query_kwargs == {}
 
 
 class RaisingLegacyConfigClient(StubClient):

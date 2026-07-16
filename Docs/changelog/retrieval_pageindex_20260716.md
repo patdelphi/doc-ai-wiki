@@ -80,3 +80,33 @@ python ".aipython/rebuild_pageindex.py" restore --latest --apply
 - 失败 staging 与 previous 目录仍保留，未在未确认的情况下清理。
 - 50 条检索候选回归：Recall@5 0.14、MRR@10 0.1002、nDCG@10 0.1144；需人工重标后才能作为正式质量判断。
 - 55 条 PageIndex 样例仍引用虚构 ID；Node Hit@5 与拒答准确率未伪造、未宣称通过。
+
+## 9. P0 正确性与质量门禁修复
+
+### 9.1 Rerank 降级可观测
+
+- OpenAI 兼容和 DashScope Rerank 客户端不再吞掉 HTTP、连接、超时或无有效结果异常。
+- 异常统一交给 `RetrievalService`，保留 RRF 候选顺序并写入 `degraded_reason=rerank_unavailable`。
+- 单候选和空候选仍直接返回，不产生无意义外部调用。
+
+### 9.2 授权知识库全局排序
+
+- 新增统一知识库范围语义：`None` 表示无限制，空集合表示显式无权限，单值与多值冲突直接拒绝。
+- SQLite FTS/短词检索使用参数化 `IN`；Chroma 使用 `$in`，与文档过滤并存时使用 `$and`。
+- 受限用户未选择单库时只执行一次授权集合检索，不再按知识库 ID 逐库截断；Embedding、RRF 和 Rerank 均在全局候选上执行一次。
+- 向量结果的 SQLite 元数据回填使用同一授权范围，防止历史向量元数据绕过权限事实源。
+
+### 9.3 Mypy 门禁恢复
+
+- 删除 `src.retrieval.service` 和 `src.retrieval.vector_store` 的精确 `ignore_errors`。
+- 新增配置回归测试，禁止重新豁免上述模块或新增检索/PageIndex目录通配豁免。
+- 当前 Mypy 命令真实检查 19 个源文件并通过。
+
+### 9.4 最新本地验收
+
+- 聚焦回归：63 项通过。
+- Ruff：`python -m ruff check src tests .aipython` 通过。
+- Mypy：`Success: no issues found in 19 source files`。
+- 完整测试：`402 passed, 6 warnings in 196.36s`；警告均为 PyPDF2/SWIG 第三方弃用提示。
+- build：sdist 与 wheel 构建成功；compileall 通过。
+- 本轮未调用外部模型 API，未执行索引重建、数据库迁移、部署、commit、push、merge 或 pull。
