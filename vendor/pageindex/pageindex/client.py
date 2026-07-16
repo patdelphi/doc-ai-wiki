@@ -1,4 +1,4 @@
-import os
+﻿import os
 import uuid
 import json
 import asyncio
@@ -148,7 +148,7 @@ class PageIndexClient:
     def _read_json(path) -> dict | None:
         """Read a JSON file, returning None on any error."""
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             print(f"Warning: corrupt {Path(path).name}: {e}")

@@ -1,4 +1,4 @@
-"""程序说明：提供最小可用的 Gradio 页面，覆盖文档管理、检索、质检与审核。"""
+﻿"""程序说明：提供最小可用的 Gradio 页面，覆盖文档管理、检索、质检与审核。"""
 
 from __future__ import annotations
 
@@ -63,6 +63,7 @@ from src.ui.viewmodels import (
     format_active_quality_check_html,
     format_database_summary_html,
     format_document_detail_html,
+    format_document_detail_markdown,
     format_document_quality_batch_export_markdown,
     format_document_quality_batch_summary_markdown,
     format_document_quality_batch_summary_html,
@@ -559,7 +560,10 @@ def _build_quality_dummy_help_html() -> str:
 def build_ui(*, ingest_service, retrieval_service, quality_service, review_service, auth_service, runtime_config: dict | None = None) -> gr.Blocks:
     """构建最小可用界面。"""
 
-    pageindex_service = PageIndexService(ingest_service.settings)
+    pageindex_service = PageIndexService(
+        ingest_service.settings,
+        retrieval_service=retrieval_service,
+    )
     knowledge_base_items = ingest_service.list_knowledge_bases()
     knowledge_base_choices = build_knowledge_base_choices(knowledge_base_items)
     default_knowledge_base_choice = next(
@@ -1314,6 +1318,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> tuple:
         """加载文档管理页，并返回分页后的界面输出。"""
 
+        if login_session is None:
+            empty_outputs = build_document_page_outputs(_build_empty_document_management_state())
+            return build_document_page_ui_outputs(empty_outputs)
         return build_document_page_ui_outputs(
             load_document_management_state(
                 knowledge_base_choice=knowledge_base_choice,
@@ -1667,6 +1674,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> tuple:
         """批量注册文档，并返回分页后的文档管理界面输出。"""
 
+        if login_session is None:
+            empty_outputs = build_document_page_outputs(_build_empty_document_management_state())
+            return (
+                format_operation_result_html(
+                    {"success": False, "message": "当前账号没有知识库管理权限或可用知识库。"},
+                    title="批量注册结果",
+                ),
+                *build_document_page_ui_outputs(empty_outputs),
+            )
         outputs = register_all_documents(knowledge_base_choice, login_session, progress)
         return (outputs[0], *build_document_page_ui_outputs(outputs[1:]))
 
@@ -2807,11 +2823,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
         """执行检索并返回分页后的界面输出。"""
 
+        effective_session = login_session
+        if effective_session is None:
+            effective_session = {
+                "is_admin": False,
+                "permissions": {"tab_names": [], "kb_ids": []},
+            }
         summary_html, _full_rows, search_rows, normalized_query, detail_html, selected_row = run_search(
             query,
             top_k,
             knowledge_base_choice,
-            login_session,
+            effective_session,
         )
         page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=1)
         return summary_html, page_rows, search_rows, normalized_query, detail_html, selected_row, page_value, page_info
@@ -3381,6 +3403,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> list[dict]:
         """按当前知识库读取最新历史质检结果，避免依赖服务启动快照。"""
 
+        if not _has_tab_access(login_session, "AI 质检"):
+            return []
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return []
@@ -5206,6 +5230,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ) -> list[dict]:
         """按知识库读取最近 AI 质检历史记录。"""
 
+        if not _has_tab_access(login_session, "AI 质检"):
+            return []
         knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
         if not knowledge_base_id:
             return []

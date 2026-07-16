@@ -1,4 +1,4 @@
-"""程序说明：验证 API 与 UI 在启动阶段遇到向量维度冲突时会自动自愈，并校验版本一致性。"""
+﻿"""程序说明：验证 API 与 UI 在向量维度冲突时安全阻断，并校验版本一致性。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import tomllib
 import pytest
 
 from src.common.config import AppSettings
+from src.common.errors import ValidationAppError
 from src.db.connection import initialize_database
 from src.db.transaction import transaction
 
@@ -201,57 +202,55 @@ def import_ui_module_with_mismatch(monkeypatch: pytest.MonkeyPatch, client: Stub
     return importlib.import_module("src.ui.app")
 
 
-def test_create_app_should_auto_rebuild_vectors_when_embedding_dimension_mismatch_at_startup(
+def test_create_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """API 初始化时发现维度不一致，应自动重建旧向量集合。"""
+    """API 初始化发现维度不一致时应阻断，不能无备份删除旧集合。"""
 
     settings = build_test_settings(tmp_path)
     seed_chunk_database(settings)
     client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
-    app_module = import_app_module_with_mismatch(monkeypatch, client, settings)
-    app = app_module.create_app(settings)
+    with pytest.raises(ValidationAppError, match="Embedding 维度"):
+        import_app_module_with_mismatch(monkeypatch, client, settings)
     collection = client.get_or_create_collection(name="knowledge_chunks")
 
-    assert app is not None
-    assert collection.peek(limit=1)["ids"] == ["chunk_1"]
-    assert len(collection.peek(limit=1)["embeddings"][0]) == 1024
+    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
+    assert len(collection.peek(limit=1)["embeddings"][0]) == 64
 
 
-def test_create_ui_app_should_auto_rebuild_vectors_when_embedding_dimension_mismatch_at_startup(
+def test_create_ui_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """UI 初始化时发现维度不一致，应自动重建旧向量集合。"""
+    """UI 初始化发现维度不一致时应阻断，不能无备份删除旧集合。"""
 
     settings = build_test_settings(tmp_path)
     seed_chunk_database(settings)
     client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
     ui_module = import_ui_module_with_mismatch(monkeypatch, client)
-    demo = ui_module.create_ui_app(settings)
+    with pytest.raises(ValidationAppError, match="Embedding 维度"):
+        ui_module.create_ui_app(settings)
     collection = client.get_or_create_collection(name="knowledge_chunks")
 
-    assert demo is not None
-    assert collection.peek(limit=1)["ids"] == ["chunk_1"]
-    assert len(collection.peek(limit=1)["embeddings"][0]) == 1024
+    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
+    assert len(collection.peek(limit=1)["embeddings"][0]) == 64
 
 
-def test_create_app_should_allow_startup_when_legacy_collection_exists_but_sqlite_has_no_chunks(
+def test_create_app_should_keep_legacy_collection_when_sqlite_has_no_chunks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """新环境仅残留旧 Chroma 索引、SQLite 还无文档时，也应能自动清空并启动。"""
+    """即使 SQLite 无 chunk，也不能在启动时无备份清空旧 Chroma。"""
 
     settings = build_test_settings(tmp_path)
     initialize_database(settings.sqlite_db_path)
     client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
-    app_module = import_app_module_with_mismatch(monkeypatch, client, settings)
-    app = app_module.create_app(settings)
+    with pytest.raises(ValidationAppError, match="Embedding 维度"):
+        import_app_module_with_mismatch(monkeypatch, client, settings)
     collection = client.get_or_create_collection(name="knowledge_chunks")
 
-    assert app is not None
-    assert collection.peek(limit=1)["ids"] == []
+    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
 
 
 def test_create_app_should_initialize_database_before_creating_vector_store(

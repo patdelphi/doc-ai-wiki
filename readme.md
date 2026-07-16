@@ -479,6 +479,15 @@ python ".aipython/inspect_index_status.py"
 - `Docs/acceptance.MD`：验收标准
 - `Docs/ui_redesign_design.MD`：UI 设计规范
 - `todo.md`：当前开发待办
+- `Docs/changelog/retrieval_pageindex_20260716.md`：检索与 PageIndex 算法、重建和恢复说明
+
+## 检索与 PageIndex 运维
+
+- 检索索引只读预检：`python ".aipython/rebuild_retrieval_indexes.py" inspect`
+- PageIndex 只读预检：`python ".aipython/rebuild_pageindex.py" inspect`
+- 离线指标评测：`python ".aipython/run_retrieval_evaluation.py"`
+- 重建和恢复默认 dry-run；只有显式 `--apply` 才会创建备份并切换活动索引。
+- 正式执行前需停止写入、确认模型配置与备份位置；完整步骤见变更记录。
 
 ## 适用场景总结
 

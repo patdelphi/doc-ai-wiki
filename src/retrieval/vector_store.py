@@ -1,4 +1,4 @@
-"""程序说明：封装 ChromaDB 持久化向量索引、维度校验与自动重建逻辑。"""
+﻿"""程序说明：封装 ChromaDB 持久化向量索引、维度校验与自动重建逻辑。"""
 
 from __future__ import annotations
 
@@ -22,12 +22,17 @@ class VectorStore:
         embedding_client: BaseEmbeddingClient | None = None,
         sqlite_db_path=None,
         auto_repair_dimension_mismatch: bool = False,
+        embedding_model: str = "deterministic-v1",
+        index_version: str = "retrieval-v2",
     ) -> None:
         self.persist_directory = str(persist_directory)
         self.collection_name = collection_name
         self.embedding = embedding_client or DeterministicEmbeddingClient()
         self.sqlite_db_path = str(sqlite_db_path) if sqlite_db_path is not None else None
         self.auto_repair_dimension_mismatch = auto_repair_dimension_mismatch
+        self.embedding_model = str(embedding_model or "unknown")
+        self.index_version = str(index_version or "retrieval-v2")
+        self.embedding_dimension = 0
         self.last_repair_summary: dict | None = None
         self._initialize_collection()
         try:
@@ -92,6 +97,7 @@ class VectorStore:
         """启动时校验当前 embedding 维度与现有集合维度是否一致。"""
 
         current_dimension = self._infer_current_embedding_dimension()
+        self.embedding_dimension = current_dimension
         stored_dimension = self._infer_stored_embedding_dimension()
         if stored_dimension is None or stored_dimension == current_dimension:
             return
@@ -227,6 +233,13 @@ class VectorStore:
             pass
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
+    def close(self) -> None:
+        """显式释放 Chroma 客户端，避免 Windows 持有索引目录句柄。"""
+
+        close_client = getattr(self.client, "close", None)
+        if callable(close_client):
+            close_client()
+
     def rebuild_from_sqlite(self, *, page_size: int = 100) -> tuple[int, int]:
         """基于 SQLite 已存储的 chunks 重建整个向量集合。"""
 
@@ -249,9 +262,15 @@ class VectorStore:
                 chunk_items = repository.list_chunks_by_doc_uid(doc_uid)
                 if not chunk_items:
                     continue
-                self.upsert_chunks(chunk_items)
+                knowledge_base_id = str(document.get("knowledge_base_id") or "")
+                # chunks 表不重复存知识库 ID，全量重建时必须从 documents 继承。
+                enriched_chunks = [
+                    {**item, "knowledge_base_id": knowledge_base_id}
+                    for item in chunk_items
+                ]
+                self.upsert_chunks(enriched_chunks)
                 repaired_docs += 1
-                repaired_chunks += len(chunk_items)
+                repaired_chunks += len(enriched_chunks)
             if page * page_size >= total:
                 break
             page += 1
@@ -279,6 +298,9 @@ class VectorStore:
                     "content_hash": item.get("content_hash") or "",
                     # H7 修复：写入知识库 ID，支持向量检索按知识库过滤
                     "knowledge_base_id": item.get("knowledge_base_id") or "",
+                    "embedding_model": self.embedding_model,
+                    "embedding_dimension": self.embedding_dimension,
+                    "index_version": self.index_version,
                 }
                 for trace_key in ("source_start_line", "source_end_line", "page_no"):
                     if item.get(trace_key) is not None:
@@ -317,6 +339,65 @@ class VectorStore:
         if ids and isinstance(ids[0], list):
             return sum(len(self._to_sequence(item)) for item in ids)
         return len(ids)
+
+    def inspect_index(self) -> dict:
+        """汇总向量数量、归属和必填模型元数据。"""
+
+        try:
+            snapshot = self.collection.get(include=["metadatas"])
+        except Exception as exc:  # noqa: BLE001
+            raise ValidationAppError(
+                "读取向量索引元数据失败",
+                details={"collection_name": self.collection_name, "reason": str(exc)},
+            ) from exc
+
+        ids = self._to_sequence(snapshot.get("ids"))
+        metadatas = self._to_sequence(snapshot.get("metadatas"))
+        if ids and isinstance(ids[0], list):
+            ids = [item for group in ids for item in self._to_sequence(group)]
+        if metadatas and isinstance(metadatas[0], list):
+            metadatas = [item for group in metadatas for item in self._to_sequence(group)]
+
+        required_fields = (
+            "chunk_id",
+            "doc_uid",
+            "knowledge_base_id",
+            "embedding_model",
+            "embedding_dimension",
+            "index_version",
+        )
+        by_knowledge_base: dict[str, int] = {}
+        by_document: dict[str, int] = {}
+        models: set[str] = set()
+        dimensions: set[int] = set()
+        versions: set[str] = set()
+        missing_metadata_count = 0
+        for raw_metadata in metadatas:
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            if any(metadata.get(field) in (None, "") for field in required_fields):
+                missing_metadata_count += 1
+            knowledge_base_id = str(metadata.get("knowledge_base_id") or "")
+            doc_uid = str(metadata.get("doc_uid") or "")
+            if knowledge_base_id:
+                by_knowledge_base[knowledge_base_id] = by_knowledge_base.get(knowledge_base_id, 0) + 1
+            if doc_uid:
+                by_document[doc_uid] = by_document.get(doc_uid, 0) + 1
+            if metadata.get("embedding_model"):
+                models.add(str(metadata["embedding_model"]))
+            if metadata.get("embedding_dimension") not in (None, ""):
+                dimensions.add(int(metadata["embedding_dimension"]))
+            if metadata.get("index_version"):
+                versions.add(str(metadata["index_version"]))
+        missing_metadata_count += max(len(ids) - len(metadatas), 0)
+        return {
+            "total_count": len(ids),
+            "by_knowledge_base": by_knowledge_base,
+            "by_document": by_document,
+            "missing_metadata_count": missing_metadata_count,
+            "embedding_models": sorted(models),
+            "embedding_dimensions": sorted(dimensions),
+            "index_versions": sorted(versions),
+        }
 
     def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None, knowledge_base_id: str | None = None) -> list[dict]:
         """执行向量检索。H7 修复：支持按 knowledge_base_id 过滤。"""

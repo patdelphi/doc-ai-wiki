@@ -1,26 +1,30 @@
-"""程序说明：封装 PageIndex 本地索引构建、文档查询与知识库隔离逻辑。"""
+﻿"""程序说明：封装 PageIndex 本地索引构建、文档查询与知识库隔离逻辑。"""
 
 from __future__ import annotations
 
 import ast
-import sqlite3
 import json
+import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from uuid import uuid4
 
 from src.ai.llm import DisabledLLMClient, build_llm_client
 from src.common.config import AppSettings
-from src.common.errors import DatabaseAppError, NotFoundAppError, ValidationAppError
+from src.common.errors import AppError, DatabaseAppError, NotFoundAppError, ValidationAppError
 from src.common.paths import resolve_input_path, to_input_relative_path
 from src.common.utils import utc_now_iso
 from src.db.connection import create_connection
 from src.db.transaction import transaction
 from src.pageindex.evidence_judge import classify_evidence_relation, infer_conclusion
 from src.pageindex.question_plan import build_question_plan_prompts, normalize_question_plan
+from src.pageindex.routing import PageIndexBudget, RetrievalBudgetExceededError, route_documents
+from src.pageindex.structure import build_heading_tree, enrich_vendor_structure, evaluate_tree_quality
 from src.pageindex.templates import PageIndexTemplateService
 from src.retrieval.query_normalizer import expand_query_texts
+from src.retrieval.service import RetrievalService
 
 
 PAGEINDEX_VENDOR_ROOT = Path(__file__).resolve().parents[2] / "vendor" / "pageindex"
@@ -39,11 +43,18 @@ else:
 class PageIndexService:
     """PageIndex 本地服务，所有数据都绑定到指定知识库。"""
 
-    def __init__(self, settings: AppSettings, *, llm_client: object | None = None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        llm_client: object | None = None,
+        retrieval_service: RetrievalService | None = None,
+    ) -> None:
         """初始化服务并确保 PageIndex 元数据表存在。"""
 
         self.settings = settings
         self.llm_client = llm_client
+        self.retrieval_service = retrieval_service or RetrievalService(settings.sqlite_db_path)
         self.template_service = PageIndexTemplateService(settings.templates_dir)
         self.workspace_root = settings.sqlite_db_path.parent / "pageindex_workspace"
         self._ensure_tables()
@@ -111,8 +122,6 @@ class PageIndexService:
     def build_index(self, knowledge_base_id: str, doc_uid: str, *, rebuild: bool = False) -> dict:
         """为指定知识库下的单篇文档构建 PageIndex 本地索引。"""
 
-        self._ensure_llm_enabled()
-        self._ensure_pageindex_available()
         resolved_knowledge_base_id = self._require_knowledge_base_id(knowledge_base_id)
         resolved_doc_uid = str(doc_uid or "").strip()
         if not resolved_doc_uid:
@@ -128,14 +137,37 @@ class PageIndexService:
         workspace = self._document_workspace(resolved_knowledge_base_id, resolved_doc_uid)
         workspace.mkdir(parents=True, exist_ok=True)
         pageindex_source_path = self._prepare_pageindex_source_path(source_path, workspace)
-        client = PageIndexClient(
-            api_key=self.settings.llm_api_key,
-            model=self._pageindex_model_name(),
-            retrieve_model=self._pageindex_model_name(),
-            workspace=str(workspace),
-        )
         mode = "md" if source_path.suffix.lower() in {".md", ".markdown"} else "pdf"
-        pageindex_doc_id = client.index(str(pageindex_source_path), mode=mode)
+        if mode == "md":
+            local_result = self._build_local_markdown_workspace(
+                workspace=workspace,
+                source_path=pageindex_source_path,
+                doc_uid=resolved_doc_uid,
+                doc_title=str(document.get("doc_title") or resolved_doc_uid),
+                source_hash=str(document["source_hash"]),
+            )
+            pageindex_doc_id = str(local_result["pageindex_doc_id"])
+            structure_status = "normalized"
+        else:
+            self._ensure_llm_enabled()
+            self._ensure_pageindex_available()
+            self._configure_vendor_environment()
+            client = PageIndexClient(
+                api_key=self.settings.llm_api_key,
+                model=self._pageindex_model_name(),
+                retrieve_model=self._pageindex_model_name(),
+                workspace=str(workspace),
+            )
+            pageindex_doc_id = client.index(str(pageindex_source_path), mode=mode)
+            structure_status = self._write_normalized_structure(
+                client=client,
+                workspace=workspace,
+                pageindex_doc_id=pageindex_doc_id,
+                doc_uid=resolved_doc_uid,
+                source_path=pageindex_source_path,
+                mode=mode,
+                source_hash=str(document["source_hash"]),
+            )
         self.upsert_index_record(
             resolved_knowledge_base_id,
             resolved_doc_uid,
@@ -149,6 +181,7 @@ class PageIndexService:
             "pageindex_doc_id": pageindex_doc_id,
             "workspace_path": str(workspace),
             "status": "ready",
+            "structure_status": structure_status,
             "rebuild": rebuild,
         }
 
@@ -229,7 +262,18 @@ class PageIndexService:
             raise ValidationAppError("问题不能为空")
         record = self._get_index_record(knowledge_base_id, doc_uid)
         structure = self._load_structure(record)
-        retrieval_result = self._answer_with_reasoning_or_fallback(record, structure, normalized_question, template_id=template_id)
+        retrieval_result = self._answer_with_reasoning_or_fallback(
+            record,
+            structure,
+            normalized_question,
+            template_id=template_id,
+            budget=PageIndexBudget(
+                max_llm_calls=6,
+                max_rounds=3,
+                max_documents=1,
+                max_evidence=8,
+            ),
+        )
         evidence = retrieval_result["evidence"]
         answer_text = retrieval_result["answer"]
         query_id = f"piq_{uuid4().hex[:12]}"
@@ -706,16 +750,43 @@ class PageIndexService:
     def _answer_knowledge_base_with_reasoning_or_fallback(self, records: list[dict], question: str, *, template_id: str | None = None) -> dict:
         """聚合当前知识库内多篇 PageIndex 文档的问答证据。"""
 
+        budget = PageIndexBudget(
+            max_llm_calls=7,
+            max_rounds=3,
+            max_documents=3,
+            max_evidence=8,
+        )
+        try:
+            question_analysis = self._analyze_question(question, budget=budget)
+        except RetrievalBudgetExceededError:
+            question_analysis = {
+                "mode": "预算内本地关键词",
+                "intent": "",
+                "entities": [],
+                "keywords": self._extract_question_terms(question),
+                "expanded_terms": [],
+            }
+        routed_records = budget.limit_documents(
+            route_documents(question, records, question_analysis, limit=budget.max_documents)
+        )
         evidence: list[dict] = []
         candidate_nodes: list[dict] = []
         rag_evidence: list[dict] = []
         llm_errors: list[str] = []
         question_plans: list[dict] = []
         document_retrieval_rounds: list[dict] = []
-        for record in records:
+        for record in routed_records:
             try:
                 structure = self._load_structure(record)
-                result = self._answer_with_reasoning_or_fallback(record, structure, question, template_id=template_id)
+                result = self._answer_with_reasoning_or_fallback(
+                    record,
+                    structure,
+                    question,
+                    template_id=template_id,
+                    budget=budget,
+                    question_analysis=question_analysis,
+                    finalize_answer=False,
+                )
             except AppError as exc:
                 llm_errors.append(exc.message)
                 continue
@@ -742,15 +813,25 @@ class PageIndexService:
                 )
             if result.get("llm_error"):
                 llm_errors.append(str(result.get("llm_error") or ""))
+            if budget.exhausted:
+                break
 
+        evidence = budget.limit_evidence(evidence)
         if not evidence and llm_errors:
             raise ValidationAppError("当前知识库 PageIndex 检索失败", details={"reason": "；".join(llm_errors)})
         answer = self._build_local_answer(question, evidence)
         aggregate_question_plan = question_plans[0] if question_plans else {}
-        if evidence:
+        if evidence and not budget.exhausted:
             try:
                 llm_client = self._get_llm_client()
-                answer_payload = self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id)
+                answer_payload = self._generate_llm_answer_payload(
+                    llm_client,
+                    question,
+                    evidence,
+                    template_id=template_id,
+                    question_plan=aggregate_question_plan,
+                    budget=budget,
+                )
                 answer = str(answer_payload.get("answer") or answer)
                 aggregate_question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else aggregate_question_plan
             except Exception as exc:  # noqa: BLE001
@@ -768,6 +849,16 @@ class PageIndexService:
                 "question_plan": aggregate_question_plan,
                 "document_question_plans": question_plans,
                 "document_retrieval_rounds": document_retrieval_rounds,
+                "routed_documents": [
+                    {
+                        "doc_uid": str(item.get("doc_uid") or ""),
+                        "doc_title": str(item.get("doc_title") or ""),
+                        "routing_score": int(item.get("routing_score") or 0),
+                        "routing_reason": str(item.get("routing_reason") or ""),
+                    }
+                    for item in routed_records
+                ],
+                "budget": budget.snapshot(),
             },
         }
 
@@ -781,16 +872,41 @@ class PageIndexService:
                 return doc_uid
         return str(records[0].get("doc_uid") or "")
 
-    def _answer_with_reasoning_or_fallback(self, record: dict, structure: list[dict], question: str, *, template_id: str | None = None) -> dict:
+    def _answer_with_reasoning_or_fallback(
+        self,
+        record: dict,
+        structure: list[dict],
+        question: str,
+        *,
+        template_id: str | None = None,
+        budget: PageIndexBudget | None = None,
+        question_analysis: dict | None = None,
+        finalize_answer: bool = True,
+    ) -> dict:
         """优先用 LLM 对 PageIndex 树做语义推理，失败时回退到本地关键词。"""
 
-        question_analysis = self._analyze_question(question)
+        active_budget = budget or PageIndexBudget(
+            max_llm_calls=6,
+            max_rounds=3,
+            max_documents=1,
+            max_evidence=8,
+        )
+        resolved_analysis = question_analysis or self._analyze_question(question, budget=active_budget)
         try:
-            evidence, answer, debug = self._answer_with_iterative_tree_reasoning(record, structure, question, question_analysis, template_id=template_id)
+            evidence, answer, debug = self._answer_with_iterative_tree_reasoning(
+                record,
+                structure,
+                question,
+                resolved_analysis,
+                template_id=template_id,
+                budget=active_budget,
+                finalize_answer=finalize_answer,
+            )
             evidence = self._classify_evidence_items(question, evidence)
             if evidence:
                 debug["retrieval_mode"] = "LLM 语义树推理"
-                debug["question_analysis"] = question_analysis
+                debug["question_analysis"] = resolved_analysis
+                debug["budget"] = active_budget.snapshot()
                 return {
                     "evidence": evidence,
                     "answer": answer or self._build_local_answer(question, evidence),
@@ -799,7 +915,8 @@ class PageIndexService:
                     "debug": debug,
                 }
             debug["retrieval_mode"] = "LLM 语义树推理"
-            debug["question_analysis"] = question_analysis
+            debug["question_analysis"] = resolved_analysis
+            debug["budget"] = active_budget.snapshot()
             return {
                 "evidence": [],
                 "answer": self._build_local_answer(question, []),
@@ -807,14 +924,17 @@ class PageIndexService:
                 "llm_error": "",
                 "debug": debug,
             }
+        except RetrievalBudgetExceededError as exc:
+            llm_error = exc.message
         except Exception as exc:  # noqa: BLE001
             llm_error = str(exc)
         else:
             llm_error = ""
 
-        evidence, candidate_nodes = self._rank_evidence(record, structure, question, question_analysis)
-        rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis)
+        evidence, candidate_nodes = self._rank_evidence(record, structure, question, resolved_analysis)
+        rag_evidence = self._search_rag_fts_evidence(record, question, resolved_analysis)
         evidence = self._merge_evidence(evidence, rag_evidence)
+        evidence = active_budget.limit_evidence(evidence)
         evidence = self._classify_evidence_items(question, evidence)
         return {
             "evidence": evidence,
@@ -823,11 +943,12 @@ class PageIndexService:
             "llm_error": llm_error,
             "debug": {
                 "retrieval_mode": "本地关键词降级",
-                "question_analysis": question_analysis,
+                "question_analysis": resolved_analysis,
                 "candidate_nodes": candidate_nodes,
                 "rag_evidence": rag_evidence,
                 "selected_nodes": candidate_nodes[: len(evidence)],
                 "llm_error": llm_error,
+                "budget": active_budget.snapshot(),
             },
         }
 
@@ -840,6 +961,8 @@ class PageIndexService:
         *,
         template_id: str | None = None,
         max_rounds: int = 3,
+        budget: PageIndexBudget | None = None,
+        finalize_answer: bool = True,
     ) -> tuple[list[dict], str, dict]:
         """让 LLM 多轮选择 PageIndex 节点，证据不足时继续检索。"""
 
@@ -853,22 +976,47 @@ class PageIndexService:
         cross_reference_candidates: list[dict] = []
         answer = ""
         debug_error = ""
-        retrieval_question_plan = self._build_question_plan(llm_client, question, [])
+        active_budget = budget or PageIndexBudget(
+            max_llm_calls=6,
+            max_rounds=max_rounds,
+            max_documents=1,
+            max_evidence=8,
+        )
+        retrieval_question_plan = self._build_question_plan(
+            llm_client,
+            question,
+            [],
+            budget=active_budget,
+        )
         retrieval_policy = self._resolve_pageindex_retrieval_policy(template_id)
         max_tree_candidates = int(retrieval_policy.get("max_tree_candidates", 30))
         max_selected_nodes = int(retrieval_policy.get("max_selected_nodes", 3))
         max_rag_evidence = int(retrieval_policy.get("max_rag_evidence", 2))
+        search_focus = ""
 
         for round_index in range(1, max(1, int(max_rounds or 3)) + 1):
+            active_budget.consume_round(f"node_selection_round_{round_index}")
+            round_question = (
+                f"{question}\n本轮补充检索重点：{search_focus}"
+                if search_focus
+                else question
+            )
+            round_analysis = dict(question_analysis)
+            if search_focus:
+                round_analysis["expanded_terms"] = [
+                    *(question_analysis.get("expanded_terms") or []),
+                    search_focus,
+                ]
             candidates = self._build_tree_candidates(
                 record,
                 structure,
-                question=question,
-                question_analysis=question_analysis,
+                question=round_question,
+                question_analysis=round_analysis,
                 limit=max_tree_candidates,
                 include_content=True,
             )
-            candidates = self._merge_tree_candidates(candidates, cross_reference_candidates)
+            # 交叉引用候选保留 xref ID，避免被同标题的普通焦点候选覆盖。
+            candidates = self._merge_tree_candidates(cross_reference_candidates, candidates)
             candidates = [item for item in candidates if str(item.get("candidate_id") or "") not in selected_candidate_ids]
             for candidate in candidates:
                 candidate_debug_by_id[str(candidate.get("candidate_id") or "")] = self._candidate_to_debug(candidate)
@@ -876,6 +1024,8 @@ class PageIndexService:
                 retrieval_rounds.append(
                     {
                         "round": round_index,
+                        "search_focus": search_focus,
+                        "candidate_node_ids": [],
                         "selected_nodes": [],
                         "sufficiency": "insufficient",
                         "missing_information": "PageIndex 树标题和摘要未召回候选节点",
@@ -885,19 +1035,22 @@ class PageIndexService:
                 break
 
             system_prompt, user_prompt = self._build_iterative_tree_reasoning_prompts(
-                question,
-                question_analysis,
+                round_question,
+                round_analysis,
                 retrieval_question_plan,
                 candidates,
                 evidence,
                 round_index,
             )
+            active_budget.consume_llm(f"node_selection_round_{round_index}")
             selection = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
             if not isinstance(selection, dict):
                 debug_error = "LLM 迭代检索返回格式无效"
                 retrieval_rounds.append(
                     {
                         "round": round_index,
+                        "search_focus": search_focus,
+                        "candidate_node_ids": [str(item.get("candidate_id") or "") for item in candidates],
                         "selected_nodes": [],
                         "sufficiency": "insufficient",
                         "missing_information": debug_error,
@@ -936,6 +1089,14 @@ class PageIndexService:
                         "source_type": "PageIndex 节点",
                         "doc_uid": str(record.get("doc_uid") or ""),
                         "pageindex_doc_id": str(record.get("pageindex_doc_id") or ""),
+                        "node_id": str(node.get("node_id") or candidate_id),
+                        "heading_path": str(node.get("heading_path") or ""),
+                        "source_start_line": node.get("source_start_line"),
+                        "source_end_line": node.get("source_end_line"),
+                        "source_anchor": str(node.get("source_anchor") or ""),
+                        "retrieval_round": round_index,
+                        "local_score": int(candidate.get("score") or 0),
+                        "degraded_reason": "",
                     }
                 )
                 debug_item = {
@@ -957,12 +1118,15 @@ class PageIndexService:
             retrieval_rounds.append(
                 {
                     "round": round_index,
+                    "search_focus": search_focus,
+                    "candidate_node_ids": [str(item.get("candidate_id") or "") for item in candidates],
                     "selected_nodes": round_selected_debug,
                     "sufficiency": sufficiency,
                     "missing_information": missing_information,
                     "next_search_focus": next_search_focus,
                 }
             )
+            search_focus = next_search_focus
             if sufficiency == "sufficient" and evidence:
                 break
             if not round_selected_debug:
@@ -971,11 +1135,19 @@ class PageIndexService:
         # PageIndex 树摘要可能缺少用户问题中的细粒度疾病/指标词；只有树候选为 0 时才启用 RAG 兜底，避免覆盖 LLM 明确拒选的判断。
         rag_evidence = self._search_rag_fts_evidence(record, question, question_analysis, max_results=max_rag_evidence) if evidence or not candidate_debug_by_id else []
         evidence = self._merge_evidence(evidence, rag_evidence)
+        evidence = active_budget.limit_evidence(evidence)
         evidence = self._classify_evidence_items(question, evidence)
         question_plan: dict = {}
-        if evidence:
+        if evidence and finalize_answer:
             try:
-                answer_payload = self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id)
+                answer_payload = self._generate_llm_answer_payload(
+                    llm_client,
+                    question,
+                    evidence,
+                    template_id=template_id,
+                    question_plan=retrieval_question_plan,
+                    budget=active_budget,
+                )
                 answer = str(answer_payload.get("answer") or answer or "")
                 question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else {}
             except Exception:  # noqa: BLE001
@@ -990,6 +1162,7 @@ class PageIndexService:
             "retrieval_question_plan": retrieval_question_plan,
             "retrieval_policy": retrieval_policy,
             "llm_error": debug_error,
+            "budget": active_budget.snapshot(),
         }
 
     @staticmethod
@@ -1186,7 +1359,12 @@ class PageIndexService:
         self.llm_client = llm_client
         return llm_client
 
-    def _analyze_question(self, question: str) -> dict:
+    def _analyze_question(
+        self,
+        question: str,
+        *,
+        budget: PageIndexBudget | None = None,
+    ) -> dict:
         """分析问题意图与扩展关键词，LLM 不可用时使用本地关键词。"""
 
         local_terms = self._extract_question_terms(question)
@@ -1199,6 +1377,8 @@ class PageIndexService:
         }
         try:
             llm_client = self._get_llm_client()
+            if budget is not None:
+                budget.consume_llm("question_analysis")
             result = llm_client.complete_json(
                 system_prompt="你是中文文档问题分析助手。请抽取问题意图、实体、关键词和同义扩展词，只返回 JSON。",
                 user_prompt="\n".join(
@@ -1210,6 +1390,8 @@ class PageIndexService:
                     ]
                 ),
             )
+        except RetrievalBudgetExceededError:
+            raise
         except Exception:  # noqa: BLE001
             return fallback
 
@@ -1390,33 +1572,59 @@ class PageIndexService:
 
         return str(self._generate_llm_answer_payload(llm_client, question, evidence, template_id=template_id).get("answer") or "").strip()
 
-    def _generate_llm_answer_payload(self, llm_client: object, question: str, evidence: list[dict], *, template_id: str | None = None) -> dict:
+    def _generate_llm_answer_payload(
+        self,
+        llm_client: object,
+        question: str,
+        evidence: list[dict],
+        *,
+        template_id: str | None = None,
+        question_plan: dict | None = None,
+        budget: PageIndexBudget | None = None,
+    ) -> dict:
         """让 LLM 基于证据生成回答，并返回 Question Plan 便于调试追踪。"""
 
         template = self.template_service.get_template(template_id)
-        question_plan = self._build_question_plan(llm_client, question, evidence)
+        resolved_question_plan = question_plan or self._build_question_plan(
+            llm_client,
+            question,
+            evidence,
+            budget=budget,
+        )
         system_prompt, user_prompt = self.template_service.render_answer_prompts(
             template,
             question=question,
             evidence=evidence,
-            question_plan=question_plan,
+            question_plan=resolved_question_plan,
             structure_context=self._build_answer_structure_context(evidence),
             evidence_judgement=self._build_local_evidence_judgement(evidence),
             citation_rules="必须列出证据标题、位置、文档或 chunk 来源。",
         )
+        if budget is not None:
+            budget.consume_llm("final_answer")
         result = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
         return {
             "answer": str(result.get("answer") or "").strip(),
-            "question_plan": question_plan,
+            "question_plan": resolved_question_plan,
         }
 
     @staticmethod
-    def _build_question_plan(llm_client: object, question: str, evidence: list[dict]) -> dict:
+    def _build_question_plan(
+        llm_client: object,
+        question: str,
+        evidence: list[dict],
+        *,
+        budget: PageIndexBudget | None = None,
+    ) -> dict:
         """调用 LLM 生成 Question Plan；失败时只做结构化兜底，不写死问题路由。"""
 
         system_prompt, user_prompt = build_question_plan_prompts(question, evidence)
         try:
+            if budget is not None:
+                budget.consume_llm("question_plan")
             payload = llm_client.complete_json(system_prompt=system_prompt, user_prompt=user_prompt)
+        except RetrievalBudgetExceededError:
+            raise
         except Exception:  # noqa: BLE001
             payload = {}
         return normalize_question_plan(payload, question)
@@ -1548,9 +1756,17 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 row = connection.execute(
                     """
-                    SELECT knowledge_base_id, doc_uid, pageindex_doc_id, workspace_path, source_hash, status
-                    FROM pageindex_indexes
-                    WHERE knowledge_base_id = ? AND doc_uid = ?
+                    SELECT
+                        p.knowledge_base_id,
+                        p.doc_uid,
+                        p.pageindex_doc_id,
+                        p.workspace_path,
+                        p.source_hash,
+                        p.status,
+                        d.source_hash AS current_source_hash
+                    FROM pageindex_indexes p
+                    JOIN documents d ON d.doc_uid = p.doc_uid
+                    WHERE p.knowledge_base_id = ? AND p.doc_uid = ?
                     """,
                     (resolved_knowledge_base_id, resolved_doc_uid),
                 ).fetchone()
@@ -1568,10 +1784,20 @@ class PageIndexService:
             with create_connection(self.settings.sqlite_db_path) as connection:
                 rows = connection.execute(
                     """
-                    SELECT knowledge_base_id, doc_uid, pageindex_doc_id, workspace_path, source_hash, status
-                    FROM pageindex_indexes
-                    WHERE knowledge_base_id = ?
-                    ORDER BY updated_at DESC, doc_uid COLLATE NOCASE
+                    SELECT
+                        p.knowledge_base_id,
+                        p.doc_uid,
+                        p.pageindex_doc_id,
+                        p.workspace_path,
+                        p.source_hash,
+                        p.status,
+                        d.doc_title,
+                        d.source_path,
+                        d.source_hash AS current_source_hash
+                    FROM pageindex_indexes p
+                    JOIN documents d ON d.doc_uid = p.doc_uid
+                    WHERE p.knowledge_base_id = ?
+                    ORDER BY p.updated_at DESC, p.doc_uid COLLATE NOCASE
                     """,
                     (resolved_knowledge_base_id,),
                 ).fetchall()
@@ -1580,10 +1806,39 @@ class PageIndexService:
         return [dict(row) for row in rows]
 
     def _load_structure(self, record: dict) -> list[dict]:
-        """通过 vendor PageIndex 读取文档结构。"""
+        """优先读取通过质量门禁的规范化树，旧索引显式标记为 legacy。"""
 
         self._ensure_pageindex_available()
         workspace_path = Path(str(record["workspace_path"]))
+        normalized_path = workspace_path / "structure.normalized.json"
+        if normalized_path.exists():
+            try:
+                payload = json.loads(normalized_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationAppError(
+                    "PageIndex 规范化结构 JSON 无效",
+                    details={"reason": str(exc), "index_status": "stale_index"},
+                ) from exc
+            structure = payload.get("structure") if isinstance(payload, dict) else None
+            expected_hash = str(record.get("source_hash") or "")
+            current_hash = str(record.get("current_source_hash") or expected_hash)
+            manifest_hash = str(payload.get("source_hash") or "") if isinstance(payload, dict) else ""
+            if not expected_hash or current_hash != expected_hash or manifest_hash != expected_hash:
+                raise ValidationAppError(
+                    "stale_index：PageIndex 来源哈希已变化，请重建索引",
+                    details={
+                        "index_status": "stale_index",
+                        "index_source_hash": expected_hash,
+                        "current_source_hash": current_hash,
+                        "manifest_source_hash": manifest_hash,
+                    },
+                )
+            if payload.get("status") != "ready" or not isinstance(structure, list):
+                raise ValidationAppError(
+                    "PageIndex 规范化结构未通过质量门禁",
+                    details={"index_status": "stale_index"},
+                )
+            return structure
         if not (workspace_path / "_meta.json").exists():
             raise ValidationAppError(
                 "PageIndex 索引文件缺失",
@@ -1599,7 +1854,153 @@ class PageIndexService:
             raise NotFoundAppError("PageIndex 结构不存在", details={"reason": str(structure.get("error"))})
         if not isinstance(structure, list):
             raise ValidationAppError("PageIndex 结构格式无效")
+        for node in structure:
+            if isinstance(node, dict):
+                node.setdefault("_structure_status", "legacy")
         return structure
+
+    def _write_normalized_structure(
+        self,
+        *,
+        client: object,
+        workspace: Path,
+        pageindex_doc_id: str,
+        doc_uid: str,
+        source_path: Path,
+        mode: str,
+        source_hash: str,
+    ) -> str:
+        """增强 vendor 结构并在质量通过后原子写入规范化文件。"""
+
+        get_structure = getattr(client, "get_document_structure", None)
+        if not callable(get_structure):
+            # 仅兼容测试替身或历史 vendor；真实客户端始终提供该接口。
+            return "legacy"
+        try:
+            raw_structure = get_structure(pageindex_doc_id)
+            vendor_structure = json.loads(raw_structure)
+        except (OSError, TypeError, json.JSONDecodeError) as exc:
+            raise ValidationAppError(
+                "PageIndex vendor 结构无法规范化",
+                details={"reason": str(exc)},
+            ) from exc
+        if not isinstance(vendor_structure, list):
+            raise ValidationAppError("PageIndex vendor 结构格式无效")
+
+        source_text = ""
+        if mode == "md":
+            try:
+                source_text = source_path.read_text(encoding="utf-8-sig")
+            except OSError as exc:
+                raise ValidationAppError(
+                    "读取 PageIndex 规范化源文档失败",
+                    details={"source_path": str(source_path), "reason": str(exc)},
+                ) from exc
+        heading_tree = build_heading_tree(source_text) if mode == "md" else []
+        normalized_structure = enrich_vendor_structure(vendor_structure, heading_tree, doc_uid)
+        source_line_count = len(source_text.splitlines()) if mode == "md" else 0
+        quality_report = evaluate_tree_quality(normalized_structure, source_line_count)
+        self._write_json_atomic(workspace / "structure.quality.json", quality_report)
+        if not quality_report["passed"]:
+            raise ValidationAppError(
+                "PageIndex 结构未通过质量门禁",
+                details={"quality": quality_report, "index_status": "stale_index"},
+            )
+
+        self._write_json_atomic(
+            workspace / "structure.normalized.json",
+            {
+                "status": "ready",
+                "pageindex_doc_id": pageindex_doc_id,
+                "doc_uid": doc_uid,
+                "source_hash": source_hash,
+                "quality": quality_report,
+                "structure": normalized_structure,
+            },
+        )
+        return "normalized"
+
+    def _build_local_markdown_workspace(
+        self,
+        *,
+        workspace: Path,
+        source_path: Path,
+        doc_uid: str,
+        doc_title: str,
+        source_hash: str,
+    ) -> dict:
+        """用 Markdown 标题和原文范围本地建树，避免节点级 LLM 并发风暴。"""
+
+        try:
+            source_text = source_path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise ValidationAppError(
+                "读取 PageIndex Markdown 源文档失败",
+                details={"source_path": str(source_path), "reason": str(exc)},
+            ) from exc
+        heading_tree = build_heading_tree(source_text)
+        normalized_structure = enrich_vendor_structure([], heading_tree, doc_uid)
+        quality_report = evaluate_tree_quality(
+            normalized_structure,
+            len(source_text.splitlines()),
+        )
+        self._write_json_atomic(workspace / "structure.quality.json", quality_report)
+        if not quality_report["passed"]:
+            raise ValidationAppError(
+                "Markdown 本地 PageIndex 结构未通过质量门禁",
+                details={"quality": quality_report, "index_status": "stale_index"},
+            )
+
+        pageindex_doc_id = f"local-md-{str(source_hash)[:24]}"
+        vendor_document = {
+            "id": pageindex_doc_id,
+            "type": "md",
+            "path": source_path.name,
+            "doc_name": doc_title,
+            "doc_description": str(normalized_structure[0].get("summary") or ""),
+            "line_count": len(source_text.splitlines()),
+            "structure": normalized_structure,
+        }
+        vendor_meta = {
+            pageindex_doc_id: {
+                "type": "md",
+                "doc_name": doc_title,
+                "doc_description": vendor_document["doc_description"],
+                "path": source_path.name,
+                "line_count": vendor_document["line_count"],
+            }
+        }
+        self._write_json_atomic(workspace / f"{pageindex_doc_id}.json", vendor_document)
+        self._write_json_atomic(workspace / "_meta.json", vendor_meta)
+        self._write_json_atomic(
+            workspace / "structure.normalized.json",
+            {
+                "status": "ready",
+                "pageindex_doc_id": pageindex_doc_id,
+                "doc_uid": doc_uid,
+                "source_hash": source_hash,
+                "quality": quality_report,
+                "structure": normalized_structure,
+            },
+        )
+        return {
+            "pageindex_doc_id": pageindex_doc_id,
+            "source_hash": source_hash,
+            "quality": quality_report,
+        }
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: dict) -> None:
+        """使用同目录临时文件原子写入 UTF-8 BOM JSON。"""
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8-sig",
+            newline="\r\n",
+        )
+        temporary_path.replace(path)
 
     def _rank_evidence(self, record: dict, structure: list[dict], question: str, question_analysis: dict | None = None) -> tuple[list[dict], list[dict]]:
         """按问题关键词对 PageIndex 节点进行本地打分。"""
@@ -1626,7 +2027,7 @@ class PageIndexService:
         return evidence, [self._candidate_to_debug(item) for item in candidates]
 
     def _search_rag_fts_evidence(self, record: dict, question: str, question_analysis: dict | None = None, *, max_results: int = 2) -> list[dict]:
-        """在当前 PageIndex 文档关联的 RAG/FTS chunk 中补充细粒度原文证据。"""
+        """调用统一混合检索服务，为当前 PageIndex 文档补充细粒度证据。"""
 
         max_results = max(0, int(max_results or 0))
         if max_results <= 0:
@@ -1640,59 +2041,36 @@ class PageIndexService:
         required_subject_terms = self._required_rag_subject_terms(terms)
         rows: list[dict] = []
         seen_chunks: set[str] = set()
-        with create_connection(self.settings.sqlite_db_path) as connection:
-            for term in query_terms:
+        for term in query_terms:
+            if len(rows) >= max_results:
+                break
+            normalized_term = str(term or "").strip()
+            if not normalized_term:
+                continue
+            result_rows = self.retrieval_service.hybrid_search(
+                normalized_term,
+                top_k=max(max_results * 3, 3),
+                doc_uid=str(record.get("doc_uid") or ""),
+                knowledge_base_id=str(record.get("knowledge_base_id") or "") or None,
+                fulltext_top_k=max(max_results * 3, 3),
+                vector_top_k=max(max_results * 3, 3),
+                use_rerank=False,
+            )
+            for item in result_rows:
+                chunk_id = str(item.get("chunk_id") or "")
+                if not chunk_id or chunk_id in seen_chunks:
+                    continue
+                content = str(item.get("content") or "")
+                if normalized_term not in content:
+                    continue
+                if required_subject_terms and not any(subject in content for subject in required_subject_terms):
+                    continue
+                if self._is_incidental_rag_context(normalized_term, content):
+                    continue
+                seen_chunks.add(chunk_id)
+                rows.append(dict(item))
                 if len(rows) >= max_results:
                     break
-                normalized_term = str(term or "").strip()
-                if not normalized_term:
-                    continue
-                try:
-                    result_rows = connection.execute(
-                        """
-                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
-                               c.source_start_line, c.source_end_line, c.source_anchor,
-                               c.chunk_type, c.content
-                        FROM chunk_fts f
-                        JOIN chunks c ON c.chunk_id = f.chunk_id
-                        WHERE chunk_fts MATCH ?
-                          AND c.doc_uid = ?
-                        LIMIT 3
-                        """,
-                        (normalized_term, record["doc_uid"]),
-                    ).fetchall()
-                except sqlite3.OperationalError:
-                    result_rows = []
-                if not result_rows:
-                    result_rows = connection.execute(
-                        """
-                        SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
-                               c.source_start_line, c.source_end_line, c.source_anchor,
-                               c.chunk_type, c.content
-                        FROM chunks c
-                        WHERE c.content LIKE ?
-                          AND c.doc_uid = ?
-                        ORDER BY c.chunk_index ASC
-                        LIMIT 3
-                        """,
-                        (f"%{normalized_term}%", record["doc_uid"]),
-                    ).fetchall()
-                for row in result_rows:
-                    item = dict(row)
-                    chunk_id = str(item.get("chunk_id") or "")
-                    if not chunk_id or chunk_id in seen_chunks:
-                        continue
-                    content = str(item.get("content") or "")
-                    if normalized_term not in content:
-                        continue
-                    if required_subject_terms and not any(subject in content for subject in required_subject_terms):
-                        continue
-                    if self._is_incidental_rag_context(normalized_term, content):
-                        continue
-                    seen_chunks.add(chunk_id)
-                    rows.append(item)
-                    if len(rows) >= max_results:
-                        break
 
         evidence: list[dict] = []
         for row in rows:
@@ -1711,6 +2089,12 @@ class PageIndexService:
                     "source_end_line": row.get("source_end_line"),
                     "source_anchor": str(row.get("source_anchor") or row.get("source_span") or ""),
                     "chunk_type": str(row.get("chunk_type") or ""),
+                    "retrieval_round": 0,
+                    "rrf_score": float(row.get("rrf_score") or row.get("query_rrf_score") or 0.0),
+                    "local_score": row.get("lexical_rank"),
+                    "matched_sources": list(row.get("matched_sources") or []),
+                    "retrieval_trace": list(row.get("retrieval_trace") or []),
+                    "degraded_reason": str(row.get("degraded_reason") or ""),
                 }
             )
         return evidence
@@ -2084,6 +2468,10 @@ class PageIndexService:
         """从中文问题片段中抽取可用于结构检索的核心短语。"""
 
         terms = [segment]
+        # 用户常在核心主题后附加“研究/资料”等泛化尾词，标题通常只保留主题本身。
+        for suffix in ("研究", "资料", "信息", "情况"):
+            if segment.endswith(suffix) and len(segment) - len(suffix) >= 2:
+                terms.append(segment[: -len(suffix)])
         if len(segment) >= 4:
             if "质量检测" in segment:
                 terms.append("质量检测")
@@ -2301,6 +2689,13 @@ class PageIndexService:
         if "/" in model or not provider:
             return model
         return f"{provider}/{model}"
+
+    def _configure_vendor_environment(self) -> None:
+        """把项目 LLM 地址桥接给 PageIndex vendor 使用的 LiteLLM。"""
+
+        base_url = str(self.settings.llm_base_url or "").strip().rstrip("/")
+        if base_url:
+            os.environ["OPENAI_API_BASE"] = base_url
 
     @staticmethod
     def _require_knowledge_base_id(knowledge_base_id: str) -> str:

@@ -1,4 +1,4 @@
-"""程序说明：提供最小可用的结构化 claim 质检流程。"""
+﻿"""程序说明：提供最小可用的结构化 claim 质检流程。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from src.quality.verdicts import (
     most_conservative_verdict,
 )
 from src.retrieval.service import RetrievalService
-from src.retrieval.query_normalizer import expand_query_texts, normalize_query_text
+from src.retrieval.query_normalizer import normalize_query_text
 from src.retrieval.vector_store import VectorStore
 from src.rules.service import RuleService
 
@@ -762,77 +762,52 @@ class QualityService:
         final_top_k = max(int(retrieval_policy["final_top_k"]), 4)
         per_query_limit = max(final_top_k + 1, 5)
         candidate_limit = max(final_top_k * 2, len(query_specs) * 2, 8)
-        merged: dict[str, dict] = {}
-        for query_spec in query_specs:
-            items = self.retrieval_service.hybrid_search(
-                query_spec["query"],
-                top_k=per_query_limit,
-                doc_uid=doc_uid,
-                knowledge_base_id=knowledge_base_id,
-                fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit + 1),
-                vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit + 1),
-                use_rerank=retrieval_policy["use_rerank"],
-            )
-            for item in items:
-                chunk_id = str(item.get("chunk_id") or "")
-                if not chunk_id:
-                    continue
-                existing = merged.get(chunk_id)
-                if existing:
-                    existing_queries = set(existing.get("matched_queries", []))
-                    existing_queries.add(query_spec["label"])
-                    existing["matched_queries"] = sorted(existing_queries)
-                    existing_sources = set(existing.get("matched_sources", []))
-                    for source in item.get("matched_sources", []) or []:
-                        existing_sources.add(str(source))
-                    if item.get("retrieval_source"):
-                        existing_sources.add(str(item.get("retrieval_source")))
-                    existing["matched_sources"] = sorted(value for value in existing_sources if value)
-                    existing["rerank_score"] = self._pick_higher_score(existing.get("rerank_score"), item.get("rerank_score"))
-                    if len(str(item.get("content") or "")) > len(str(existing.get("content") or "")):
-                        existing["content"] = item.get("content")
-                    continue
-                merged[chunk_id] = {
-                    **item,
-                    "matched_queries": [query_spec["label"]],
-                    "matched_sources": sorted(
-                        {
-                            *(str(source) for source in (item.get("matched_sources", []) or [])),
-                            str(item.get("retrieval_source") or ""),
-                        }
-                        - {""}
-                    ),
-                }
-
-        return self._sort_evidence_candidates(list(merged.values()))[:candidate_limit]
+        items = self.retrieval_service.search_queries(
+            query_specs,
+            top_k=candidate_limit,
+            doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
+            fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit + 1),
+            vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit + 1),
+            use_rerank=bool(retrieval_policy["use_rerank"]),
+        )
+        return self._sort_evidence_candidates(items)[:candidate_limit]
 
     @classmethod
     def _build_retrieval_queries(cls, claim_text: str) -> list[dict]:
-        """构建原始查询与放宽逻辑约束后的查询。"""
+        """构建原文、语义归一和反证三类互补查询。"""
 
         literal_query = claim_text.strip()
         claim_logic = cls._build_claim_logic_snapshot(claim_text)
         query_specs = [{"label": "claim_literal", "query": literal_query}]
-        for expanded_query in expand_query_texts(literal_query, limit=4)[1:]:
-            query_specs.append({"label": "entity_expanded", "query": expanded_query})
         normalized_query = cls._normalize_claim_query_for_retrieval(claim_text)
-        if normalized_query and normalized_query != literal_query:
-            query_specs.append({"label": "logic_relaxed", "query": normalized_query})
-        normalized_entity_query = normalize_query_text(normalized_query)
-        if normalized_entity_query and normalized_entity_query != normalized_query:
-            query_specs.append({"label": "entity_expanded", "query": normalized_entity_query})
-        topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
-        if topic_query:
-            query_specs.append({"label": "topic_focus", "query": topic_query})
-        for keyword_source in expand_query_texts(normalized_query or literal_query, limit=4):
-            for keyword_query in cls._build_keyword_focus_queries(keyword_source):
-                query_specs.append({"label": "keyword_focus", "query": keyword_query})
-        for keyword_query in cls._build_keyword_focus_queries(normalized_entity_query):
-            query_specs.append({"label": "keyword_focus", "query": keyword_query})
+        semantic_query = cls._build_semantic_retrieval_query(normalized_query or literal_query)
+        if semantic_query and semantic_query != literal_query:
+            query_specs.append({"label": "semantic_normalized", "query": semantic_query})
         counter_query = cls._build_counter_probe_query(normalized_query or literal_query, claim_logic)
         if counter_query:
             query_specs.append({"label": "counter_probe", "query": counter_query})
-        return cls._deduplicate_query_specs(query_specs)
+        return cls._deduplicate_query_specs(query_specs)[:3]
+
+    @classmethod
+    def _build_semantic_retrieval_query(cls, normalized_query: str) -> str:
+        """从归一文本中提取实体与目标组合，减少低价值查询变体。"""
+
+        entity_query = normalize_query_text(normalized_query)
+        keyword_queries = cls._build_keyword_focus_queries(entity_query)
+        core_entity = cls._extract_core_entity_for_keyword_query(entity_query)
+        entity_pairs = [
+            query
+            for query in keyword_queries
+            if len(query.split()) == 2 and (not core_entity or query.split()[0] == core_entity)
+        ]
+        for query in entity_pairs:
+            target = query.split()[1]
+            if target not in cls._QUERY_RELATION_WORDS:
+                return query
+        if entity_pairs:
+            return entity_pairs[0]
+        return entity_query
 
     @classmethod
     def _normalize_claim_query_for_retrieval(cls, claim_text: str) -> str:

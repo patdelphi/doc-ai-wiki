@@ -1,4 +1,4 @@
-"""程序说明：验证规则等级对质检结论的影响。"""
+﻿"""程序说明：验证规则等级对质检结论的影响。"""
 
 from pathlib import Path
 
@@ -125,7 +125,8 @@ def test_quality_service_should_apply_template_rule_tags_and_retrieval_policy(tm
     assert result["check"]["retrieval_policy"]["use_rerank"] is True
     assert captured_search_kwargs["fulltext_top_k"] >= 6
     assert captured_search_kwargs["vector_top_k"] >= 6
-    assert captured_search_kwargs["use_rerank"] is True
+    # 多查询候选先合并，子查询阶段不重复调用重排模型。
+    assert captured_search_kwargs["use_rerank"] is False
     assert captured_expand_kwargs["neighbor_window"] == 1
     assert captured_expand_kwargs["include_section_context"] is True
     assert result["rule_hits"][0]["rule_code"] == "M001"
@@ -384,36 +385,31 @@ def test_quality_service_should_retrieve_counter_evidence_and_reject_exclusive_c
     assert len(result["claims"][0]["evidence_details"]) >= 2
 
 
-def test_quality_service_should_build_complementary_queries_for_strict_claim() -> None:
-    """强约束 Claim 应构造更多互补查询，兼顾主题、放宽检索与反证探测。"""
+def test_quality_service_should_limit_strict_claim_to_three_complementary_queries() -> None:
+    """强约束 Claim 只保留原文、语义归一和反证三类查询。"""
 
     query_specs = QualityService._build_retrieval_queries("阿胶只有东阿一家有")
 
     labels = [item["label"] for item in query_specs]
     queries = [item["query"] for item in query_specs]
 
-    assert labels[0] == "claim_literal"
-    assert "logic_relaxed" in labels
-    assert "topic_focus" in labels
-    assert "counter_probe" in labels
-    assert len(query_specs) >= 4
+    assert labels == ["claim_literal", "semantic_normalized", "counter_probe"]
+    assert len(query_specs) == 3
     assert queries[0] == "阿胶只有东阿一家有"
-    assert any("只有" not in query for query in queries[1:])
-    assert any("也有" in query or "并非唯一" in query for query in queries)
+    assert "只有" not in queries[1]
+    assert "也有" in queries[2] or "并非唯一" in queries[2]
 
 
-def test_quality_service_should_build_keyword_queries_for_chinese_sentence_claim() -> None:
-    """普通中文整句 Claim 应补充关键词查询，避免整句检索零召回。"""
+def test_quality_service_should_build_one_semantic_query_for_chinese_sentence_claim() -> None:
+    """普通中文整句 Claim 应收敛为一个实体与目标组合查询。"""
 
     query_specs = QualityService._build_retrieval_queries("阿胶能治疗癌症")
 
     labels = [item["label"] for item in query_specs]
     queries = [item["query"] for item in query_specs]
 
-    assert "keyword_focus" in labels
-    assert "阿胶 癌症" in queries
-    assert "癌症" in queries
-    assert "阿胶 治疗" in queries
+    assert labels == ["claim_literal", "semantic_normalized"]
+    assert queries == ["阿胶能治疗癌症", "阿胶 癌症"]
 
 
 def test_quality_service_should_build_keyword_queries_for_category_claim() -> None:
@@ -423,8 +419,7 @@ def test_quality_service_should_build_keyword_queries_for_category_claim() -> No
 
     queries = [item["query"] for item in query_specs]
 
-    assert "阿胶 滋补" in queries
-    assert "滋补" in queries
+    assert queries == ["阿胶在资料中常被归入滋补类内容", "阿胶 滋补"]
 
 
 def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
@@ -434,8 +429,7 @@ def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
 
     queries = [item["query"] for item in query_specs]
 
-    assert "阿胶能改善贫血" in queries
-    assert "阿胶 贫血" in queries
+    assert queries == ["驴皮胶能改善贫血", "阿胶 贫血"]
 
 
 def test_quality_service_should_keep_broader_candidate_pool_before_final_judgement(tmp_path: Path) -> None:

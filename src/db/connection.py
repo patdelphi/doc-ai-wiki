@@ -1,4 +1,4 @@
-"""程序说明：封装 SQLite 连接创建与初始化逻辑。"""
+﻿"""程序说明：封装 SQLite 连接创建与初始化逻辑。"""
 
 from __future__ import annotations
 
@@ -53,6 +53,8 @@ def create_connection(database_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON;")
+    connection.execute("PRAGMA journal_mode = WAL;")
+    connection.execute("PRAGMA synchronous = NORMAL;")
     return connection
 
 

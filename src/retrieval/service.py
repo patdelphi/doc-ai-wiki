@@ -1,13 +1,13 @@
-"""程序说明：提供最小可用的全文检索、向量检索与混合检索接口。"""
+﻿"""程序说明：提供最小可用的全文检索、向量检索与混合检索接口。"""
 
 from __future__ import annotations
 
 import json
-import sqlite3
 
 from src.ai.rerank import BaseReranker, DisabledReranker
 from src.db.connection import create_connection
-from src.retrieval.query_normalizer import expand_query_texts
+from src.retrieval.fusion import reciprocal_rank_fusion
+from src.retrieval.lexical import LexicalRetriever
 from src.retrieval.vector_store import VectorStore
 
 
@@ -16,6 +16,7 @@ class RetrievalService:
 
     def __init__(self, database_path) -> None:
         self.database_path = database_path
+        self.lexical = LexicalRetriever(database_path)
         self.vector_store = None
         self.reranker: BaseReranker = DisabledReranker()
 
@@ -36,80 +37,15 @@ class RetrievalService:
         doc_uid: str | None = None,
         knowledge_base_id: str | None = None,
     ) -> list[dict]:
-        """执行全文检索，优先 FTS5，中文场景下对未命中结果使用 LIKE 兜底。"""
+        """执行 Trigram/BM25 全文检索，并规范化返回元数据。"""
 
-        query_texts = expand_query_texts(query, limit=6)
-        doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
-        knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
-        like_doc_uid_filter = " AND c.doc_uid = ?" if doc_uid else ""
-        like_knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
-
-        collected_rows: list[dict] = []
-        seen_chunk_ids: set[str] = set()
-        with create_connection(self.database_path) as connection:
-            for query_text in query_texts:
-                params_list: list = [query_text]
-                if doc_uid:
-                    params_list.append(doc_uid)
-                if knowledge_base_id:
-                    params_list.append(knowledge_base_id)
-                params_list.append(top_k)
-                params = tuple(params_list)
-                try:
-                    rows = connection.execute(
-                        f"""
-                        SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
-                               c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
-                               c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
-                        FROM chunk_fts f
-                        JOIN chunks c ON c.chunk_id = f.chunk_id
-                        JOIN documents d ON d.doc_uid = c.doc_uid
-                        WHERE chunk_fts MATCH ?
-                        {doc_uid_filter}
-                        {knowledge_base_filter}
-                        LIMIT ?
-                        """,
-                        params,
-                    ).fetchall()
-                except sqlite3.OperationalError:
-                    # 某些 SQLite/FTS5 运行环境对 MATCH 参数解析不稳定，失败时回退到 LIKE，
-                    # 避免检索异常直接中断 AI 质检链路。
-                    rows = []
-                if not rows:
-                    like_params_list: list = [f"%{query_text}%"]
-                    if doc_uid:
-                        like_params_list.append(doc_uid)
-                    if knowledge_base_id:
-                        like_params_list.append(knowledge_base_id)
-                    like_params_list.append(top_k)
-                    like_params = tuple(like_params_list)
-                    rows = connection.execute(
-                        f"""
-                        SELECT c.chunk_id, c.doc_uid, d.doc_title, d.author, d.source_name, d.tags_json,
-                               c.source_span, c.heading_path, c.source_start_line, c.source_end_line,
-                               c.page_no, c.chunk_type, c.content_hash, c.source_anchor, c.content
-                        FROM chunks c
-                        JOIN documents d ON d.doc_uid = c.doc_uid
-                        WHERE content LIKE ?
-                        {like_doc_uid_filter}
-                        {like_knowledge_base_filter}
-                        ORDER BY c.updated_at DESC
-                        LIMIT ?
-                        """,
-                        like_params,
-                    ).fetchall()
-                for row in rows:
-                    row_dict = dict(row)
-                    chunk_id = str(row_dict.get("chunk_id") or "")
-                    if not chunk_id or chunk_id in seen_chunk_ids:
-                        continue
-                    collected_rows.append(row_dict)
-                    seen_chunk_ids.add(chunk_id)
-                    if len(collected_rows) >= top_k:
-                        break
-                if len(collected_rows) >= top_k:
-                    break
-        return [self._with_source(self._normalize_metadata_fields(row), "fulltext") for row in collected_rows]
+        rows = self.lexical.search(
+            query,
+            top_k=top_k,
+            doc_uid=doc_uid,
+            knowledge_base_id=knowledge_base_id,
+        )
+        return [self._with_source(self._normalize_metadata_fields(row), "fulltext") for row in rows]
 
     def vector_search(
         self,
@@ -141,43 +77,117 @@ class RetrievalService:
         vector_top_k: int | None = None,
         use_rerank: bool | None = None,
     ) -> list[dict]:
-        """合并全文与向量检索结果，并按 chunk_id 去重。"""
+        """使用 RRF 合并全文与向量结果，并在外部服务失败时显式降级。"""
 
-        merged: dict[str, dict] = {}
-        for item in self.fulltext_search(
+        lexical_items = self.fulltext_search(
             query,
             top_k=fulltext_top_k or top_k,
             doc_uid=doc_uid,
             knowledge_base_id=knowledge_base_id,
-        ):
-            merged[item["chunk_id"]] = {
-                **item,
-                "matched_sources": ["fulltext"],
+        )
+        degraded_reason = ""
+        try:
+            vector_items = self.vector_search(
+                query,
+                top_k=vector_top_k or top_k,
+                doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
+            )
+        except Exception:  # noqa: BLE001
+            # 外部 Embedding 或向量存储异常时保留本地检索结果。
+            vector_items = []
+            degraded_reason = "vector_unavailable"
+
+        items = reciprocal_rank_fusion(
+            {
+                "fulltext": lexical_items,
+                "vector": vector_items,
             }
-        for item in self.vector_search(
-            query,
-            top_k=vector_top_k or top_k,
-            doc_uid=doc_uid,
-            knowledge_base_id=knowledge_base_id,
-        ):
-            existing = merged.get(item["chunk_id"])
-            if existing:
-                matched_sources = set(existing.get("matched_sources", []))
-                matched_sources.add("vector")
-                existing["matched_sources"] = sorted(matched_sources)
-                existing["score"] = max(float(existing.get("score", 0.0)), float(item.get("score", 0.0)))
-                if len(existing["matched_sources"]) > 1:
-                    existing["retrieval_source"] = "hybrid"
-                continue
-            merged[item["chunk_id"]] = {
-                **item,
-                "matched_sources": ["vector"],
-            }
-        items = list(merged.values())
+        )
+        if degraded_reason:
+            items = [{**item, "degraded_reason": degraded_reason} for item in items]
         should_rerank = self.reranker.enabled if use_rerank is None else use_rerank and self.reranker.enabled
         if should_rerank:
-            return self.reranker.rerank(query=query, items=items, top_k=top_k)
+            try:
+                return self.reranker.rerank(query=query, items=items, top_k=top_k)
+            except Exception:  # noqa: BLE001
+                return [{**item, "degraded_reason": "rerank_unavailable"} for item in items[:top_k]]
         return items[:top_k]
+
+    def search_queries(
+        self,
+        query_specs: list[dict],
+        *,
+        top_k: int,
+        doc_uid: str | None = None,
+        knowledge_base_id: str | None = None,
+        fulltext_top_k: int | None = None,
+        vector_top_k: int | None = None,
+        use_rerank: bool = True,
+    ) -> list[dict]:
+        """合并最多三类查询的候选，并只执行一次批量 Rerank。"""
+
+        limit = max(int(top_k), 1)
+        merged: dict[str, dict] = {}
+        query_scores: dict[str, float] = {}
+        normalized_specs = [
+            {
+                "label": str(item.get("label") or "").strip(),
+                "query": str(item.get("query") or "").strip(),
+            }
+            for item in query_specs[:3]
+            if str(item.get("label") or "").strip() and str(item.get("query") or "").strip()
+        ]
+        for query_spec in normalized_specs:
+            items = self.hybrid_search(
+                query_spec["query"],
+                top_k=limit,
+                doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
+                fulltext_top_k=fulltext_top_k,
+                vector_top_k=vector_top_k,
+                use_rerank=False,
+            )
+            for rank, item in enumerate(items, start=1):
+                chunk_id = str(item.get("chunk_id") or "").strip()
+                if not chunk_id:
+                    continue
+                query_scores[chunk_id] = query_scores.get(chunk_id, 0.0) + 1.0 / (60 + rank)
+                if chunk_id not in merged:
+                    merged[chunk_id] = {
+                        **item,
+                        "matched_queries": [query_spec["label"]],
+                    }
+                    continue
+                existing = merged[chunk_id]
+                existing_queries = list(existing.get("matched_queries") or [])
+                if query_spec["label"] not in existing_queries:
+                    existing_queries.append(query_spec["label"])
+                existing["matched_queries"] = existing_queries
+                existing_sources = list(existing.get("matched_sources") or [])
+                for source in item.get("matched_sources") or []:
+                    if source not in existing_sources:
+                        existing_sources.append(source)
+                existing["matched_sources"] = existing_sources
+
+        candidates = sorted(
+            (
+                {**item, "query_rrf_score": query_scores[chunk_id]}
+                for chunk_id, item in merged.items()
+            ),
+            key=lambda item: (
+                -float(item.get("query_rrf_score") or 0.0),
+                str(item.get("chunk_id") or ""),
+            ),
+        )
+        should_rerank = bool(use_rerank and self.reranker.enabled and candidates)
+        if should_rerank:
+            combined_query = "；".join(item["query"] for item in normalized_specs)
+            try:
+                return self.reranker.rerank(query=combined_query, items=candidates, top_k=limit)
+            except Exception:  # noqa: BLE001
+                return [{**item, "degraded_reason": "rerank_unavailable"} for item in candidates[:limit]]
+        return candidates[:limit]
 
     def get_chunk_detail(self, chunk_id: str) -> dict | None:
         """按 chunk_id 读取检索结果详情。"""
@@ -324,43 +334,50 @@ class RetrievalService:
         retrieval_source: str,
         knowledge_base_id: str | None = None,
     ) -> list[dict]:
-        """为检索结果补全文档元数据与来源字段。"""
+        """以 SQLite 为准补全向量结果的文档与 chunk 追溯元数据。"""
 
         if not items:
             return []
 
-        doc_uids = sorted({item["doc_uid"] for item in items if item.get("doc_uid")})
+        chunk_ids = sorted({str(item["chunk_id"]) for item in items if item.get("chunk_id")})
+        if not chunk_ids:
+            return []
         metadata_map: dict[str, dict] = {}
         with create_connection(self.database_path) as connection:
-            placeholders = ",".join("?" for _ in doc_uids)
-            knowledge_base_filter = " AND knowledge_base_id = ?" if knowledge_base_id else ""
+            placeholders = ",".join("?" for _ in chunk_ids)
+            knowledge_base_filter = " AND d.knowledge_base_id = ?" if knowledge_base_id else ""
             params: tuple = (
-                (*doc_uids, knowledge_base_id) if knowledge_base_id else tuple(doc_uids)
+                (*chunk_ids, knowledge_base_id) if knowledge_base_id else tuple(chunk_ids)
             )
             rows = connection.execute(
                 f"""
-                SELECT doc_uid, knowledge_base_id, doc_title, author, source_name, tags_json
-                FROM documents
-                WHERE doc_uid IN ({placeholders})
+                SELECT c.chunk_id, c.doc_uid, c.source_span, c.heading_path,
+                       c.source_start_line, c.source_end_line, c.page_no, c.chunk_type,
+                       c.content_hash, c.source_anchor, c.content,
+                       d.knowledge_base_id, d.doc_title, d.author, d.source_name, d.tags_json
+                FROM chunks c
+                JOIN documents d ON d.doc_uid = c.doc_uid
+                WHERE c.chunk_id IN ({placeholders})
                 {knowledge_base_filter}
                 """,
                 params,
             ).fetchall()
             metadata_map = {
-                row["doc_uid"]: self._normalize_metadata_fields(dict(row))
+                row["chunk_id"]: self._normalize_metadata_fields(dict(row))
                 for row in rows
             }
 
         filtered_items = [
             item
             for item in items
-            if item.get("doc_uid") in metadata_map
+            if item.get("chunk_id") in metadata_map
         ]
         return [
             self._with_source(
                 {
                     **item,
-                    **metadata_map.get(item.get("doc_uid"), {}),
+                    # SQLite 是元数据事实源，可覆盖向量索引中的历史追溯字段。
+                    **metadata_map.get(item.get("chunk_id"), {}),
                 },
                 retrieval_source,
             )

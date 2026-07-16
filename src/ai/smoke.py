@@ -1,4 +1,4 @@
-"""程序说明：提供 LLM、Embedding 与 Rerank 的最小连通性自检能力，便于快速验证 .env 配置是否可用。"""
+﻿"""程序说明：提供 LLM、Embedding 与 Rerank 的最小连通性自检能力，便于快速验证 .env 配置是否可用。"""
 
 from __future__ import annotations
 
@@ -117,6 +117,15 @@ def _run_rerank_smoke_test(reranker: BaseReranker, settings: AppSettings) -> dic
             ],
             top_k=2,
         )
+        # 生产检索允许 Rerank 失败后静默降级，但连通性门禁必须识别这种降级，避免假绿。
+        if not result or not any(isinstance(item.get("rerank_score"), (int, float)) for item in result):
+            return {
+                "provider": settings.rerank_provider,
+                "model": settings.rerank_model,
+                "enabled": True,
+                "ok": False,
+                "message": "Rerank 请求未返回有效分数",
+            }
         return {
             "provider": settings.rerank_provider,
             "model": settings.rerank_model,

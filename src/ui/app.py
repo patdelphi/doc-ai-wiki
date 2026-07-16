@@ -1,4 +1,4 @@
-"""程序说明：Gradio UI 启动入口，负责组装服务实例并构建页面。"""
+﻿"""程序说明：Gradio UI 启动入口，负责组装服务实例并构建页面。"""
 
 from __future__ import annotations
 
@@ -71,9 +71,11 @@ def create_ui_app(settings_override: AppSettings | None = None) -> gr.Blocks:
         settings.chroma_persist_dir,
         embedding_client=embedding_client,
         sqlite_db_path=settings.sqlite_db_path,
-        auto_repair_dimension_mismatch=True,
+        auto_repair_dimension_mismatch=False,
+        embedding_model=settings.embedding_model,
+        index_version="retrieval-v2",
     )
-    ingest_service = IngestService(settings)
+    ingest_service = IngestService(settings, vector_store=vector_store)
     retrieval_service = RetrievalService(settings.sqlite_db_path)
     retrieval_service.set_vector_store(vector_store)
     retrieval_service.set_reranker(reranker)

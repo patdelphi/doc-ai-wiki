@@ -1,8 +1,9 @@
-"""程序说明：提供离线检索评测与 Claim 评测指标计算工具。"""
+﻿"""程序说明：提供离线检索评测与 Claim 评测指标计算工具。"""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -32,6 +33,52 @@ def load_jsonl_cases(path: str | Path) -> list[dict]:
         if isinstance(item, dict):
             cases.append(item)
     return cases
+
+
+def build_provisional_aligned_cases(
+    cases: list[dict],
+    suggestions_markdown: str,
+    *,
+    knowledge_base_id_by_doc_uid: dict[str, str] | None = None,
+) -> list[dict]:
+    """从候选建议中提取首个真实 chunk，生成不冒充人工金标的回归样例。"""
+
+    candidates_by_case: dict[str, tuple[str, str]] = {}
+    section_parts = re.split(r"(?m)^###\s+(\S+)\s*$", str(suggestions_markdown or ""))
+    for index in range(1, len(section_parts), 2):
+        case_id = section_parts[index].strip()
+        section = section_parts[index + 1] if index + 1 < len(section_parts) else ""
+        for line in section.splitlines():
+            if not line.lstrip().startswith("|"):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) < 3 or cells[0] in {"score", "---:"}:
+                continue
+            doc_uid, chunk_id = cells[1], cells[2]
+            if doc_uid and doc_uid != "-" and chunk_id and chunk_id != "-":
+                candidates_by_case[case_id] = (doc_uid, chunk_id)
+                break
+
+    aligned_cases: list[dict] = []
+    for case in cases:
+        case_id = str(case.get("case_id") or "").strip()
+        candidate = candidates_by_case.get(case_id)
+        aligned = dict(case)
+        # 仅以 chunk 为相关性目标，防止少量大文档让文档级命中率失真。
+        aligned["expected_doc_uids"] = []
+        if candidate is None:
+            aligned["expected_chunk_ids"] = []
+            aligned["aligned_candidate_doc_uid"] = ""
+            aligned["alignment_status"] = "missing_candidate"
+        else:
+            aligned["expected_chunk_ids"] = [candidate[1]]
+            aligned["aligned_candidate_doc_uid"] = candidate[0]
+            aligned["alignment_status"] = "provisional_first_candidate"
+            knowledge_base_id = (knowledge_base_id_by_doc_uid or {}).get(candidate[0], "")
+            if knowledge_base_id:
+                aligned["knowledge_base_id"] = knowledge_base_id
+        aligned_cases.append(aligned)
+    return aligned_cases
 
 
 def evaluate_retrieval_cases(
@@ -67,6 +114,10 @@ def evaluate_retrieval_cases(
         if not top_k_hit and expected_doc_uids:
             top_k_hit = bool(expected_doc_uids.intersection(returned_doc_uids))
         traceable = bool(items) and all(_is_traceable_item(item) for item in items)
+        reranked = bool(items) and all(
+            isinstance(item.get("rerank_score"), int | float) for item in items
+        )
+        degraded = bool(error_message) or any(item.get("degraded_reason") for item in items)
         rows.append(
             {
                 "case_id": str(case.get("case_id") or f"case_{index}"),
@@ -78,12 +129,164 @@ def evaluate_retrieval_cases(
                 "top_k": limit,
                 "top_k_hit": top_k_hit,
                 "traceable": traceable,
+                "reranked": reranked,
+                "degraded": degraded,
                 "error_message": error_message,
             }
         )
     return {
         "summary": _build_retrieval_summary(rows),
         "rows": rows,
+    }
+
+
+def evaluate_ranked_rows(rows: list[dict]) -> dict:
+    """对已生成的排名结果计算 Recall@5、MRR@10 与 nDCG@10。"""
+
+    enriched_rows: list[dict] = []
+    reciprocal_ranks: list[float] = []
+    ndcg_values: list[float] = []
+    recall_hits = 0
+    for row in rows:
+        expected_chunks = _to_string_set(row.get("expected_chunk_ids"))
+        expected_docs = _to_string_set(row.get("expected_doc_uids"))
+        returned_chunks = [str(item or "") for item in row.get("returned_chunk_ids") or []]
+        returned_docs = [str(item or "") for item in row.get("returned_doc_uids") or []]
+        result_count = max(len(returned_chunks), len(returned_docs))
+        relevance: list[int] = []
+        for index in range(result_count):
+            chunk_id = returned_chunks[index] if index < len(returned_chunks) else ""
+            doc_uid = returned_docs[index] if index < len(returned_docs) else ""
+            relevant = bool(chunk_id and chunk_id in expected_chunks)
+            if not relevant and expected_docs:
+                relevant = bool(doc_uid and doc_uid in expected_docs)
+            relevance.append(1 if relevant else 0)
+
+        first_relevant_rank = next(
+            (rank for rank, value in enumerate(relevance[:10], start=1) if value),
+            None,
+        )
+        reciprocal_rank = 0.0 if first_relevant_rank is None else 1.0 / first_relevant_rank
+        recall_hit = any(relevance[:5])
+        relevant_target_count = max(len(expected_chunks), len(expected_docs), 1 if any(relevance) else 0)
+        dcg = sum(
+            value / math.log2(rank + 1)
+            for rank, value in enumerate(relevance[:10], start=1)
+        )
+        ideal_relevance = [1] * min(relevant_target_count, 10)
+        ideal_dcg = sum(
+            value / math.log2(rank + 1)
+            for rank, value in enumerate(ideal_relevance, start=1)
+        )
+        ndcg = 0.0 if ideal_dcg == 0 else dcg / ideal_dcg
+        reciprocal_ranks.append(reciprocal_rank)
+        ndcg_values.append(ndcg)
+        recall_hits += int(recall_hit)
+        enriched_rows.append(
+            {
+                **row,
+                "first_relevant_rank": first_relevant_rank,
+                "reciprocal_rank": round(reciprocal_rank, 4),
+                "ndcg_at_10": round(ndcg, 4),
+                "recall_at_5_hit": recall_hit,
+            }
+        )
+
+    case_count = len(enriched_rows)
+    traceable_count = sum(1 for row in enriched_rows if row.get("traceable"))
+    return {
+        "summary": {
+            "case_count": case_count,
+            "recall_at_5": _safe_rate(recall_hits, case_count),
+            "mrr_at_10": round(sum(reciprocal_ranks) / case_count, 4) if case_count else 0.0,
+            "ndcg_at_10": round(sum(ndcg_values) / case_count, 4) if case_count else 0.0,
+            "traceable_rate": _safe_rate(traceable_count, case_count),
+        },
+        "rows": enriched_rows,
+    }
+
+
+def evaluate_pageindex_rows(rows: list[dict]) -> dict:
+    """计算 PageIndex Node Hit@5、拒答准确率和调用预算统计。"""
+
+    node_hits = 0
+    refusal_matches = 0
+    llm_calls: list[int] = []
+    enriched: list[dict] = []
+    for row in rows:
+        expected_nodes = _to_string_set(row.get("expected_node_ids"))
+        returned_nodes = [str(item or "") for item in row.get("returned_node_ids") or []]
+        node_hit = bool(expected_nodes.intersection(returned_nodes[:5]))
+        answerable = bool(row.get("answerable", True))
+        refused = bool(row.get("refused"))
+        refusal_matched = refused == (not answerable)
+        raw_budget = row.get("budget")
+        budget: dict = {}
+        if isinstance(raw_budget, dict):
+            budget = raw_budget
+        llm_call_count = int(budget.get("llm_calls") or 0)
+        node_hits += int(node_hit)
+        refusal_matches += int(refusal_matched)
+        llm_calls.append(llm_call_count)
+        enriched.append(
+            {
+                **row,
+                "node_hit_at_5": node_hit,
+                "refusal_matched": refusal_matched,
+                "llm_call_count": llm_call_count,
+            }
+        )
+    case_count = len(enriched)
+    return {
+        "summary": {
+            "case_count": case_count,
+            "node_hit_at_5": _safe_rate(node_hits, case_count),
+            "refusal_accuracy": _safe_rate(refusal_matches, case_count),
+            "average_llm_calls": round(sum(llm_calls) / case_count, 4) if case_count else 0.0,
+            "max_llm_calls": max(llm_calls, default=0),
+        },
+        "rows": enriched,
+    }
+
+
+def validate_case_references(database_path: str | Path, cases: list[dict]) -> dict:
+    """校验正式评测样例引用的知识库、文档和 chunk 是否真实存在。"""
+
+    referenced_kbs: set[str] = set()
+    referenced_docs: set[str] = set()
+    referenced_chunks: set[str] = set()
+    for case in cases:
+        knowledge_base_id = str(case.get("knowledge_base_id") or "").strip()
+        if knowledge_base_id:
+            referenced_kbs.add(knowledge_base_id)
+        referenced_docs.update(_to_string_set(case.get("expected_doc_uids")))
+        referenced_docs.update(_to_string_set(case.get("doc_uid")))
+        referenced_chunks.update(_to_string_set(case.get("expected_chunk_ids")))
+
+    connection = create_connection(Path(database_path))
+    try:
+        existing_kbs = {
+            str(row[0])
+            for row in connection.execute("SELECT knowledge_base_id FROM knowledge_bases").fetchall()
+        }
+        existing_docs = {
+            str(row[0])
+            for row in connection.execute("SELECT doc_uid FROM documents").fetchall()
+        }
+        existing_chunks = {
+            str(row[0])
+            for row in connection.execute("SELECT chunk_id FROM chunks").fetchall()
+        }
+    finally:
+        connection.close()
+    missing_kbs = sorted(referenced_kbs - existing_kbs)
+    missing_docs = sorted(referenced_docs - existing_docs)
+    missing_chunks = sorted(referenced_chunks - existing_chunks)
+    return {
+        "valid": not (missing_kbs or missing_docs or missing_chunks),
+        "missing_knowledge_base_ids": missing_kbs,
+        "missing_doc_uids": missing_docs,
+        "missing_chunk_ids": missing_chunks,
     }
 
 
@@ -221,7 +424,12 @@ def format_evaluation_report_markdown(
             f"| 检索样例数 | {_format_metric(retrieval_summary.get('case_count'))} |",
             f"| Top-K 命中数 | {_format_metric(retrieval_summary.get('top_k_hit_count'))} |",
             f"| Top-K 命中率 | {_format_metric(retrieval_summary.get('top_k_hit_rate'))} |",
+            f"| Recall@5 | {_format_metric(retrieval_summary.get('recall_at_5'))} |",
+            f"| MRR@10 | {_format_metric(retrieval_summary.get('mrr_at_10'))} |",
+            f"| nDCG@10 | {_format_metric(retrieval_summary.get('ndcg_at_10'))} |",
             f"| 证据追溯率 | {_format_metric(retrieval_summary.get('traceability_rate'))} |",
+            f"| Rerank 覆盖率 | {_format_metric(retrieval_summary.get('rerank_coverage_rate'))} |",
+            f"| 降级样例数 | {_format_metric(retrieval_summary.get('degraded_case_count'))} |",
             f"| Claim 样例数 | {_format_metric(claim_summary.get('case_count'))} |",
             f"| Claim 准确率 | {_format_metric(claim_summary.get('verdict_accuracy'))} |",
             f"| 无证据 verified 率 | {_format_metric(claim_summary.get('no_evidence_verified_rate'))} |",
@@ -426,12 +634,22 @@ def _build_retrieval_summary(rows: list[dict]) -> dict:
     case_count = len(rows)
     hit_count = sum(1 for row in rows if row["top_k_hit"])
     traceable_count = sum(1 for row in rows if row["traceable"])
+    reranked_count = sum(1 for row in rows if row.get("reranked"))
+    degraded_count = sum(1 for row in rows if row.get("degraded"))
+    ranked_summary = evaluate_ranked_rows(rows)["summary"]
     return {
         "case_count": case_count,
         "top_k_hit_count": hit_count,
         "top_k_hit_rate": _safe_rate(hit_count, case_count),
         "traceable_case_count": traceable_count,
         "traceability_rate": _safe_rate(traceable_count, case_count),
+        "rerank_case_count": reranked_count,
+        "rerank_coverage_rate": _safe_rate(reranked_count, case_count),
+        "degraded_case_count": degraded_count,
+        "recall_at_5": ranked_summary["recall_at_5"],
+        "mrr_at_10": ranked_summary["mrr_at_10"],
+        "ndcg_at_10": ranked_summary["ndcg_at_10"],
+        "traceable_rate": ranked_summary["traceable_rate"],
     }
 
 
@@ -580,7 +798,11 @@ def _to_string_set(value: object) -> set[str]:
 def _is_traceable_item(item: dict) -> bool:
     """判断单条证据是否具备人工复核所需的基本出处字段。"""
 
-    return bool(item.get("heading_path")) and item.get("source_start_line") is not None and item.get("chunk_type")
+    return bool(
+        item.get("heading_path")
+        and item.get("source_start_line") is not None
+        and item.get("chunk_type")
+    )
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:

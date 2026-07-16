@@ -1,4 +1,4 @@
-"""程序说明：验证检索服务在不同 SQLite 环境下的兜底行为。"""
+﻿"""程序说明：验证检索服务在不同 SQLite 环境下的兜底行为。"""
 
 from __future__ import annotations
 
@@ -39,8 +39,15 @@ class _FakeConnection:
         return _FakeCursor(self._rows)
 
 
-def test_fulltext_search_should_fallback_to_like_when_fts_match_binding_fails(monkeypatch) -> None:
-    """FTS5 参数查询失败时，应自动回退到 LIKE，避免中断上层质检链路。"""
+class _FakeVectorStore:
+    """程序说明：模拟只返回基础标识的向量索引。"""
+
+    def query(self, query: str, **kwargs) -> list[dict]:
+        return [{"chunk_id": "chunk_vector", "doc_uid": "doc_vector", "content": "向量内容"}]
+
+
+def test_fulltext_search_should_use_controlled_like_for_two_character_term(monkeypatch) -> None:
+    """两字词应直接使用受控 LIKE，避免无效 FTS 查询。"""
 
     fake_rows = [
         {
@@ -63,16 +70,16 @@ def test_fulltext_search_should_fallback_to_like_when_fts_match_binding_fails(mo
     ]
     fake_connection = _FakeConnection(fake_rows)
     monkeypatch.setattr(
-        "src.retrieval.service.create_connection",
+        "src.retrieval.lexical.create_connection",
         lambda database_path: fake_connection,
     )
 
     service = RetrievalService("unused.db")
     items = service.fulltext_search("东阿", top_k=5, knowledge_base_id="default")
 
-    assert len(fake_connection.executed_sql) == 2
-    assert "MATCH ?" in fake_connection.executed_sql[0]
-    assert "content LIKE ?" in fake_connection.executed_sql[1]
+    assert len(fake_connection.executed_sql) == 1
+    assert "MATCH ?" not in fake_connection.executed_sql[0]
+    assert "c.content LIKE ?" in fake_connection.executed_sql[0]
     assert len(items) == 1
     assert items[0]["doc_title"] == "测试文档"
     assert items[0]["retrieval_source"] == "fulltext"
@@ -153,6 +160,43 @@ def test_fulltext_search_should_return_traceability_fields_from_sqlite(tmp_path:
     assert items[0]["chunk_type"] == "paragraph"
     assert items[0]["content_hash"] == "b" * 64
     assert items[0]["source_anchor"] == "L3-L6"
+
+
+def test_vector_search_should_refresh_traceability_fields_from_sqlite(tmp_path: Path) -> None:
+    """向量元数据可能滞后，返回前应以 SQLite 的追溯字段为准。"""
+
+    database_path = tmp_path / "app.db"
+    initialize_database(database_path)
+    now = "2026-07-16T00:00:00+00:00"
+    with create_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO documents (
+                doc_uid, knowledge_base_id, doc_id, doc_title, source_path, source_hash,
+                ingest_status, index_status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("doc_vector", "default", "doc_vector", "向量文档", "default/vector.md", "hash", "completed", "indexed", now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO chunks (
+                chunk_id, doc_uid, section_id, chunk_index, content, source_span,
+                heading_path, source_start_line, source_end_line, chunk_type,
+                source_anchor, token_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("chunk_vector", "doc_vector", None, 0, "向量内容", "section-1:chunk-0", "根 > 子", 8, 12, "paragraph", "L8-L12", 4, now, now),
+        )
+
+    service = RetrievalService(database_path)
+    service.set_vector_store(_FakeVectorStore())
+    items = service.vector_search("向量", top_k=5)
+
+    assert items[0]["doc_title"] == "向量文档"
+    assert items[0]["heading_path"] == "根 > 子"
+    assert items[0]["source_start_line"] == 8
+    assert items[0]["source_anchor"] == "L8-L12"
 
 
 def test_fulltext_search_should_expand_entity_alias_query(tmp_path: Path) -> None:

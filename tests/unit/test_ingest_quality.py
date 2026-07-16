@@ -1,4 +1,4 @@
-"""程序说明：验证文档入库质检结果的统计与异常提示。"""
+﻿"""程序说明：验证文档入库质检结果的统计与异常提示。"""
 
 import sqlite3
 from pathlib import Path
@@ -27,6 +27,38 @@ def _build_ingest_service(tmp_path: Path) -> IngestService:
     settings.ensure_runtime_directories()
     initialize_database(settings.sqlite_db_path)
     return IngestService(settings)
+
+
+def test_ingest_service_should_pass_embedding_fingerprint_without_auto_repair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启动期只校验索引，不得无备份自动重建，并应传递模型指纹。"""
+
+    captured: dict = {}
+
+    class CapturingVectorStore:
+        """记录 IngestService 创建向量存储时的关键参数。"""
+
+        def __init__(self, persist_directory, **kwargs) -> None:
+            captured.update({"persist_directory": persist_directory, **kwargs})
+
+    monkeypatch.setattr("src.ingest.service.VectorStore", CapturingVectorStore)
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+        EMBEDDING_MODEL="test-embedding-v2",
+    )
+
+    IngestService(settings)
+
+    assert captured["embedding_model"] == "test-embedding-v2"
+    assert captured["index_version"] == "retrieval-v2"
+    assert captured["auto_repair_dimension_mismatch"] is False
 
 
 def test_inspect_document_quality_should_report_complete_metrics(tmp_path: Path) -> None:

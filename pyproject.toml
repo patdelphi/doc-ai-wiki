@@ -26,7 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2.0,<2.0.0",
+  "mypy>=1.11.0,<2.0.0",
   "pytest>=8.0.0,<9.0.0",
+  "ruff>=0.6.0,<1.0.0",
 ]
 
 [tool.setuptools]
@@ -43,3 +46,39 @@ markers = [
     "unit: 单元测试",
     "integration: 集成测试",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["vendor", "index", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501", "I001"]
+
+[tool.ruff.lint.per-file-ignores]
+".aipython/*.py" = ["E402"]
+"src/auth/service.py" = ["F841"]
+"src/ui/pages.py" = ["F401", "F841"]
+"tests/unit/test_ui.py" = ["F401", "F841"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+allow_untyped_defs = true
+check_untyped_defs = false
+exclude = "^(vendor|index|dist|build)/"
+
+[[tool.mypy.overrides]]
+module = [
+  "src.db.*",
+  "src.rules.*",
+  "src.quality.service",
+  "src.quality.templates",
+  "src.pageindex.service",
+  "src.pageindex.evidence_judge",
+  "src.pageindex.templates",
+  "src.retrieval.service",
+  "src.retrieval.vector_store",
+]
+ignore_errors = true

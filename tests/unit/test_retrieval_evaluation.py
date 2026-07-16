@@ -1,20 +1,56 @@
-"""程序说明：验证离线检索与 Claim 评测指标计算。"""
+﻿"""程序说明：验证离线检索与 Claim 评测指标计算。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from src.db.connection import create_connection, initialize_database
 from src.retrieval.evaluation import (
+    build_provisional_aligned_cases,
     export_evidence_catalog,
     evaluate_claim_cases,
     evaluate_claim_results,
     evaluate_retrieval_cases,
+    evaluate_ranked_rows,
     format_evidence_catalog_markdown,
     format_evaluation_report_markdown,
     load_jsonl_cases,
     suggest_retrieval_case_alignments,
 )
-from src.db.connection import create_connection, initialize_database
+
+
+def test_build_provisional_aligned_cases_should_use_first_real_chunk_only() -> None:
+    """候选对齐集应采用首个真实 chunk，且不使用容易虚高的文档级金标。"""
+
+    markdown = """
+### ret_001
+
+| score | doc_uid | chunk_id | 文档 | 标题路径 | 位置 | 摘要 |
+|---:|---|---|---|---|---|---|
+| 9 | doc_real | chunk_best | 文档 | 路径 | L1-L2 | 最佳候选 |
+| 8 | doc_real | chunk_other | 文档 | 路径 | L3-L4 | 次选候选 |
+"""
+
+    result = build_provisional_aligned_cases(
+        [
+            {
+                "case_id": "ret_001",
+                "query": "阿胶 贫血",
+                "expected_doc_uids": ["fake_doc"],
+                "expected_chunk_ids": ["fake_chunk"],
+            }
+        ],
+        markdown,
+        knowledge_base_id_by_doc_uid={"doc_real": "kb_real"},
+    )
+
+    assert result[0]["expected_doc_uids"] == []
+    assert result[0]["expected_chunk_ids"] == ["chunk_best"]
+    assert result[0]["aligned_candidate_doc_uid"] == "doc_real"
+    assert result[0]["knowledge_base_id"] == "kb_real"
+    assert result[0]["alignment_status"] == "provisional_first_candidate"
 
 
 class _FakeRetrievalService:
@@ -31,6 +67,7 @@ class _FakeRetrievalService:
                     "source_start_line": 10,
                     "source_end_line": 12,
                     "chunk_type": "paragraph",
+                    "rerank_score": 0.93,
                 }
             ][:top_k]
         return [
@@ -42,6 +79,7 @@ class _FakeRetrievalService:
                 "source_start_line": None,
                 "source_end_line": None,
                 "chunk_type": "",
+                "degraded_reason": "rerank_unavailable",
             }
         ][:top_k]
 
@@ -117,8 +155,36 @@ def test_evaluate_retrieval_cases_should_report_top_k_hit_and_traceability() -> 
     assert result["summary"]["top_k_hit_rate"] == 0.5
     assert result["summary"]["traceable_case_count"] == 1
     assert result["summary"]["traceability_rate"] == 0.5
+    assert result["summary"]["rerank_coverage_rate"] == 0.5
+    assert result["summary"]["degraded_case_count"] == 1
     assert result["rows"][0]["top_k_hit"] is True
     assert result["rows"][1]["top_k_hit"] is False
+
+
+def test_retrieval_metrics_should_calculate_recall_mrr_and_ndcg() -> None:
+    """标准排名指标应按首个相关结果和折损累计增益计算。"""
+
+    result = evaluate_ranked_rows(
+        [
+            {
+                "case_id": "rank_1",
+                "expected_chunk_ids": ["a"],
+                "returned_chunk_ids": ["a", "x", "y"],
+                "traceable": True,
+            },
+            {
+                "case_id": "rank_2",
+                "expected_chunk_ids": ["b"],
+                "returned_chunk_ids": ["x", "b", "y"],
+                "traceable": True,
+            },
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["recall_at_5"] == 1.0
+    assert summary["mrr_at_10"] == 0.75
+    assert summary["ndcg_at_10"] == pytest.approx(0.8155, abs=0.0001)
 
 
 def test_evaluate_claim_results_should_report_accuracy_and_no_evidence_verified_rate() -> None:

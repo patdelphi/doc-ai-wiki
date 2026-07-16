@@ -1,8 +1,9 @@
-"""程序说明：验证 PageIndex 本地集成服务的知识库隔离与 LLM 配置保护。"""
+﻿"""程序说明：验证 PageIndex 本地集成服务的知识库隔离与 LLM 配置保护。"""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ def build_pageindex_test_settings(tmp_path: Path, *, llm_provider: str = "disabl
         RULES_DIR=rules_dir,
         TEMPLATES_DIR=templates_dir,
         LLM_PROVIDER=llm_provider,
+        LLM_MODEL="test-pageindex-model" if llm_provider != "disabled" else "disabled",
         EMBEDDING_PROVIDER="local",
         RERANK_ENABLED=False,
     )
@@ -95,8 +97,8 @@ def test_pageindex_service_should_list_documents_inside_selected_knowledge_base(
     assert second["doc_uid"] not in {item["doc_uid"] for item in alpha_documents}
 
 
-def test_pageindex_service_should_reject_build_when_llm_disabled(tmp_path: Path) -> None:
-    """LLM 未启用时，PageIndex 不应静默建树或误走外部默认配置。"""
+def test_pageindex_service_should_build_markdown_locally_when_llm_disabled(tmp_path: Path) -> None:
+    """LLM 未启用时，Markdown 仍应通过确定性标题树完成本地建树。"""
 
     settings = build_pageindex_test_settings(tmp_path, llm_provider="disabled")
     initialize_database(settings.sqlite_db_path)
@@ -104,8 +106,10 @@ def test_pageindex_service_should_reject_build_when_llm_disabled(tmp_path: Path)
 
     service = PageIndexService(settings)
 
-    with pytest.raises(ValidationAppError, match="PageIndex 需要启用 LLM"):
-        service.build_index("kb_alpha", document["doc_uid"])
+    result = service.build_index("kb_alpha", document["doc_uid"])
+
+    assert result["pageindex_doc_id"].startswith("local-md-")
+    assert result["structure_status"] == "normalized"
 
 
 def test_pageindex_service_should_report_llm_retrieval_status(tmp_path: Path) -> None:
@@ -128,25 +132,13 @@ def test_pageindex_service_should_report_llm_retrieval_status(tmp_path: Path) ->
     assert enabled_status["model"] == "gpt-test"
 
 
-def test_pageindex_service_should_repair_legacy_source_path_before_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pageindex_service_should_repair_legacy_source_path_before_build(tmp_path: Path) -> None:
     """历史数据库路径指向旧项目时，应自动修复为当前 Input 知识库路径再构建。"""
 
     settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
     initialize_database(settings.sqlite_db_path)
     document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
     legacy_path = tmp_path / "old_project" / "Input" / "kb_alpha" / "alpha.md"
-    captured_paths: list[str] = []
-
-    class FakePageIndexClient:
-        """测试用 PageIndex 客户端，记录实际构建路径。"""
-
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def index(self, file_path: str, mode: str = "auto") -> str:
-            captured_paths.append(file_path)
-            return "pi_doc_repaired"
-
     with settings.sqlite_db_path.open("rb"):
         pass
     from src.db.connection import create_connection
@@ -158,14 +150,12 @@ def test_pageindex_service_should_repair_legacy_source_path_before_build(tmp_pat
         )
         connection.commit()
 
-    monkeypatch.setattr("src.pageindex.service.PageIndexClient", FakePageIndexClient)
     service = PageIndexService(settings)
 
     result = service.build_index("kb_alpha", document["doc_uid"])
 
-    assert result["pageindex_doc_id"] == "pi_doc_repaired"
-    assert captured_paths
-    captured_path = Path(captured_paths[0])
+    assert result["pageindex_doc_id"].startswith("local-md-")
+    captured_path = Path(result["workspace_path"]) / "source.cleaned.md"
     assert captured_path.name == "source.cleaned.md"
     assert captured_path.read_text(encoding="utf-8").startswith("# alpha")
     with create_connection(settings.sqlite_db_path) as connection:
@@ -176,7 +166,56 @@ def test_pageindex_service_should_repair_legacy_source_path_before_build(tmp_pat
     assert repaired_row["source_path"] == "kb_alpha/alpha.md"
 
 
-def test_pageindex_build_should_use_cleaned_markdown_copy_without_changing_original(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pageindex_build_should_bridge_llm_base_url_to_vendor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PageIndex vendor 使用 LiteLLM 时，应收到项目配置的 OpenAI 兼容 Base URL。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
+    settings.llm_api_key = "test-key"
+    settings.llm_base_url = "https://example.com/v1"
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+
+    PageIndexService(settings)._configure_vendor_environment()
+
+    assert os.environ["OPENAI_API_BASE"] == "https://example.com/v1"
+
+
+def test_markdown_build_should_use_local_heading_tree_without_vendor_llm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Markdown 已有显式标题结构时，建树不得为每个节点并发调用外部 LLM。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
+    settings.llm_api_key = "test-key"
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+
+    class FailingPageIndexClient:
+        """若 Markdown 仍进入 vendor 建树，则测试立即失败。"""
+
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("Markdown 不应调用 vendor LLM 建树")
+
+    monkeypatch.setattr("src.pageindex.service.PageIndexClient", FailingPageIndexClient)
+
+    result = PageIndexService(settings).build_index("kb_alpha", document["doc_uid"])
+
+    assert result["pageindex_doc_id"].startswith("local-md-")
+    workspace = Path(result["workspace_path"])
+    vendor_document = json.loads(
+        (workspace / f"{result['pageindex_doc_id']}.json").read_text(encoding="utf-8-sig")
+    )
+    assert vendor_document["type"] == "md"
+    assert vendor_document["structure"][0]["nodes"][0]["title"] == "风险"
+    assert "仅属于当前知识库" in vendor_document["structure"][0]["nodes"][0]["text"]
+    assert (workspace / "structure.normalized.json").exists()
+    assert (workspace / "structure.quality.json").exists()
+
+
+def test_pageindex_build_should_use_cleaned_markdown_copy_without_changing_original(tmp_path: Path) -> None:
     """构建 PageIndex 时应使用清洗后的 Markdown 副本，且不修改用户原始文档。"""
 
     settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
@@ -197,31 +236,86 @@ def test_pageindex_build_should_use_cleaned_markdown_copy_without_changing_origi
         ]
     )
     source_path.write_text(original_text, encoding="utf-8")
-    captured_paths: list[Path] = []
-
-    class FakePageIndexClient:
-        """测试用 PageIndex 客户端，记录传给 PageIndex 的构建文件。"""
-
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def index(self, file_path: str, mode: str = "auto") -> str:
-            captured_paths.append(Path(file_path))
-            return "pi_doc_cleaned"
-
-    monkeypatch.setattr("src.pageindex.service.PageIndexClient", FakePageIndexClient)
-
     result = PageIndexService(settings).build_index("kb_alpha", document["doc_uid"])
 
-    assert result["pageindex_doc_id"] == "pi_doc_cleaned"
-    assert captured_paths
-    cleaned_path = captured_paths[0]
+    assert result["pageindex_doc_id"].startswith("local-md-")
+    cleaned_path = Path(result["workspace_path"]) / "source.cleaned.md"
     assert cleaned_path != source_path
     cleaned_text = cleaned_path.read_text(encoding="utf-8")
     assert "![](images/noise.jpg)" not in cleaned_text
     assert "目 录" not in cleaned_text
     assert "阿胶正文内容。" in cleaned_text
     assert source_path.read_text(encoding="utf-8") == original_text
+
+
+def test_pageindex_build_should_write_and_prefer_normalized_structure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """构建完成后应保存规范化树，读取时不再依赖 vendor 临时解析。"""
+
+    settings = build_pageindex_test_settings(tmp_path, llm_provider="openai")
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(
+        settings,
+        knowledge_base_id="kb_alpha",
+        file_name="alpha.md",
+    )
+
+    class FakePageIndexClient:
+        """测试用客户端：写入最小元数据并返回 vendor 树。"""
+
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            self.workspace = Path(kwargs["workspace"])
+
+        def index(self, _file_path: str, mode: str = "auto") -> str:
+            self.workspace.mkdir(parents=True, exist_ok=True)
+            (self.workspace / "_meta.json").write_text("{}", encoding="utf-8")
+            return "pi_doc_normalized"
+
+        def get_document_structure(self, _doc_uid: str) -> str:
+            return json.dumps(
+                [
+                    {
+                        "title": "alpha",
+                        "line_num": 1,
+                        "summary": "总览",
+                        "nodes": [
+                            {"title": "风险", "line_num": 5, "summary": "风险", "nodes": []}
+                        ],
+                    }
+                ],
+                ensure_ascii=False,
+            )
+
+    monkeypatch.setattr("src.pageindex.service.PageIndexClient", FakePageIndexClient)
+    service = PageIndexService(settings)
+
+    service.build_index("kb_alpha", document["doc_uid"])
+    workspace = service._document_workspace("kb_alpha", document["doc_uid"])
+    normalized_path = workspace / "structure.normalized.json"
+    payload = json.loads(normalized_path.read_text(encoding="utf-8-sig"))
+
+    assert payload["status"] == "ready"
+    assert payload["quality"]["passed"] is True
+    assert payload["structure"][0]["nodes"][0]["heading_path"] == "alpha / 风险"
+
+    class FailingPageIndexClient:
+        def __init__(self, **_kwargs) -> None:
+            raise AssertionError("存在规范化树时不应读取 vendor")
+
+    monkeypatch.setattr("src.pageindex.service.PageIndexClient", FailingPageIndexClient)
+    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    assert service._load_structure(record) == payload["structure"]
+
+    with transaction(settings.sqlite_db_path) as connection:
+        connection.execute(
+            "UPDATE documents SET source_hash = ? WHERE doc_uid = ?",
+            ("changed-source-hash", document["doc_uid"]),
+        )
+    stale_record = service._get_index_record("kb_alpha", document["doc_uid"])
+    with pytest.raises(ValidationAppError, match="stale_index"):
+        service._load_structure(stale_record)
 
 
 def seed_pageindex_workspace(settings: AppSettings, *, knowledge_base_id: str, doc_uid: str, file_name: str) -> str:
@@ -519,7 +613,14 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
     assert answer["debug"]["question_analysis"]["expanded_terms"] == ["皮肤状态改善", "滋养阴血"]
     assert answer["debug"]["candidate_nodes"][0]["candidate_id"] == "node_2"
     assert answer["debug"]["selected_nodes"][0]["reason"] == "语义上对应皮肤状态改善"
-    assert len(llm_client.prompts) == 5
+    assert len(llm_client.prompts) == 4
+    assert answer["debug"]["budget"]["llm_calls"] == 4
+    assert answer["debug"]["budget"]["call_trace"] == [
+        "question_analysis",
+        "question_plan",
+        "node_selection_round_1",
+        "final_answer",
+    ]
 
 
 def test_pageindex_iterative_prompt_should_require_sufficiency_fields() -> None:
@@ -648,6 +749,8 @@ def test_pageindex_should_continue_iterative_retrieval_until_sufficient(tmp_path
     assert answer["debug"]["retrieval_rounds"][0]["missing_information"] == "缺少具体检测方法清单"
     assert answer["debug"]["retrieval_rounds"][1]["sufficiency"] == "sufficient"
     assert answer["debug"]["retrieval_rounds"][1]["selected_nodes"][0]["title"] == "质量检测方法"
+    assert answer["debug"]["retrieval_rounds"][1]["search_focus"] == answer["debug"]["retrieval_rounds"][0]["next_search_focus"]
+    assert answer["debug"]["retrieval_rounds"][1]["candidate_node_ids"] != answer["debug"]["retrieval_rounds"][0]["candidate_node_ids"]
 
 
 def test_pageindex_template_retrieval_policy_should_limit_selected_nodes(tmp_path: Path) -> None:
@@ -1077,6 +1180,7 @@ def test_pageindex_question_terms_should_keep_meaningful_chinese_phrases() -> No
 
     cold_terms = PageIndexService._extract_question_terms("阿胶对感冒有没有作用")
     quality_terms = PageIndexService._extract_question_terms("阿胶质量检测方法有哪些")
+    anemia_terms = PageIndexService._extract_question_terms("阿胶抗贫血研究有哪些")
 
     assert "感冒" in cold_terms
     assert "不孕不育" in PageIndexService._extract_question_terms("阿胶能不能治疗不孕不育")
@@ -1086,6 +1190,7 @@ def test_pageindex_question_terms_should_keep_meaningful_chinese_phrases() -> No
     assert "质量检测" in quality_terms
     assert "检测方法" in quality_terms
     assert "有哪些" not in quality_terms
+    assert "抗贫血" in anemia_terms
 
 
 def test_pageindex_local_rank_should_return_empty_when_only_generic_terms_match(tmp_path: Path) -> None:
@@ -1284,6 +1389,55 @@ def test_pageindex_rag_evidence_should_ignore_generic_entity_terms(tmp_path: Pat
 
     assert [item["chunk_id"] for item in rag_items] == ["chunk_cold_evidence"]
     assert "感冒期间" in rag_items[0]["content"]
+
+
+def test_pageindex_rag_evidence_should_use_injected_retrieval_service(tmp_path: Path) -> None:
+    """PageIndex 补充召回应统一调用 RetrievalService，不再执行自有 FTS/LIKE。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+
+    class StubRetrievalService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def hybrid_search(self, query: str, **kwargs) -> list[dict]:  # noqa: ANN003
+            self.calls.append({"query": query, **kwargs})
+            return [
+                {
+                    "chunk_id": "chunk_unified",
+                    "doc_uid": document["doc_uid"],
+                    "content": "阿胶质量检测包括特征肽鉴别。",
+                    "source_span": "section-1:chunk-0",
+                    "heading_path": "质量检测",
+                    "source_start_line": 10,
+                    "source_end_line": 12,
+                    "source_anchor": "L10-L12",
+                    "chunk_type": "paragraph",
+                    "rrf_score": 0.032,
+                    "degraded_reason": "",
+                }
+            ]
+
+    retrieval_service = StubRetrievalService()
+    service = PageIndexService(settings, retrieval_service=retrieval_service)
+    record = {
+        "doc_uid": document["doc_uid"],
+        "knowledge_base_id": "kb_alpha",
+    }
+
+    evidence = service._search_rag_fts_evidence(
+        record,
+        "阿胶质量检测方法",
+        {"entities": ["阿胶"], "keywords": ["质量检测"], "expanded_terms": []},
+    )
+
+    assert retrieval_service.calls
+    assert retrieval_service.calls[0]["doc_uid"] == document["doc_uid"]
+    assert retrieval_service.calls[0]["knowledge_base_id"] == "kb_alpha"
+    assert evidence[0]["chunk_id"] == "chunk_unified"
+    assert evidence[0]["rrf_score"] == 0.032
 
 
 def test_pageindex_rag_evidence_should_skip_when_only_generic_terms(tmp_path: Path) -> None:
@@ -2137,3 +2291,24 @@ def test_pageindex_knowledge_base_question_should_use_aggregate_question_plan_an
     assert result["debug"]["document_retrieval_rounds"][0]["rounds"][0]["sufficiency"] == "insufficient"
     assert "真伪鉴别" in result["answer"]
     assert "不能证明" not in result["answer"]
+
+
+def test_knowledge_base_search_should_convert_document_app_error_to_validation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """单篇索引异常应被聚合为可读错误，而不是触发未定义异常类型。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    service = PageIndexService(settings)
+
+    def raise_invalid_structure(_record: dict) -> list[dict]:
+        raise ValidationAppError("索引结构无效")
+
+    monkeypatch.setattr(service, "_load_structure", raise_invalid_structure)
+
+    with pytest.raises(ValidationAppError, match="当前知识库 PageIndex 检索失败"):
+        service._answer_knowledge_base_with_reasoning_or_fallback(
+            [{"doc_uid": "doc_invalid", "pageindex_doc_id": "pi_invalid"}],
+            "测试问题",
+        )

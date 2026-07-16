@@ -1,4 +1,4 @@
-"""程序说明：应用主入口，注册最小 API 路由、统一应用版本并初始化数据库。"""
+﻿"""程序说明：应用主入口，注册最小 API 路由、统一应用版本并初始化数据库。"""
 
 from __future__ import annotations
 
@@ -56,7 +56,9 @@ def create_app(settings_override: AppSettings | None = None) -> FastAPI:
         settings.chroma_persist_dir,
         embedding_client=embedding_client,
         sqlite_db_path=settings.sqlite_db_path,
-        auto_repair_dimension_mismatch=True,
+        auto_repair_dimension_mismatch=False,
+        embedding_model=settings.embedding_model,
+        index_version="retrieval-v2",
     )
     ingest_service = IngestService(settings, vector_store=vector_store)
     retrieval_service = RetrievalService(settings.sqlite_db_path)

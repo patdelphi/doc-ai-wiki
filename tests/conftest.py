@@ -1,12 +1,17 @@
-"""程序说明：提供测试期的全局初始化配置，并按目录自动补齐 pytest marker。"""
+﻿"""程序说明：提供测试期的全局初始化配置，并按目录自动补齐 pytest marker。"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-# 在 pytest 导入 UI 相关模块前关闭 Gradio 分析线程，保证测试纯本地执行。
-os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
+# 在 pytest 导入业务模块前覆盖真实环境，保证测试纯本地、无外部调用。
+os.environ["DOC_AI_WIKI_INITIAL_ADMIN_PASSWORD"] = ""
+os.environ["LLM_PROVIDER"] = "disabled"
+os.environ["LLM_MODEL"] = "disabled"
+os.environ["EMBEDDING_PROVIDER"] = "local"
+os.environ["RERANK_ENABLED"] = "false"
+os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
 
 def pytest_collection_modifyitems(items) -> None:

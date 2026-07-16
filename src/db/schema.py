@@ -1,4 +1,4 @@
-"""程序说明：定义 SQLite 初始化所需的表结构。"""
+﻿"""程序说明：定义 SQLite 初始化所需的表结构。"""
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -79,7 +79,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_section_id ON chunks (section_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
     chunk_id UNINDEXED,
     doc_uid UNINDEXED,
-    content
+    content,
+    tokenize='trigram'
 );
 
 CREATE TABLE IF NOT EXISTS ingest_jobs (

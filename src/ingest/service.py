@@ -1,4 +1,4 @@
-"""程序说明：实现 Markdown 文档注册、分块与基础入库流程。"""
+﻿"""程序说明：实现 Markdown 文档注册、分块与基础入库流程。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,9 @@ class IngestService:
             settings.chroma_persist_dir,
             embedding_client=build_embedding_client(settings),
             sqlite_db_path=settings.sqlite_db_path,
-            auto_repair_dimension_mismatch=True,
+            auto_repair_dimension_mismatch=False,
+            embedding_model=settings.embedding_model,
+            index_version="retrieval-v2",
         )
 
     def register_documents(

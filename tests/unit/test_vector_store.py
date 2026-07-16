@@ -1,4 +1,4 @@
-"""程序说明：验证向量索引启动时的 embedding 维度自检逻辑。"""
+﻿"""程序说明：验证向量索引启动时的 embedding 维度自检逻辑。"""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ class StubCollection:
     def __init__(self, *, ids: list[str] | None = None, embeddings: list[list[float]] | None = None) -> None:
         self._ids = ids if ids is not None else []
         self._embeddings = embeddings if embeddings is not None else []
+        self._metadatas: list[dict] = []
 
     def peek(self, limit: int = 1) -> dict:
         return {
@@ -55,6 +56,7 @@ class StubCollection:
         assert len(ids) == len(documents) == len(metadatas) == len(embeddings)
         self._ids = list(ids)
         self._embeddings = [list(item) for item in embeddings]
+        self._metadatas = [dict(item) for item in metadatas]
 
     def delete(self, *, where: dict) -> None:
         _ = where
@@ -78,6 +80,7 @@ class StubClient:
 
     def __init__(self, collection: StubCollection) -> None:
         self._collections = {"knowledge_chunks": collection}
+        self.closed = False
 
     def get_or_create_collection(self, *, name: str) -> StubCollection:
         assert name == "knowledge_chunks"
@@ -85,6 +88,11 @@ class StubClient:
 
     def delete_collection(self, *, name: str) -> None:
         self._collections.pop(name, None)
+
+    def close(self) -> None:
+        """记录客户端句柄已释放。"""
+
+        self.closed = True
 
 
 class RaisingLegacyConfigClient(StubClient):
@@ -327,3 +335,81 @@ def test_vector_store_count_by_doc_uid_should_support_nested_id_sequences(monkey
     )
 
     assert store.count_by_doc_uid("doc_1") == 2
+
+
+def test_vector_store_should_write_model_dimension_and_index_version_metadata(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """每条向量必须携带知识库、模型、维度和索引版本。"""
+
+    collection = StubCollection()
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: StubClient(collection),
+    )
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=8),
+        embedding_model="test-embedding-v2",
+        index_version="retrieval-v2",
+    )
+
+    store.upsert_chunks(
+        [
+            {
+                "chunk_id": "chunk_meta",
+                "doc_uid": "doc_meta",
+                "knowledge_base_id": "default",
+                "content": "向量元数据测试",
+            }
+        ]
+    )
+
+    metadata = collection._metadatas[0]
+    assert metadata["knowledge_base_id"] == "default"
+    assert metadata["embedding_model"] == "test-embedding-v2"
+    assert metadata["embedding_dimension"] == 8
+    assert metadata["index_version"] == "retrieval-v2"
+
+
+def test_rebuild_from_sqlite_should_inherit_document_knowledge_base(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """全量重建时，应把 documents.knowledge_base_id 写入每条向量元数据。"""
+
+    database_path = tmp_path / "app.db"
+    seed_chunk_database(database_path)
+    collection = StubCollection()
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: StubClient(collection),
+    )
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=8),
+        sqlite_db_path=database_path,
+    )
+
+    store.rebuild_from_sqlite()
+
+    assert collection._metadatas[0]["knowledge_base_id"] == "default"
+
+
+def test_vector_store_close_should_release_chroma_client(monkeypatch, tmp_path: Path) -> None:
+    """关闭向量存储时，应显式释放 Windows 下持有目录的 Chroma 客户端。"""
+
+    client = StubClient(StubCollection())
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.chromadb.PersistentClient",
+        lambda path: client,
+    )
+    store = VectorStore(
+        tmp_path / "chroma",
+        embedding_client=StubEmbeddingClient(dimension=8),
+    )
+
+    store.close()
+
+    assert client.closed is True
