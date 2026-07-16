@@ -1,4 +1,4 @@
-"""程序说明：用户认证与权限管理服务（适配现有数据库结构）。"""
+﻿"""程序说明：用户认证与权限管理服务（适配现有数据库结构）。"""
 
 import hmac
 import hashlib
@@ -248,7 +248,7 @@ class AuthService:
             "SELECT knowledge_base_id FROM user_kb_access WHERE user_id = ?",
             (user_id,)
         ).fetchall()
-        marker_row = self._db.execute(
+        self._db.execute(
             "SELECT 1 FROM user_permissions WHERE user_id = ?",
             (user_id,),
         ).fetchone()

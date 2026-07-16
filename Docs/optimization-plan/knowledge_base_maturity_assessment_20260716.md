@@ -250,6 +250,10 @@
 
 该结果提升了权限范围内排序正确性和 CI 可信度，但不改变人工金标、线上可观测性、用户反馈、PageIndex 多文档规模和生产 SLA 尚未完成的判断。因此成熟度总分暂不因工程测试通过而上调，待 P1/P2 产生真实质量与用户数据后再复评。
 
+P1 第一批已清理 UI/认证相关 185 个 F401/F841 问题、重复权限 helper 和历史重导出，并恢复对应 Ruff 门禁。此项降低了继续拆分 UI 的噪声和回归风险，但 `build_ui()` 与 PageIndex 巨型服务仍未完成职责拆分，因此可维护性短板只算部分改善。
+
+该批次最终验证为 Ruff、Mypy、build、compileall 通过，完整测试 `404 passed, 6 warnings`。
+
 ## 9. 参考
 
 - [PageIndex 官方仓库](https://github.com/VectifyAI/PageIndex)

@@ -1,4 +1,4 @@
-"""程序说明：验证最小 UI 可构建，并确保 UI 测试不受模块重载污染。"""
+﻿"""程序说明：验证最小 UI 可构建，并确保 UI 测试不受模块重载污染。"""
 
 import importlib
 import sqlite3
@@ -9,22 +9,20 @@ import gradio as gr
 import pandas as pd
 import pytest
 
+from src.auth.service import normalize_auth_tab_name
 from src.common.config import AppSettings
 from src.db.connection import initialize_database
 from src.db.repositories import DocumentRepository, QualityRepository
 from src.ingest.service import IngestService
-from src.quality.service import QualityService
 from src.review.service import ReviewService
-from src.retrieval.service import RetrievalService
-from src.retrieval.vector_store import VectorStore
 from src.ui.app import create_ui_app
+from src.ui.css import UI_CSS
 from src.ui.document_page import build_document_tab
-from src.ui.page_helpers import get_selected_search_item_from_page_rows, paginate_table_rows
-from src.ui.pages import (
-    UI_CSS,
+from src.ui.page_helpers import (
     build_visible_knowledge_base_bundle,
     filter_visible_knowledge_base_items,
-    normalize_auth_tab_name,
+    get_selected_search_item_from_page_rows,
+    paginate_table_rows,
 )
 
 
@@ -704,7 +702,7 @@ def test_create_ui_app_should_include_settings_workspace(tmp_path: Path) -> None
 
     demo = create_ui_app(settings)
     components = demo.config.get("components", [])
-    html_values = [
+    [
         str(component.get("props", {}).get("value", ""))
         for component in components
         if component.get("type") == "html"

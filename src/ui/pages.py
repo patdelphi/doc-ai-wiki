@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 import gradio as gr
 
@@ -11,14 +10,11 @@ from src.auth.service import AUTH_TAB_NAMES, normalize_auth_tab_name
 from src.common.errors import AppError, NotFoundAppError
 from src.common.paths import resolve_input_path
 from src.pageindex.service import PageIndexService
-from src.ui.css import UI_CSS
 from src.ui.exporters import build_download_url, save_markdown_export
 from src.ui.page_helpers import (
     TABLE_PAGE_SIZE,
-    build_markdown_table,
     build_visible_knowledge_base_bundle,
     change_table_page,
-    filter_visible_knowledge_base_items,
     format_table_pagination_html,
     get_row_from_paged_table,
     get_selected_search_item_from_page_rows,
@@ -41,7 +37,6 @@ from src.ui.viewmodels import (
     build_claim_evidence_rows,
     build_database_summary_rows,
     build_document_action_updates,
-    build_document_choices,
     build_document_quality_batch_rows,
     build_document_quality_chunk_rows,
     build_document_quality_section_rows,
@@ -59,40 +54,30 @@ from src.ui.viewmodels import (
     build_template_choices,
     format_claim_detail_for_review,
     format_claim_detail_html,
-    format_claim_detail_markdown,
     format_active_quality_check_html,
     format_database_summary_html,
     format_document_detail_html,
     format_document_detail_markdown,
     format_document_quality_batch_export_markdown,
-    format_document_quality_batch_summary_markdown,
     format_document_quality_batch_summary_html,
-    format_document_quality_checks_markdown,
     format_document_quality_config_markdown,
     format_document_quality_config_html,
     format_document_quality_checks_html,
     format_document_quality_export_markdown,
-    format_document_quality_report_markdown,
     format_document_quality_report_html,
-    format_document_quality_search_summary_markdown,
     format_document_quality_search_summary_html,
     format_document_summary_html,
     format_evidence_detail_html,
-    format_evidence_detail_markdown,
     format_ingest_result,
     format_operation_result_html,
     format_quality_evaluation_export_markdown,
-    format_quality_evaluation_help_html,
     format_quality_evaluation_summary_html,
     format_quality_export_markdown,
-    format_quality_help_html,
     format_quality_progress_html,
     format_quality_result,
     format_quality_result_html,
     format_search_export_markdown,
-    format_settings_help_html,
     format_settings_knowledge_base_detail_html,
-    format_settings_knowledge_base_detail_markdown,
     format_settings_runtime_markdown,
     format_settings_runtime_html,
     format_settings_template_detail_markdown,
@@ -101,18 +86,12 @@ from src.ui.viewmodels import (
     format_recent_quality_checks,
     format_review_candidates,
     format_review_export_markdown,
-    format_review_help_html,
     format_review_history,
-    format_review_record_detail_markdown,
     format_review_record_detail_html,
-    format_search_help_html,
     format_search_result_detail_html,
-    format_search_result_detail_markdown,
     format_search_results,
     format_search_summary_html,
     get_document_detail,
-    get_review_record_detail,
-    get_review_target_claim_id,
     normalize_search_query,
     parse_claim_choice,
     parse_document_choice,
@@ -938,7 +917,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         """基于 PageIndex 本地结构提问，并刷新证据与历史。"""
 
         knowledge_base_id = parse_knowledge_base_choice(knowledge_base_choice or "")
-        doc_uid = _parse_pageindex_document_choice(document_choice)
         template_id = parse_template_choice(template_choice or "")
         if not knowledge_base_id:
             return _build_pageindex_answer_html("请先选择知识库。"), [], [], [], [], "", "", None
@@ -5556,15 +5534,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
         return extract_login_session_permissions(session)
 
-    def _has_tab_access(session: dict[str, object] | None, tab_name: str) -> bool:
-        """判断当前登录态是否拥有指定主菜单权限。"""
-
-        if session is None:
-            return True
-        is_admin, allowed_tabs, _allowed_kb_ids = _extract_session_permissions(session)
-        normalized_tab_name = normalize_auth_tab_name(tab_name)
-        return bool(is_admin or allowed_tabs is None or normalized_tab_name in allowed_tabs)
-
     def _build_quality_permission_updates(
         session: dict[str, object] | None,
         history_scope_value: str | None = None,
@@ -5817,17 +5786,13 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_quality_evaluation_table_rows=initial_quality_evaluation_table_rows,
                         initial_quality_evaluation_page_info=initial_quality_evaluation_page_info,
                     )
-                    quality_input = quality_components["quality_input"]
                     quality_knowledge_base = quality_components["quality_knowledge_base"]
                     quality_template = quality_components["quality_template"]
-                    quality_button = quality_components["quality_button"]
-                    recent_quality_button = quality_components["recent_quality_button"]
                     quality_template_detail = quality_components["quality_template_detail"]
                     formatted_quality_result_state = quality_components["formatted_quality_result_state"]
                     quality_claim_page_state = quality_components["quality_claim_page_state"]
                     quality_evidence_page_state = quality_components["quality_evidence_page_state"]
                     recent_quality_page_state = quality_components["recent_quality_page_state"]
-                    quality_evaluation_page_state = quality_components["quality_evaluation_page_state"]
                     quality_progress = quality_components["quality_progress"]
                     quality_result = quality_components["quality_result"]
                     selected_claim_state = quality_components["selected_claim_state"]
@@ -5836,33 +5801,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     evidence_items_state = quality_components["evidence_items_state"]
                     quality_active_check = quality_components["quality_active_check"]
                     quality_claims = quality_components["quality_claims"]
-                    quality_claim_prev_button = quality_components["quality_claim_prev_button"]
-                    quality_claim_next_button = quality_components["quality_claim_next_button"]
                     quality_claim_page_info = quality_components["quality_claim_page_info"]
                     claim_detail_view = quality_components["claim_detail_view"]
                     quality_review_claim_detail = quality_components["quality_review_claim_detail"]
                     claim_evidence_table = quality_components["claim_evidence_table"]
-                    quality_evidence_prev_button = quality_components["quality_evidence_prev_button"]
-                    quality_evidence_next_button = quality_components["quality_evidence_next_button"]
                     quality_evidence_page_info = quality_components["quality_evidence_page_info"]
                     claim_evidence_detail = quality_components["claim_evidence_detail"]
-                    recent_quality_scope_filter = quality_components["recent_quality_scope_filter"]
                     recent_quality_checks = quality_components["recent_quality_checks"]
-                    recent_quality_prev_button = quality_components["recent_quality_prev_button"]
-                    recent_quality_next_button = quality_components["recent_quality_next_button"]
                     recent_quality_page_info = quality_components["recent_quality_page_info"]
-                    quality_export_button = quality_components["quality_export_button"]
-                    quality_export_result = quality_components["quality_export_result"]
                     quality_evaluation_cases = quality_components["quality_evaluation_cases"]
-                    quality_evaluation_button = quality_components["quality_evaluation_button"]
-                    quality_evaluation_export_button = quality_components["quality_evaluation_export_button"]
-                    quality_evaluation_export_result = quality_components["quality_evaluation_export_result"]
-                    quality_evaluation_summary = quality_components["quality_evaluation_summary"]
-                    quality_evaluation_result_state = quality_components["quality_evaluation_result_state"]
-                    quality_evaluation_table = quality_components["quality_evaluation_table"]
-                    quality_evaluation_prev_button = quality_components["quality_evaluation_prev_button"]
-                    quality_evaluation_next_button = quality_components["quality_evaluation_next_button"]
-                    quality_evaluation_page_info = quality_components["quality_evaluation_page_info"]
 
                 build_quality_dummy_tab(
                     claim_choices=quality_dummy_claim_choices,
@@ -5915,32 +5862,17 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_review_record_detail_html=initial_review_record_detail_html,
                     )
                     review_knowledge_base = review_components["review_knowledge_base"]
-                    review_scope_filter = review_components["review_scope_filter"]
-                    review_risk_filter = review_components["review_risk_filter"]
                     review_pending_candidates = review_components["review_pending_candidates"]
-                    review_pending_prev_button = review_components["review_pending_prev_button"]
-                    review_pending_next_button = review_components["review_pending_next_button"]
                     review_pending_page_info = review_components["review_pending_page_info"]
                     review_processed_candidates = review_components["review_processed_candidates"]
-                    review_processed_prev_button = review_components["review_processed_prev_button"]
-                    review_processed_next_button = review_components["review_processed_next_button"]
                     review_processed_page_info = review_components["review_processed_page_info"]
                     review_claim_detail_panel = review_components["review_claim_detail_panel"]
                     review_evidence_detail = review_components["review_evidence_detail"]
                     review_evidence_table = review_components["review_evidence_table"]
-                    review_evidence_prev_button = review_components["review_evidence_prev_button"]
-                    review_evidence_next_button = review_components["review_evidence_next_button"]
                     review_evidence_page_info = review_components["review_evidence_page_info"]
                     review_action_input = review_components["review_action_input"]
                     review_note_input = review_components["review_note_input"]
-                    review_button = review_components["review_button"]
-                    review_history_button = review_components["review_history_button"]
-                    review_export_button = review_components["review_export_button"]
-                    review_result = review_components["review_result"]
-                    review_export_result = review_components["review_export_result"]
                     review_history = review_components["review_history"]
-                    review_history_prev_button = review_components["review_history_prev_button"]
-                    review_history_next_button = review_components["review_history_next_button"]
                     review_history_page_info = review_components["review_history_page_info"]
                     review_record_detail = review_components["review_record_detail"]
 
@@ -5992,74 +5924,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             "quality_short_chunk_warn_min_chunk_count": initial_quality_short_chunk_warn_min_chunk_count,
                         }
                     )
-                    document_management_help = document_components["document_management_help"]
                     document_knowledge_base = document_components["document_knowledge_base"]
-                    scan_button = document_components["scan_button"]
-                    document_summary = document_components["document_summary"]
-                    database_summary = document_components["database_summary"]
-                    document_choices = document_components["document_choices"]
-                    document_detail = document_components["document_detail"]
                     document_target_knowledge_base = document_components["document_target_knowledge_base"]
-                    register_button = document_components["register_button"]
-                    rebuild_button = document_components["rebuild_button"]
-                    status_button = document_components["status_button"]
-                    move_document_button = document_components["move_document_button"]
-                    database_summary_table = document_components["database_summary_table"]
-                    database_prev_button = document_components["database_prev_button"]
-                    database_next_button = document_components["database_next_button"]
-                    database_page_info = document_components["database_page_info"]
-                    document_table = document_components["document_table"]
-                    document_prev_button = document_components["document_prev_button"]
-                    document_next_button = document_components["document_next_button"]
-                    document_page_info = document_components["document_page_info"]
-                    register_all_button = document_components["register_all_button"]
-                    register_result = document_components["register_result"]
-                    rebuild_result = document_components["rebuild_result"]
-                    document_quality_run_button = document_components["document_quality_run_button"]
-                    document_quality_result_export_button = document_components["document_quality_result_export_button"]
-                    document_quality_result_export_result = document_components["document_quality_result_export_result"]
-                    document_quality_report = document_components["document_quality_report"]
-                    document_quality_checks = document_components["document_quality_checks"]
-                    document_quality_sections = document_components["document_quality_sections"]
-                    document_quality_sections_prev_button = document_components["document_quality_sections_prev_button"]
-                    document_quality_sections_next_button = document_components["document_quality_sections_next_button"]
-                    document_quality_sections_page_info = document_components["document_quality_sections_page_info"]
-                    document_quality_chunks = document_components["document_quality_chunks"]
-                    document_quality_chunks_prev_button = document_components["document_quality_chunks_prev_button"]
-                    document_quality_chunks_next_button = document_components["document_quality_chunks_next_button"]
-                    document_quality_chunks_page_info = document_components["document_quality_chunks_page_info"]
-                    document_quality_search_query = document_components["document_quality_search_query"]
-                    document_quality_search_button = document_components["document_quality_search_button"]
-                    document_quality_search_export_button = document_components["document_quality_search_export_button"]
-                    document_quality_search_summary = document_components["document_quality_search_summary"]
-                    document_quality_search_export_result = document_components["document_quality_search_export_result"]
-                    document_quality_search_results = document_components["document_quality_search_results"]
-                    document_quality_search_prev_button = document_components["document_quality_search_prev_button"]
-                    document_quality_search_next_button = document_components["document_quality_search_next_button"]
-                    document_quality_search_page_info = document_components["document_quality_search_page_info"]
-                    document_quality_search_detail = document_components["document_quality_search_detail"]
-                    document_quality_batch_button = document_components["document_quality_batch_button"]
-                    document_quality_csv_export_button = document_components["document_quality_csv_export_button"]
-                    document_quality_batch_export_button = document_components["document_quality_batch_export_button"]
-                    document_quality_batch_summary = document_components["document_quality_batch_summary"]
-                    document_quality_csv_export_result = document_components["document_quality_csv_export_result"]
-                    document_quality_batch_export_result = document_components["document_quality_batch_export_result"]
-                    document_quality_batch_table = document_components["document_quality_batch_table"]
-                    document_quality_batch_prev_button = document_components["document_quality_batch_prev_button"]
-                    document_quality_batch_next_button = document_components["document_quality_batch_next_button"]
-                    document_quality_batch_page_info = document_components["document_quality_batch_page_info"]
-                    document_quality_config_panel = document_components["document_quality_config_panel"]
-                    document_quality_config_result = document_components["document_quality_config_result"]
-                    document_quality_sample_limit = document_components["document_quality_sample_limit"]
-                    document_quality_long_document_char_threshold = document_components["document_quality_long_document_char_threshold"]
-                    document_quality_min_sections_for_long_doc = document_components["document_quality_min_sections_for_long_doc"]
-                    document_quality_max_avg_chunks_per_section = document_components["document_quality_max_avg_chunks_per_section"]
-                    document_quality_max_chunk_chars = document_components["document_quality_max_chunk_chars"]
-                    document_quality_short_chunk_chars = document_components["document_quality_short_chunk_chars"]
-                    document_quality_short_chunk_warn_min_chunk_count = document_components["document_quality_short_chunk_warn_min_chunk_count"]
-                    document_quality_config_save_button = document_components["document_quality_config_save_button"]
-                    document_quality_config_export_button = document_components["document_quality_config_export_button"]
-                    document_quality_config_export_result = document_components["document_quality_config_export_result"]
 
                 with gr.Tab("知识库检索", visible=False, id=MAIN_TAB_IDS["知识库检索"]) as search_tab:
                     search_components = build_search_tab(
@@ -6069,22 +5935,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         initial_search_page=initial_search_page,
                         initial_search_page_info=initial_search_page_info,
                     )
-                    search_query = search_components["search_query"]
                     search_knowledge_base = search_components["search_knowledge_base"]
-                    search_top_k = search_components["search_top_k"]
-                    search_button = search_components["search_button"]
-                    search_result_summary = search_components["search_result_summary"]
-                    search_result = search_components["search_result"]
-                    search_result_state = search_components["search_result_state"]
-                    search_query_state = search_components["search_query_state"]
-                    search_selected_row_state = search_components["search_selected_row_state"]
-                    search_page_state = search_components["search_page_state"]
-                    search_prev_button = search_components["search_prev_button"]
-                    search_next_button = search_components["search_next_button"]
-                    search_page_info = search_components["search_page_info"]
-                    search_result_detail = search_components["search_result_detail"]
-                    search_export_button = search_components["search_export_button"]
-                    search_export_result = search_components["search_export_result"]
 
                 with gr.Tab("PageIndex 深度检索", visible=False, id=MAIN_TAB_IDS["PageIndex 深度检索"]) as pageindex_tab:
                     pageindex_components = build_pageindex_tab(
@@ -6162,48 +6013,8 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             "permission_result_html": initial_settings_permission_result_html,
                         },
                     )
-                    settings_runtime = settings_components["settings_runtime"]
-                    settings_template_table = settings_components["settings_template_table"]
-                    settings_template_prev_button = settings_components["settings_template_prev_button"]
-                    settings_template_next_button = settings_components["settings_template_next_button"]
-                    settings_template_page_info = settings_components["settings_template_page_info"]
-                    settings_new_button = settings_components["settings_new_button"]
-                    settings_refresh_button = settings_components["settings_refresh_button"]
-                    settings_template_detail = settings_components["settings_template_detail"]
-                    settings_template_id = settings_components["settings_template_id"]
-                    settings_template_name = settings_components["settings_template_name"]
-                    settings_template_description = settings_components["settings_template_description"]
-                    settings_rule_tags = settings_components["settings_rule_tags"]
-                    settings_fulltext_top_k = settings_components["settings_fulltext_top_k"]
-                    settings_vector_top_k = settings_components["settings_vector_top_k"]
-                    settings_final_top_k = settings_components["settings_final_top_k"]
-                    settings_neighbor_window = settings_components["settings_neighbor_window"]
-                    settings_section_max_chars = settings_components["settings_section_max_chars"]
-                    settings_use_rerank = settings_components["settings_use_rerank"]
-                    settings_include_section_context = settings_components["settings_include_section_context"]
-                    settings_system_prompt = settings_components["settings_system_prompt"]
-                    settings_user_prompt_template = settings_components["settings_user_prompt_template"]
-                    settings_delete_confirm = settings_components["settings_delete_confirm"]
-                    settings_save_button = settings_components["settings_save_button"]
-                    settings_delete_button = settings_components["settings_delete_button"]
                     settings_knowledge_base_table = settings_components["settings_knowledge_base_table"]
-                    settings_knowledge_base_prev_button = settings_components["settings_knowledge_base_prev_button"]
-                    settings_knowledge_base_next_button = settings_components["settings_knowledge_base_next_button"]
                     settings_knowledge_base_page_info = settings_components["settings_knowledge_base_page_info"]
-                    settings_knowledge_base_new_button = settings_components["settings_knowledge_base_new_button"]
-                    settings_knowledge_base_refresh_button = settings_components["settings_knowledge_base_refresh_button"]
-                    settings_knowledge_base_detail = settings_components["settings_knowledge_base_detail"]
-                    settings_knowledge_base_id = settings_components["settings_knowledge_base_id"]
-                    settings_knowledge_base_name = settings_components["settings_knowledge_base_name"]
-                    settings_knowledge_base_description = settings_components["settings_knowledge_base_description"]
-                    settings_knowledge_base_status = settings_components["settings_knowledge_base_status"]
-                    settings_knowledge_base_is_default = settings_components["settings_knowledge_base_is_default"]
-                    settings_knowledge_base_save_button = settings_components["settings_knowledge_base_save_button"]
-                    settings_knowledge_base_delete_button = settings_components["settings_knowledge_base_delete_button"]
-                    settings_knowledge_base_result = settings_components["settings_knowledge_base_result"]
-                    settings_result = settings_components["settings_result"]
-                    settings_export_button = settings_components["settings_export_button"]
-                    settings_export_result = settings_components["settings_export_result"]
 
             bind_document_events(
                 components=document_components,

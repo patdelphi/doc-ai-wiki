@@ -110,3 +110,13 @@ python ".aipython/rebuild_pageindex.py" restore --latest --apply
 - 完整测试：`402 passed, 6 warnings in 196.36s`；警告均为 PyPDF2/SWIG 第三方弃用提示。
 - build：sdist 与 wheel 构建成功；compileall 通过。
 - 本轮未调用外部模型 API，未执行索引重建、数据库迁移、部署、commit、push、merge 或 pull。
+
+## 10. P1 第一批 UI 死代码治理
+
+- 删除 `src/ui/pages.py` 中重复的 `_has_tab_access()`，权限判断只保留一个实现。
+- 删除 21 个无用导入，以及 159 个无用局部赋值或组件字典读取；`pages.py` 净减少 189 行。
+- 测试不再依赖 `pages.py` 对 CSS 和知识库 helper 的历史重导出，改为从真实所属模块导入。
+- 删除 `src/auth/service.py` 中没有参与权限判断的冗余查询，以及 `test_ui.py` 中未使用的组件值列表。
+- `src/ui/pages.py`、`tests/unit/test_ui.py`、`src/auth/service.py` 不再豁免 Ruff `F401/F841`。
+- 新增 AST 与配置门禁测试，防止重复权限 helper 和静态检查豁免回归。
+- 最终验收：Ruff、Mypy、build、compileall 通过；完整测试 `404 passed, 6 warnings in 200.22s`。

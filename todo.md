@@ -5,7 +5,7 @@
 > 范围：检索、PageIndex、质量门禁与核心模块治理
 > 设计文档：`Docs/design/p0_code_quality_remediation_design_20260716.md`
 > 实施计划：`Docs/tasks/p0_code_quality_remediation_plan_20260716.md`
-> 原则：本轮只执行 P0；P1/P2 作为后续路线，不扩大当前改动范围
+> 原则：P0 已完成；P1 按可验证的小批次继续执行，P2 保留后续路线
 
 ### P0：本轮执行
 
@@ -22,7 +22,7 @@
 ### P1：后续治理
 
 - [ ] 按页面迁移 `src/ui/pages.py` 处理器，迁移一块删除一块
-- [ ] 清理 UI 未使用导入、变量和重复 `_has_tab_access()`
+- [x] 清理 UI 未使用导入、变量和重复 `_has_tab_access()`
 - [ ] 将 PageIndex 拆为索引存取、树检索、回答编排、历史导出四个现有职责
 - [ ] 把阿胶、疾病、方剂和评测主题词迁入词表/YAML配置
 - [ ] 统一外部模型降级、数据库异常和用户错误码约定
@@ -43,6 +43,18 @@
 - 本轮修改的两个检索模块真实通过 Mypy
 - 所有新增测试完成红绿验证，完整质量命令以最新结果为准
 - 不调用外部 API，不执行数据库迁移、部署、commit、push、merge 或 pull
+
+### P1 第一批：UI 死代码与门禁恢复
+
+- [x] 删除重复 `_has_tab_access()`，保留一个权限判断事实源
+- [x] 删除 `src/ui/pages.py` 的 21 个无用导入
+- [x] 删除 `src/ui/pages.py` 的 159 个无用局部赋值和组件字典读取
+- [x] 清理 `tests/unit/test_ui.py` 与 `src/auth/service.py` 的剩余死代码
+- [x] 测试改为从真实模块导入 UI CSS 与知识库过滤 helper
+- [x] 移除三个文件的 Ruff `F401/F841` 豁免
+- [x] 增加质量门禁测试，禁止重新豁免或重复定义权限 helper
+
+验收标准：隔离 Ruff 的 185 个历史 F401/F841 问题降为 0；UI、认证与质量门禁聚焦测试通过；完整质量命令以最新运行结果为准。
 
 ## 历史计划
 

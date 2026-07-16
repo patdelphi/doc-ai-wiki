@@ -359,3 +359,16 @@ MVP 验收建议以以下指标为参考：
 | 工程门禁 | 通过 | Ruff、Mypy、build、compileall 均通过 |
 
 本次验收不包含真实外部模型调用、索引重建、数据库迁移、部署和 Git 写操作。人工金标相关性、PageIndex Node Hit 与拒答准确率仍属于后续质量验收，不因本轮工程修复自动判定通过。
+
+### 2026-07-16 P1 第一批 UI 代码质量验收
+
+| 验收项 | 结果 | 证据 |
+|---|---|---|
+| 重复权限 helper | 通过 | `_has_tab_access()` 从两个实现收敛为一个，并有 AST 门禁 |
+| 未使用导入 | 通过 | UI 页面与测试的隔离 Ruff F401 为 0 |
+| 未使用局部变量 | 通过 | `pages.py`、`test_ui.py`、`auth/service.py` 的隔离 Ruff F841 为 0 |
+| Ruff 豁免收敛 | 通过 | 三个文件不再配置 F401/F841 per-file-ignore |
+| UI/认证聚焦回归 | 通过 | 76 项测试通过，6 个第三方弃用警告 |
+| 完整工程回归 | 通过 | Ruff、Mypy、build、compileall 通过；`404 passed, 6 warnings` |
+
+本批次仅删除可静态证明未使用的导入、赋值和重复 helper，不改变 Gradio 组件创建、事件绑定、权限数据模型和公开接口。
