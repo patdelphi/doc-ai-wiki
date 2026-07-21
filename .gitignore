@@ -11,7 +11,11 @@ __pycache__/
 index/*.db
 index/**/*.db
 index/**/*.sqlite3
+index/*.db-shm
+index/*.db-wal
 index/chroma/
+index/test_chroma/
+index/test_app.db
 index/pageindex_workspace/
 
 # 运行过程中的导出结果与临时文件不再同步到 GitHub

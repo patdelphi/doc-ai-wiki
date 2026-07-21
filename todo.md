@@ -23,10 +23,21 @@
 
 - [ ] 按页面迁移 `src/ui/pages.py` 处理器，迁移一块删除一块
 - [x] 清理 UI 未使用导入、变量和重复 `_has_tab_access()`
-- [ ] 将 PageIndex 拆为索引存取、树检索、回答编排、历史导出四个现有职责
+- [x] 将 PageIndex 拆为索引存取、树检索、回答编排、历史导出四个现有职责
 - [ ] 把阿胶、疾病、方剂和评测主题词迁入词表/YAML配置
 - [ ] 统一外部模型降级、数据库异常和用户错误码约定
 - [ ] 逐模块删除其余 Mypy 精确豁免
+
+### 2026-07-21 Windows 入库、状态与 AI 质检收口
+
+- [x] 修复登录恢复和入库期间页签跳转到 AI 质检页的问题
+- [x] 用稳定 NumPy 持久化索引替换 Windows Chroma 原生崩溃路径
+- [x] 用完整 `.env` 的 Qwen Embedding 重建 4516 条正式向量
+- [x] 清理失败 Chroma 备份、staging、影子 FTS 表和无用 Python 3.12 虚拟环境
+- [x] 完成真实 AI 质检 4/4 验收，补血支持、医疗错误断言拒答、绝对化断言驳回
+- [x] 完成向量、启动、入库、检索、质量和 UI 回归验证
+- [x] 真实 PageIndex 建树并验证信息抽取、医疗安全、绝对化断言和辅助治疗边界
+- [x] 修复 PageIndex 多文档预算耗尽、信息抽取误判和长证据 Prompt 超时退化
 
 ### P2：效果与运营闭环
 
@@ -55,6 +66,73 @@
 - [x] 增加质量门禁测试，禁止重新豁免或重复定义权限 helper
 
 验收标准：隔离 Ruff 的 185 个历史 F401/F841 问题降为 0；UI、认证与质量门禁聚焦测试通过；完整质量命令以最新运行结果为准。
+
+### P1 第二批：知识库检索页处理器迁移
+
+- [x] 完成设计与 TDD 实施计划，明确只迁移一个页面，不改变检索算法和权限语义
+- [x] 将九个检索页处理器迁入现有 `src/ui/search_page.py`
+- [x] 在 `pages.py` 注入运行时依赖，并保留稳定的 Gradio 回调名称
+- [x] 删除 `build_ui()` 中九个旧实现，保留跨页面知识库同步职责
+- [x] 新增检索页直接单测与 AST 防回归门禁
+- [x] 完成 Ruff、Mypy、Pytest、build 和 compileall 验收
+
+本批次使 `pages.py` 净减少 149 行；完整测试 `415 passed, 6 warnings in 191.24s`。整体“按页面迁移”任务仍未完成，下一批继续选择一个独立页面处理器集合。
+
+### P1 第三批：历史标签、兼容债务与 Ruff 范围
+
+- [x] 将源码中的 `H7/M3/C5 修复` 标签改为解释安全、权限和空输入不变量的注释
+- [x] 为主要 legacy 分支记录可验证删除条件与 1.0.0 评审截止点
+- [x] 修复归档认证脚本的 Ruff E402，并禁止将归档脚本作为正式迁移入口
+- [x] CI 与 PR 模板将 `Docs/migrations` 纳入 Ruff，增加配置回归门禁
+- [x] 完成第三批完整 Ruff、Mypy、Pytest、build 和 compileall 验收
+
+第三批最终验证：扩展 Ruff 通过；Mypy 19 个目标文件通过；完整测试 `417 passed, 6 warnings in 187.47s`；sdist、wheel 和 compileall 通过。
+
+### P1 第四批：PageIndex 历史导出职责迁移
+
+- [x] 完成 A 方案设计、书面确认和 TDD 实施计划
+- [x] 新增 `src/pageindex/history_export.py`，承载历史行解析与 Markdown 格式化
+- [x] 从 `PageIndexService` 删除八个无状态私有方法，不保留包装层
+- [x] 保持历史 SQL、写入、权限校验和七个公开查询/导出接口不变
+- [x] 新增四项直接单测和一项 AST 职责门禁
+- [x] 完成扩展 Ruff、Mypy、完整 Pytest、build 和 compileall 验收
+
+本批次 `service.py` 从 2716 行降至 2542 行，方法数从 96 降至 88；新模块 166 行，生产代码合计净减少 8 行。最终验证为 `422 passed, 6 warnings in 214.90s`。PageIndex 的历史 SQL/写入、索引存取、树检索和回答编排仍属于后续拆分任务。
+
+### P1 第五批：PageIndex 持久化职责迁移
+
+- [x] 完成 B 方案设计、书面复核和 TDD 实施计划
+- [x] 新增单一 `PageIndexRepository`，统一 PageIndex 表初始化、索引记录和问答历史持久化
+- [x] 从 `PageIndexService` 删除 PageIndex 自有表 SQL、四个持久化方法和两个私有读取包装层
+- [x] 保持公开服务接口、业务校验、检索算法、返回结构和历史导出行为
+- [x] 九个仓储入口统一事务/连接边界与 `DatabaseAppError` 转换
+- [x] 新增十二项仓储直接测试、普通字典历史解析测试、服务委托测试和职责门禁
+- [x] 完成扩展 Ruff、Mypy、完整 Pytest、build 和 compileall 验收
+
+本批次 `service.py` 从 2542 行、88 个方法降至 2354 行、84 个方法。新仓储为 289 行、11 个方法，生产代码合计增加 101 行；增加部分是显式仓储接口、事务和数据库异常处理，不是平行兼容层。职责门禁确认服务已不存在 PageIndex 自有表 SQL 和两个私有读取包装层。最终验证为 `437 passed, 6 warnings in 198.70s`。
+
+### P1 第六批：PageIndex 确定性树检索职责迁移
+
+- [x] 完成 A1 方案设计、书面确认和 TDD 实施计划
+- [x] 新增纯算法模块 `src/pageindex/tree_retriever.py`
+- [x] 迁出树展开、位置、评分、前置惩罚、候选构造、交叉引用、合并和 debug 格式化
+- [x] 从 `PageIndexService` 删除九个无状态方法和重复树展开实现
+- [x] 服务只保留问题词准备、vendor client 与原文读取的 `_build_tree_candidates()` IO 适配
+- [x] 新增八项直接算法测试和一项服务职责门禁
+- [x] 完成扩展 Ruff、CI 范围 Mypy、完整 Pytest、build 和 compileall 验收
+
+本批次 `service.py` 从 2354 行、84 个方法降至 2165 行、75 个方法；新模块 189 行，生产代码合计保持 2354 行。完整测试 `446 passed, 6 warnings in 215.49s`。PageIndex 四项目标职责中，历史导出、索引存取和确定性树检索已经拆分；回答编排仍待后续独立批次，因此总任务保持未完成。
+
+### P1 第七批：PageIndex 最终回答编排职责迁移
+
+- [x] 完成 A 方案设计、书面确认和 TDD 实施计划
+- [x] 新增 `src/pageindex/answer_orchestrator.py`，集中 Question Plan、证据分类、本地保守回答和最终 LLM 回答载荷
+- [x] `PageIndexService` 直接持有唯一编排器，不保留服务包装层
+- [x] 删除十四个回答相关方法和两个旧单轮树检索方法，共十六个方法
+- [x] 新增八项编排器直接测试和服务职责门禁
+- [x] 完成扩展 Ruff、CI 范围 Mypy、完整 Pytest、build 和 compileall 验收
+
+本批次 `service.py` 从 2165 行、75 个方法降至 1834 行、59 个方法；新模块 172 行、5 个类方法，两文件合计 2006 行，净减少 159 行。完整测试 `455 passed, 6 warnings in 194.02s`。PageIndex 的索引存取、确定性树检索、最终回答编排和历史导出四项目标职责均已形成独立边界。
 
 ## 历史计划
 
@@ -912,3 +990,15 @@
 - [ ] 人工复核 50 条检索样例的一个或多个真实相关 chunk；当前候选回归指标不代表正式质量。
 - [ ] 重标 55 条 PageIndex 样例的真实文档和稳定节点 ID，再运行 Node Hit@5 与拒答准确率。
 - [ ] 相关性与 PageIndex 正式指标达到门槛后，再把专项质量验收标记为完全通过。
+
+## 2026-07-21 页面跳转与 AI 质检回归修复
+
+### 范围与完成标准
+
+- [x] 登录态恢复不得改变用户当前选择的 PageIndex 或其他主标签页。
+- [x] 恢复旧版多查询证据召回能力，同时保留明确的知识库与文档范围约束。
+- [x] 先增加回归测试，再修改生产代码。
+- [x] 使用真实数据库、真实问题和已配置模型验证证据、结论与理由。
+- [x] 完成 33 项聚焦测试、Ruff 与质检模块 Mypy 校验；UI 全依赖树仍有 235 个既有类型错误。
+- [x] 不部署、不迁移数据库、不执行 Git commit、push、merge 或 pull。
+- [ ] 修复或替换 Windows 上原生崩溃的 Chroma 向量后端，再恢复完整混合检索验收。

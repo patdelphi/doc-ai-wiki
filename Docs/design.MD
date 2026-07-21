@@ -54,8 +54,8 @@ FastAPI 服务层
   │   ├─ 全文索引表
   │   ├─ 质检记录表
   │   └─ 审核记录表
-  └─ ChromaDB
-      └─ 向量索引集合
+  └─ NumPy 本地向量索引
+      └─ vectors.npz（精确余弦检索）
 ```
 
 ### 2.1 设计原则
@@ -85,7 +85,7 @@ doc-ai-wiki/
 │   ├── entities/
 │   └── fixtures/
 ├── index/
-│   ├── chroma/
+│   ├── chroma/                 # 本地向量索引（vectors.npz，配置名兼容旧版）
 │   └── app.db
 ├── review/
 ├── rules/
@@ -185,7 +185,7 @@ doc-ai-wiki/
 边界：
 
 - 不做业务编排
-- 不直接调用 LLM、ChromaDB
+- 不直接调用 LLM、向量索引
 
 关键约束：
 
@@ -270,7 +270,7 @@ doc-ai-wiki/
 子模块职责：
 
 - `fulltext.py`：FTS5 查询
-- `vector.py`：ChromaDB 查询
+- `vector.py`：本地向量索引查询
 - `fusion.py`：去重、合并、打分归一
 - `reranker.py`：对候选结果进行二次排序
 - `service.py`：统一对外提供检索能力
@@ -592,11 +592,13 @@ doc-ai-wiki/
 
 ---
 
-## 七、ChromaDB 集合设计
+## 七、本地向量索引设计
 
-建议使用单集合模式：
+使用单文件原子持久化模式：
 
-- 集合名：`knowledge_chunks`
+- 文件：`index/chroma/vectors.npz`
+- 记录主键：`chunk_id`
+- 向量：`float32` embedding，查询时计算精确余弦相似度
 
 每条向量记录元数据建议包含：
 
@@ -611,9 +613,9 @@ doc-ai-wiki/
 
 原因：
 
-- 文档规模前期较小，单集合更易维护
-- 检索时可通过 metadata 做过滤
-- 后续需要拆分多集合时可平滑迁移
+- 文档规模前期较小，单文件更易维护
+- 检索时通过 metadata 做知识库与文档过滤
+- 临时文件刷盘后原子替换，避免半写入状态
 
 ---
 
@@ -634,7 +636,7 @@ doc-ai-wiki/
   -> 分块
   -> 写入 chunks
   -> 更新 FTS5
-  -> 写入 ChromaDB
+  -> 写入本地向量索引
   -> 更新 index_status = indexed
 ```
 
@@ -642,7 +644,7 @@ doc-ai-wiki/
 
 - 文档注册与元数据写入走同一事务
 - 向量写入不与 SQLite 共事务，因此需要状态补偿
-- ChromaDB 写入失败时，SQLite 中将 `index_status` 标为 `partial_failed`
+- 向量索引写入失败时，SQLite 中将 `index_status` 标为 `partial_failed`
 
 ## 8.2 检索流程
 
@@ -724,7 +726,7 @@ doc-ai-wiki/
 
 事务外：
 
-- ChromaDB 向量写入
+- 本地向量索引写入
 - 外部 embedding 调用
 
 原因：
@@ -846,7 +848,7 @@ doc-ai-wiki/
 
 ## 13.2 集成测试重点
 
-- Markdown 入库到 SQLite + ChromaDB
+- Markdown 入库到 SQLite + 本地向量索引
 - 检索主链路
 - 质检主链路
 - 审核落库流程

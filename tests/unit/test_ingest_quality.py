@@ -8,8 +8,6 @@ import pytest
 from src.common.config import AppSettings
 from src.db.connection import create_connection, initialize_database
 
-pytest.importorskip("chromadb")
-
 from src.ingest.service import IngestService
 
 

@@ -1,10 +1,11 @@
-"""程序说明：历史一次性认证接入脚本，仅用于早期改造试验与归档参考，禁止执行。
+﻿"""程序说明：历史一次性认证接入脚本，仅用于早期改造试验与归档参考，禁止执行。
 
 注意：
 - 本文件不是当前项目的正式迁移方案
 - 当前认证实现应以 "src/auth"、"src/ui/pages.py"、相关测试为准
 - 若需继续调整认证逻辑，请直接修改正式源码与测试，不要执行本脚本
 """
+import py_compile
 import re
 
 MAIN = "src/ui/pages.py"
@@ -115,7 +116,6 @@ with open(MAIN, "w", encoding="utf-8") as f:
 
 print(f"Updated: {MAIN} ({len(content.splitlines())} lines)")
 
-import py_compile
 try:
     py_compile.compile(MAIN, doraise=True)
     print("OK: compile passed")

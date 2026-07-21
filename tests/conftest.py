@@ -10,8 +10,14 @@ os.environ["DOC_AI_WIKI_INITIAL_ADMIN_PASSWORD"] = ""
 os.environ["LLM_PROVIDER"] = "disabled"
 os.environ["LLM_MODEL"] = "disabled"
 os.environ["EMBEDDING_PROVIDER"] = "local"
+os.environ["EMBEDDING_API_KEY"] = ""
 os.environ["RERANK_ENABLED"] = "false"
+os.environ["RERANK_API_KEY"] = ""
+os.environ["LLM_API_KEY"] = ""
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
+# 测试必须与真实运行期索引隔离，避免本地 Qwen 1024 维索引影响默认 app 导入。
+os.environ["SQLITE_DB_PATH"] = "index/test_app.db"
+os.environ["CHROMA_PERSIST_DIR"] = "index/test_chroma"
 
 
 def pytest_collection_modifyitems(items) -> None:

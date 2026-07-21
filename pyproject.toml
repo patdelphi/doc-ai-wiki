@@ -9,7 +9,7 @@ description = "基于文档的知识库AI查询系统"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-  "chromadb>=0.5.5,<1.0.0",
+  "numpy>=1.26.0,<3.0.0",
   "click>=8.2.1,<9.0.0",
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn>=0.30.0,<1.0.0",

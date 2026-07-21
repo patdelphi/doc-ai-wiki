@@ -23,7 +23,7 @@ jobs:
       - name: Install project and development checks
         run: python -m pip install -e ".[dev]"
       - name: Lint
-        run: python -m ruff check src tests .aipython
+        run: python -m ruff check src tests .aipython Docs/migrations
       - name: Type check retrieval and PageIndex
         run: python -m mypy src/retrieval src/pageindex src/quality/service.py
       - name: Test

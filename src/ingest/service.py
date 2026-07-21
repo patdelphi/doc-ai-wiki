@@ -102,7 +102,7 @@ class IngestService:
             if progress_callback:
                 progress_callback(payload)
 
-        # C5 修复：校验文件路径是否在允许的输入目录内，防止路径遍历。
+        # 输入路径来自任务记录，必须限制在 input_root 内，避免路径遍历读取知识库外文件。
         file_path = resolve_input_path(document["file_path"], self.settings.input_root)
         if not file_path.exists():
             raise NotFoundAppError("文档文件不存在", details={"file_path": str(file_path)})
@@ -737,7 +737,7 @@ class IngestService:
                         "content_hash": content_hash,
                         "source_anchor": section.get("source_anchor"),
                         "content": chunk_content,
-                        # H7 修复：写入知识库 ID，供向量检索按知识库过滤
+                        # chunks 表不存知识库 ID，向量元数据必须在入库时继承该字段才能执行权限过滤。
                         "knowledge_base_id": knowledge_base_id,
                     }
                     chunk_items.append(chunk_item)
@@ -779,7 +779,7 @@ class IngestService:
         return chunk_items
 
     def _sync_vector_index(self, *, doc_uid: str, chunk_items: list[dict], progress_callback=None) -> None:
-        """同步写入 ChromaDB，失败时标记部分失败状态。"""
+        """同步写入本地向量索引，失败时标记部分失败状态。"""
 
         try:
             self.vector_store.delete_by_doc_uid(doc_uid)

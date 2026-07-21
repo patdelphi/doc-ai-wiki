@@ -117,12 +117,12 @@
 ### 数据与索引
 
 - `SQLite`
-- `ChromaDB`
+- `NumPy` 本地向量索引
 
 作用说明：
 
 - `SQLite`：保存文档元数据、章节、分块、质检记录、审核记录、用户与权限数据，并提供全文检索能力
-- `ChromaDB`：保存向量索引，支持语义召回
+- `NumPy` 向量索引：保存 `vectors.npz`，支持精确余弦语义召回；`CHROMA_PERSIST_DIR` 仅作为兼容目录配置名
 
 ### AI 与排序
 
@@ -448,7 +448,7 @@ python ".aipython/inspect_index_status.py"
 - 建议显式配置 `LLM`、`Embedding`、`Rerank`
 - 建议将 `.env` 与密钥文件排除出版本控制
 - 建议不要把 `index/app.db`、`index/chroma`、`index/pageindex_workspace` 直接作为 Git 仓库内容同步
-- PageIndex workspace、SQLite 数据库和 Chroma 向量库都应视为可重建运行期资产，不作为长期版本资产管理
+- PageIndex workspace、SQLite 数据库和本地向量索引都应视为可重建运行期资产，不作为长期版本资产管理
 - 如果需要共享知识库基础数据，优先共享 `Input`、规则文件、模板文件和导出的开发文档
 
 ## 当前版本边界

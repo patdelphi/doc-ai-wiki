@@ -7,7 +7,7 @@
 
 ## 必须通过的检查
 
-- [ ] `python -m ruff check src tests .aipython`
+- [ ] `python -m ruff check src tests .aipython Docs/migrations`
 - [ ] `python -m mypy src/retrieval src/pageindex src/quality/service.py`
 - [ ] `python -m pytest tests --maxfail=1 -q`
 - [ ] `python -m build`

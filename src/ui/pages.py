@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial, update_wrapper
 import json
 
 import gradio as gr
@@ -31,7 +32,17 @@ from src.ui.pageindex_page import bind_pageindex_events, build_pageindex_tab
 from src.ui.quality_dummy_page import build_quality_dummy_tab
 from src.ui.quality_page import bind_quality_events, build_quality_tab
 from src.ui.review_page import bind_review_events, build_review_tab
-from src.ui.search_page import bind_search_events, build_search_tab
+from src.ui.search_page import (
+    bind_search_events,
+    build_search_detail as search_build_search_detail,
+    build_search_detail_payload as search_build_search_detail_payload,
+    build_search_tab,
+    change_search_page,
+    export_search_results as search_export_search_results,
+    reset_search_workspace_ui,
+    run_search_ui as search_run_search_ui,
+    select_search_result as search_select_search_result,
+)
 from src.ui.settings_page import bind_settings_events, build_settings_tab
 from src.ui.viewmodels import (
     build_claim_evidence_rows,
@@ -90,7 +101,6 @@ from src.ui.viewmodels import (
     format_review_record_detail_html,
     format_search_result_detail_html,
     format_search_results,
-    format_search_summary_html,
     get_document_detail,
     normalize_search_query,
     parse_claim_choice,
@@ -2146,6 +2156,33 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 title="下载结果",
             )
 
+    # 检索页处理器由独立模块实现；此处仅注入当前应用实例依赖并保留回调函数名。
+    build_search_detail_payload = update_wrapper(
+        partial(search_build_search_detail_payload, retrieval_service=retrieval_service),
+        search_build_search_detail_payload,
+    )
+    build_search_detail = update_wrapper(
+        partial(search_build_search_detail, retrieval_service=retrieval_service),
+        search_build_search_detail,
+    )
+    export_search_results = update_wrapper(
+        partial(search_export_search_results, export_markdown_result=export_markdown_result),
+        search_export_search_results,
+    )
+    run_search_ui = update_wrapper(
+        partial(
+            search_run_search_ui,
+            retrieval_service=retrieval_service,
+            has_tab_access=_has_tab_access,
+            resolve_authorized_knowledge_base=_resolve_authorized_knowledge_base_choice,
+        ),
+        search_run_search_ui,
+    )
+    select_search_result = update_wrapper(
+        partial(search_select_search_result, retrieval_service=retrieval_service),
+        search_select_search_result,
+    )
+
     def build_document_table_page_outputs(
         rows: object,
         page: int | float | None = 1,
@@ -2253,17 +2290,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             base_outputs[26],
             base_outputs[27],
         )
-
-    def build_search_table_page_outputs(search_rows: list[dict] | None, page: int | float | None = 1) -> tuple[list[list[object]], int, str]:
-        """构建检索结果表格分页输出。"""
-
-        full_rows = build_search_result_rows({"table": search_rows or []})
-        page_rows, resolved_page, _total_pages, page_info = paginate_table_rows(
-            full_rows,
-            page,
-            prepend_sequence=False,
-        )
-        return page_rows, resolved_page, format_table_pagination_html(page_info)
 
     def build_quality_claim_table_page_outputs(
         formatted_result: dict | None,
@@ -2664,39 +2690,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             *base_outputs[1:],
         )
 
-    def build_search_detail_payload(search_row: dict | None) -> dict | None:
-        """根据检索结果行补齐原文详情。"""
-
-        if not search_row:
-            return None
-        detail = retrieval_service.get_chunk_detail(search_row.get("chunk_id", "")) or {}
-        return {**search_row, **detail}
-
-    def build_search_detail(search_row: dict | None, query_text: str) -> str:
-        """根据检索结果行构建原文详情。"""
-
-        return format_search_result_detail_html(build_search_detail_payload(search_row), query_text=query_text)
-
-    def export_search_results(
-        search_rows: list[dict],
-        selected_search_row: dict | None,
-        query_text: str,
-    ) -> str:
-        """导出当前检索结果为 TXT 文件。"""
-
-        formatted = {
-            "count": len(search_rows or []),
-            "query_text": normalize_search_query(query_text),
-            "table": search_rows or [],
-        }
-        markdown_text = format_search_export_markdown(
-            formatted,
-            selected_search_row or (search_rows[0] if search_rows else None),
-            query_text=query_text,
-        )
-        selected_chunk_id = str((selected_search_row or {}).get("chunk_id") or "")
-        return export_markdown_result("文档检索", "检索结果", markdown_text, linked_id=selected_chunk_id or None)
-
     def select_document_quality_search_result(
         results: list[dict],
         query_text: str,
@@ -2713,164 +2706,6 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         if not matched_row:
             return format_search_result_detail_html(None, query_text=query_text), page_rows
         return build_search_detail(matched_row, query_text), page_rows
-
-    def run_search(
-        query: str,
-        top_k: int,
-        knowledge_base_choice: str | None = None,
-        login_session: dict[str, object] | None = None,
-    ) -> tuple[str, list[list[str]], list[dict], str, str, dict]:
-        normalized_query = normalize_search_query(query)
-        if not normalized_query:
-            return (
-                format_operation_result_html(
-                    {"success": False, "message": "请输入关键词、短语或整句后再检索"},
-                    title="检索结果",
-                ),
-                [],
-                [],
-                "",
-                format_search_result_detail_html(None, query_text=""),
-                {},
-            )
-        if not _has_tab_access(login_session, "知识库检索"):
-            return (
-                format_operation_result_html(
-                    {"success": False, "message": "当前账号没有知识库检索权限。"},
-                    title="检索结果",
-                ),
-                [],
-                [],
-                normalized_query,
-                format_search_result_detail_html(None, query_text=normalized_query),
-                {},
-            )
-        knowledge_base_id = _resolve_authorized_knowledge_base_choice(knowledge_base_choice, login_session)
-        if not knowledge_base_id:
-            return (
-                format_operation_result_html(
-                    {"success": False, "message": "当前账号没有可用知识库，请联系管理员开通知识库权限。"},
-                    title="检索结果",
-                ),
-                [],
-                [],
-                normalized_query,
-                format_search_result_detail_html(None, query_text=normalized_query),
-                {},
-            )
-        try:
-            items = retrieval_service.hybrid_search(
-                normalized_query,
-                top_k=top_k,
-                knowledge_base_id=knowledge_base_id,
-                use_rerank=True,
-            )
-        except AppError as exc:
-            return (
-                format_operation_result_html(
-                    {"success": False, "message": exc.message, "error_code": exc.error_code},
-                    title="检索结果",
-                ),
-                [],
-                [],
-                normalized_query,
-                format_search_result_detail_html(None, query_text=normalized_query),
-                {},
-            )
-        formatted = format_search_results(items, query_text=normalized_query)
-        selected_row = build_search_detail_payload(formatted["table"][0]) if formatted["table"] else {}
-        detail_html = (
-            format_search_result_detail_html(selected_row, query_text=normalized_query)
-            if selected_row
-            else format_search_result_detail_html(None, query_text=normalized_query)
-        )
-        return (
-            format_search_summary_html(formatted),
-            build_search_result_rows(formatted, selected_row_index=0 if formatted["table"] else None),
-            formatted["table"],
-            normalized_query,
-            detail_html,
-            selected_row,
-        )
-
-    def run_search_ui(
-        query: str,
-        top_k: int,
-        knowledge_base_choice: str | None = None,
-        login_session: dict[str, object] | None = None,
-    ) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
-        """执行检索并返回分页后的界面输出。"""
-
-        effective_session = login_session
-        if effective_session is None:
-            effective_session = {
-                "is_admin": False,
-                "permissions": {"tab_names": [], "kb_ids": []},
-            }
-        summary_html, _full_rows, search_rows, normalized_query, detail_html, selected_row = run_search(
-            query,
-            top_k,
-            knowledge_base_choice,
-            effective_session,
-        )
-        page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=1)
-        return summary_html, page_rows, search_rows, normalized_query, detail_html, selected_row, page_value, page_info
-
-    def reset_search_workspace_ui(knowledge_base_choice: str | None = None) -> tuple[str, list[list[object]], list[dict], str, str, dict, int, str]:
-        """切换知识库后清空旧检索结果，避免跨库误读。"""
-
-        _ = knowledge_base_choice
-        page_rows, page_value, page_info = build_search_table_page_outputs([], page=1)
-        return (
-            format_operation_result_html(
-                {"success": True, "message": "已切换知识库，请重新执行检索。"},
-                title="检索结果",
-            ),
-            page_rows,
-            [],
-            "",
-            format_search_result_detail_html(None, query_text=""),
-            {},
-            page_value,
-            page_info,
-        )
-
-    def change_search_page(
-        search_rows: list[dict],
-        current_page: int | float,
-        action: str,
-    ) -> tuple[list[list[object]], int, str]:
-        """切换检索结果分页。"""
-
-        current_page_rows, page_value, page_info = build_search_table_page_outputs(search_rows, page=current_page)
-        _ = current_page_rows
-        full_rows = build_search_result_rows({"table": search_rows or []})
-        page_rows, new_page, new_page_info = change_table_page(
-            full_rows,
-            page_value,
-            action=action,
-            prepend_sequence=False,
-        )
-        return page_rows, new_page, format_table_pagination_html(new_page_info)
-
-    def select_search_result(
-        current_page_rows: list[list[object]],
-        search_rows: list[dict],
-        query_text: str,
-        evt: gr.SelectData,
-    ) -> tuple[str, list[list[object]], dict]:
-        """点击检索结果表格后展示对应原文。"""
-
-        page_rows = normalize_table_rows(current_page_rows)
-        if not search_rows or not page_rows:
-            return format_search_result_detail_html(None, query_text=query_text), page_rows, {}
-        matched_row = get_selected_search_item_from_page_rows(page_rows, search_rows, evt)
-        selected_row = build_search_detail_payload(matched_row) or {}
-        return (
-            format_search_result_detail_html(selected_row, query_text=query_text),
-            page_rows,
-            selected_row,
-        )
 
     def render_claim_views(claim_choice: str, claim_detail_map: dict | None) -> tuple[str, list[list[str]], str, list[dict], str]:
         """统一渲染 Claim 摘要与证据表。"""
@@ -4331,7 +4166,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
         )
         return (
             *sync_knowledge_base_selector_outputs(resolved_choice, login_session),
-            *load_document_management_state_ui(resolved_choice),
+            *load_document_management_state_ui(resolved_choice, login_session),
         )
 
     def change_search_knowledge_base_ui(
@@ -5705,6 +5540,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
 
     with gr.Blocks(title="基于文档的知识库AI查询系统") as demo:
         login_state = gr.State(_empty_login_session())
+        login_restore_initialized = gr.State(False)
         persisted_login_state = gr.BrowserState(
             _empty_login_session(),
             storage_key=AUTH_SESSION_STORAGE_KEY,
@@ -6233,6 +6069,51 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 change_review_evidence_page=change_review_evidence_page,
                 change_review_history_page=change_review_history_page,
             )
+
+            # 认证状态变化后必须刷新知识库管理整页，不能继续使用服务启动时的初始快照。
+            document_workspace_outputs = [
+                document_components["document_summary"],
+                document_components["database_summary"],
+                document_components["database_summary_table"],
+                database_page_state,
+                document_components["database_page_info"],
+                document_components["document_table"],
+                document_page_state,
+                document_components["document_page_info"],
+                document_components["document_choices"],
+                document_components["document_detail"],
+                document_components["register_button"],
+                document_components["rebuild_button"],
+                document_components["document_quality_report"],
+                document_components["document_quality_checks"],
+                document_components["document_quality_sections"],
+                document_quality_sections_page_state,
+                document_components["document_quality_sections_page_info"],
+                document_components["document_quality_chunks"],
+                document_quality_chunks_page_state,
+                document_components["document_quality_chunks_page_info"],
+                document_components["document_quality_search_summary"],
+                document_components["document_quality_search_results"],
+                document_quality_search_page_state,
+                document_components["document_quality_search_page_info"],
+                document_quality_search_state,
+                document_components["document_quality_search_detail"],
+                document_components["document_quality_batch_summary"],
+                document_components["document_quality_batch_table"],
+                document_quality_batch_page_state,
+                document_components["document_quality_batch_page_info"],
+                document_components["document_quality_config_panel"],
+                document_components["document_quality_sample_limit"],
+                document_components["document_quality_long_document_char_threshold"],
+                document_components["document_quality_min_sections_for_long_doc"],
+                document_components["document_quality_max_avg_chunks_per_section"],
+                document_components["document_quality_max_chunk_chars"],
+                document_components["document_quality_short_chunk_chars"],
+                document_components["document_quality_short_chunk_warn_min_chunk_count"],
+                document_components["document_quality_config_result"],
+                document_components["document_quality_csv_export_result"],
+            ]
+
             def _do_login(username, password):
                 try:
                     user = auth_service.authenticate(username, password)
@@ -6246,6 +6127,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             gr.update(visible=False),
                             *_build_permission_ui_updates(_empty_login_session()),
                             *_build_quality_permission_updates(_empty_login_session()),
+                            *_build_document_permission_updates(_empty_login_session()),
                             *_build_review_permission_updates(_empty_login_session()),
                         )
                     session = _build_login_session(user.user_id)
@@ -6258,6 +6140,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         gr.update(visible=True),
                         *_build_permission_ui_updates(session, select_default_tab=True),
                         *_build_quality_permission_updates(session),
+                        *_build_document_permission_updates(session),
                         *_build_review_permission_updates(session),
                     )
                 except Exception as e:
@@ -6270,6 +6153,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         gr.update(visible=False),
                         *_build_permission_ui_updates(_empty_login_session()),
                         *_build_quality_permission_updates(_empty_login_session()),
+                        *_build_document_permission_updates(_empty_login_session()),
                         *_build_review_permission_updates(_empty_login_session()),
                     )
 
@@ -6289,7 +6173,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             def _do_logout():
                 return _empty_login_session()
 
-            def _restore_login_session(stored_session):
+            def _restore_login_session(stored_session, restore_initialized: bool = False):
                 """从浏览器持久化状态恢复登录态，刷新页面后仍保持登录。"""
                 try:
                     if not isinstance(stored_session, dict):
@@ -6301,7 +6185,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             gr.update(visible=False),
                             *_build_permission_ui_updates(empty_session),
                             *_build_quality_permission_updates(empty_session),
+                            *_build_document_permission_updates(empty_session),
                             *_build_review_permission_updates(empty_session),
+                            False,
                         )
                     user_id = str(stored_session.get("user_id") or "").strip()
                     if not user_id:
@@ -6313,7 +6199,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             gr.update(visible=False),
                             *_build_permission_ui_updates(empty_session),
                             *_build_quality_permission_updates(empty_session),
+                            *_build_document_permission_updates(empty_session),
                             *_build_review_permission_updates(empty_session),
+                            False,
                         )
                     restored_session = _build_login_session(user_id)
                     if not restored_session.get("user_id"):
@@ -6325,16 +6213,21 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                             gr.update(visible=False),
                             *_build_permission_ui_updates(empty_session),
                             *_build_quality_permission_updates(empty_session),
+                            *_build_document_permission_updates(empty_session),
                             *_build_review_permission_updates(empty_session),
+                            False,
                         )
                     return (
                         restored_session,
                         _render_auth_user(str(restored_session.get("username") or "")),
                         gr.update(visible=False),
                         gr.update(visible=True),
-                        *_build_permission_ui_updates(restored_session, select_default_tab=True),
+                        # 浏览器会话恢复只更新权限和数据，不改变用户当前主标签页。
+                        *_build_permission_ui_updates(restored_session, select_default_tab=False),
                         *_build_quality_permission_updates(restored_session),
+                        *_build_document_permission_updates(restored_session),
                         *_build_review_permission_updates(restored_session),
+                        True,
                     )
                 except Exception:
                     empty_session = _empty_login_session()
@@ -6345,7 +6238,9 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         gr.update(visible=False),
                         *_build_permission_ui_updates(empty_session),
                         *_build_quality_permission_updates(empty_session),
+                        *_build_document_permission_updates(empty_session),
                         *_build_review_permission_updates(empty_session),
+                        False,
                     )
 
             def _reset_auth_forms():
@@ -6370,6 +6265,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                 return (
                     *_build_permission_ui_updates(empty_session),
                     *_build_quality_permission_updates(empty_session),
+                    *_build_document_permission_updates(empty_session),
                     *_build_review_permission_updates(empty_session),
                 )
 
@@ -6398,6 +6294,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                              quality_evidence_page_info, quality_review_claim_detail, evidence_items_state,
                                              claim_evidence_detail, recent_quality_state, recent_quality_checks, recent_quality_page_state,
                                              recent_quality_page_info, quality_evaluation_cases,
+                                             *document_workspace_outputs,
                                              review_pending_candidates, review_pending_page_state, review_pending_page_info,
                                              review_processed_candidates, review_processed_page_state, review_processed_page_info,
                                              review_candidate_state, review_selected_claim_state, review_claim_detail_state,
@@ -6421,6 +6318,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                                                 quality_evidence_page_info, quality_review_claim_detail, evidence_items_state,
                                                 claim_evidence_detail, recent_quality_state, recent_quality_checks, recent_quality_page_state,
                                                 recent_quality_page_info, quality_evaluation_cases,
+                                                *document_workspace_outputs,
                                                 review_pending_candidates, review_pending_page_state, review_pending_page_info,
                                                 review_processed_candidates, review_processed_page_state, review_processed_page_info,
                                                 review_candidate_state, review_selected_claim_state, review_claim_detail_state,
@@ -6503,6 +6401,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                     recent_quality_page_state,
                     recent_quality_page_info,
                     quality_evaluation_cases,
+                    *document_workspace_outputs,
                     review_pending_candidates,
                     review_pending_page_state,
                     review_pending_page_info,
@@ -6532,7 +6431,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             persisted_login_state.change(
                 fn=_restore_login_session,
-                inputs=[persisted_login_state],
+                inputs=[persisted_login_state, login_restore_initialized],
                 outputs=[login_state, auth_user_display, auth_page, main_content,
                          pending_access_tab, quality_tab, review_tab, document_tab, search_tab, pageindex_tab, settings_tab,
                          pending_access_view, main_tabs,
@@ -6545,6 +6444,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                          quality_evidence_page_info, quality_review_claim_detail, evidence_items_state,
                          claim_evidence_detail, recent_quality_state, recent_quality_checks, recent_quality_page_state,
                          recent_quality_page_info, quality_evaluation_cases,
+                         *document_workspace_outputs,
                          review_pending_candidates, review_pending_page_state, review_pending_page_info,
                          review_processed_candidates, review_processed_page_state, review_processed_page_info,
                          review_candidate_state, review_selected_claim_state, review_claim_detail_state,
@@ -6552,7 +6452,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                          review_evidence_page_info, review_evidence_items_state, review_evidence_detail,
                          review_action_input, review_note_input, review_history, review_history_page_state,
                          review_history_page_info, review_history_state, review_selected_record_state,
-                         review_record_detail],
+                         review_record_detail, login_restore_initialized],
                 queue=False,
                 show_progress="hidden",
             )

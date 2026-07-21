@@ -21,7 +21,7 @@ from src.quality.verdicts import (
     most_conservative_verdict,
 )
 from src.retrieval.service import RetrievalService
-from src.retrieval.query_normalizer import normalize_query_text
+from src.retrieval.query_normalizer import expand_query_texts, normalize_query_text
 from src.retrieval.vector_store import VectorStore
 from src.rules.service import RuleService
 
@@ -98,6 +98,24 @@ class QualityService:
         "补血",
         "养血",
         "滋补",
+    )
+    # 医疗目标在原文中常以同义主题出现；只扩展目标词，不改写用户 Claim。
+    _MEDICAL_TARGET_ALIASES: dict[str, tuple[str, ...]] = {
+        "癌症": ("癌症", "肿瘤", "抗肿瘤", "肿瘤相关", "化疗"),
+        "肿瘤": ("肿瘤", "癌症", "抗肿瘤", "肿瘤相关", "化疗"),
+        "感冒": ("感冒", "外感", "风寒", "风热", "咳嗽"),
+        "贫血": ("贫血", "血虚", "造血", "血红蛋白"),
+        "补血": ("补血", "养血", "血虚", "造血", "贫血", "血红蛋白"),
+        "养血": ("养血", "补血", "血虚", "造血", "贫血", "血红蛋白"),
+        "滋补": ("滋补", "补益", "补血", "养血"),
+    }
+    _MEDICAL_COMPOUND_MARKERS = (
+        "复方阿胶",
+        "阿胶浆",
+        "阿胶珠",
+        "阿胶颗粒",
+        "阿胶方",
+        "阿胶汤",
     )
     _QUERY_STOP_PHRASES = (
         "什么",
@@ -189,7 +207,7 @@ class QualityService:
     ) -> Iterator[dict]:
         """流式执行质检，逐步返回进度事件和最终结果。"""
 
-        # M3 修复：空输入校验，防止对空文本执行完整质检流程
+        # 空文本无法形成可审核 Claim，应在调用规则与模型前直接拒绝，避免无意义成本。
         if not input_text or not input_text.strip():
             raise ValidationAppError("质检输入文本不能为空")
 
@@ -635,6 +653,36 @@ class QualityService:
                 "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
                 "reason": "命中提示级规则，建议结合更直接证据继续核对。",
             }
+        # 医疗功效 Claim 必须有同时覆盖主体、目标和功效关系的直接证据，
+        # 不能因为 LLM 看到了同主题论文，就把证据不足误判为 verified。
+        required_terms = QualityService._extract_required_evidence_terms(claim_text)
+        if required_terms:
+            has_direct_support = any(
+                str(item.get("evidence_relation") or "") == EvidenceRelation.SUPPORT.value
+                for item in evidence_list
+            )
+            has_direct_contradiction = any(
+                str(item.get("evidence_relation") or "") == EvidenceRelation.CONTRADICT.value
+                for item in evidence_list
+            )
+            if has_direct_contradiction:
+                return {
+                    "verdict": QualityVerdict.REJECTED.value,
+                    "confidence": 0.25,
+                    "risk_level": "high",
+                    "has_evidence": has_evidence,
+                    "evidence_judgement": EvidenceRelation.CONTRADICT.value,
+                    "reason": "医疗功效 Claim 检索到直接矛盾证据，不能直接放行。",
+                }
+            if not has_direct_support:
+                return {
+                    "verdict": QualityVerdict.NEEDS_REVIEW.value,
+                    "confidence": 0.45 if has_evidence else 0.2,
+                    "risk_level": "high",
+                    "has_evidence": has_evidence,
+                    "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
+                    "reason": "医疗功效 Claim 的现有证据未同时覆盖目标对象和功效关系，不能直接放行。",
+                }
         if logic_snapshot.get("requires_strict_evidence"):
             return {
                 "verdict": QualityVerdict.NEEDS_REVIEW.value,
@@ -681,7 +729,7 @@ class QualityService:
 
     @staticmethod
     def _build_overall_verdict(claim_items: list[dict]) -> str:
-        """根据 claim 结果生成总体结论。M3 修复：空列表保护。"""
+        """根据 claim 结果生成总体结论；无 Claim 时必须进入人工复核。"""
 
         if not claim_items:
             return QualityVerdict.NEEDS_REVIEW.value
@@ -689,7 +737,7 @@ class QualityService:
 
     @staticmethod
     def _build_overall_risk_level(claim_items: list[dict]) -> str:
-        """聚合 claim 风险为整体风险等级。M3 修复：空列表保护。"""
+        """聚合 claim 风险；无 Claim 时返回最低风险并由总体结论标记人工复核。"""
 
         if not claim_items:
             return "low"
@@ -762,52 +810,121 @@ class QualityService:
         final_top_k = max(int(retrieval_policy["final_top_k"]), 4)
         per_query_limit = max(final_top_k + 1, 5)
         candidate_limit = max(final_top_k * 2, len(query_specs) * 2, 8)
-        items = self.retrieval_service.search_queries(
-            query_specs,
-            top_k=candidate_limit,
-            doc_uid=doc_uid,
-            knowledge_base_id=knowledge_base_id,
-            fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), per_query_limit + 1),
-            vector_top_k=max(int(retrieval_policy["vector_top_k"]), per_query_limit + 1),
-            use_rerank=bool(retrieval_policy["use_rerank"]),
-        )
-        return self._sort_evidence_candidates(items)[:candidate_limit]
+        merged: dict[str, dict] = {}
+        for query_spec in query_specs:
+            query_limit = max(per_query_limit, 20) if query_spec.get("label") == "medical_focus" else per_query_limit
+            items = self.retrieval_service.hybrid_search(
+                query_spec["query"],
+                top_k=query_limit,
+                doc_uid=doc_uid,
+                knowledge_base_id=knowledge_base_id,
+                fulltext_top_k=max(int(retrieval_policy["fulltext_top_k"]), query_limit + 1),
+                vector_top_k=max(int(retrieval_policy["vector_top_k"]), query_limit + 1),
+                use_rerank=retrieval_policy["use_rerank"],
+            )
+            for item in items:
+                chunk_id = str(item.get("chunk_id") or "")
+                if not chunk_id:
+                    continue
+                existing = merged.get(chunk_id)
+                if existing:
+                    existing_queries = set(existing.get("matched_queries", []))
+                    existing_queries.add(query_spec["label"])
+                    existing["matched_queries"] = sorted(existing_queries)
+                    existing_sources = set(existing.get("matched_sources", []))
+                    for source in item.get("matched_sources", []) or []:
+                        existing_sources.add(str(source))
+                    if item.get("retrieval_source"):
+                        existing_sources.add(str(item.get("retrieval_source")))
+                    existing["matched_sources"] = sorted(value for value in existing_sources if value)
+                    existing["rerank_score"] = self._pick_higher_score(
+                        existing.get("rerank_score"), item.get("rerank_score")
+                    )
+                    if len(str(item.get("content") or "")) > len(str(existing.get("content") or "")):
+                        existing["content"] = item.get("content")
+                    continue
+                merged[chunk_id] = {
+                    **item,
+                    "matched_queries": [query_spec["label"]],
+                    "matched_sources": sorted(
+                        {
+                            *(str(source) for source in (item.get("matched_sources", []) or [])),
+                            str(item.get("retrieval_source") or ""),
+                        }
+                        - {""}
+                    ),
+                }
+
+        return self._sort_evidence_candidates(list(merged.values()))[:candidate_limit]
 
     @classmethod
     def _build_retrieval_queries(cls, claim_text: str) -> list[dict]:
-        """构建原文、语义归一和反证三类互补查询。"""
+        """构建原文、实体扩展、主题、关键词与反证查询。"""
 
         literal_query = claim_text.strip()
         claim_logic = cls._build_claim_logic_snapshot(claim_text)
         query_specs = [{"label": "claim_literal", "query": literal_query}]
+        for expanded_query in expand_query_texts(literal_query, limit=4)[1:]:
+            query_specs.append({"label": "entity_expanded", "query": expanded_query})
         normalized_query = cls._normalize_claim_query_for_retrieval(claim_text)
-        semantic_query = cls._build_semantic_retrieval_query(normalized_query or literal_query)
-        if semantic_query and semantic_query != literal_query:
-            query_specs.append({"label": "semantic_normalized", "query": semantic_query})
+        if normalized_query and normalized_query != literal_query:
+            query_specs.append({"label": "logic_relaxed", "query": normalized_query})
+        normalized_entity_query = normalize_query_text(normalized_query)
+        if normalized_entity_query and normalized_entity_query != normalized_query:
+            query_specs.append({"label": "entity_expanded", "query": normalized_entity_query})
+        query_specs.extend(cls._build_strict_scope_queries(literal_query, claim_logic))
+        topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
+        if topic_query:
+            query_specs.append({"label": "topic_focus", "query": topic_query})
+        for keyword_source in expand_query_texts(normalized_query or literal_query, limit=4):
+            for keyword_query in cls._build_keyword_focus_queries(keyword_source):
+                query_specs.append(
+                    {
+                        "label": cls._keyword_query_label(keyword_query, literal_query),
+                        "query": keyword_query,
+                    }
+                )
+        for keyword_query in cls._build_keyword_focus_queries(normalized_entity_query):
+            query_specs.append(
+                {
+                    "label": cls._keyword_query_label(keyword_query, literal_query),
+                    "query": keyword_query,
+                }
+            )
         counter_query = cls._build_counter_probe_query(normalized_query or literal_query, claim_logic)
         if counter_query:
             query_specs.append({"label": "counter_probe", "query": counter_query})
-        return cls._deduplicate_query_specs(query_specs)[:3]
+        return cls._deduplicate_query_specs(query_specs)
 
     @classmethod
-    def _build_semantic_retrieval_query(cls, normalized_query: str) -> str:
-        """从归一文本中提取实体与目标组合，减少低价值查询变体。"""
+    def _build_strict_scope_queries(cls, claim_text: str, claim_logic: dict) -> list[dict]:
+        """为强约束断言生成短主体与范围查询，避免长句在 Trigram FTS 中零召回。"""
 
-        entity_query = normalize_query_text(normalized_query)
-        keyword_queries = cls._build_keyword_focus_queries(entity_query)
-        core_entity = cls._extract_core_entity_for_keyword_query(entity_query)
-        entity_pairs = [
-            query
-            for query in keyword_queries
-            if len(query.split()) == 2 and (not core_entity or query.split()[0] == core_entity)
-        ]
-        for query in entity_pairs:
-            target = query.split()[1]
-            if target not in cls._QUERY_RELATION_WORDS:
-                return query
-        if entity_pairs:
-            return entity_pairs[0]
-        return entity_query
+        if not claim_logic.get("requires_strict_evidence"):
+            return []
+        normalized = normalize_query_text(cls._sanitize_retrieval_query_text(claim_text))
+        strict_markers = (
+            *cls._STRICT_EXCLUSIVE_MARKERS,
+            *cls._STRICT_UNIVERSAL_MARKERS,
+            *cls._STRICT_NEGATION_MARKERS,
+            *cls._STRICT_COMPARISON_MARKERS,
+        )
+        marker = next((value for value in strict_markers if value in normalized), "")
+        if not marker:
+            return []
+        subject, remainder = normalized.split(marker, 1)
+        subject = cls._sanitize_retrieval_query_text(subject)
+        if not 2 <= len(subject.replace(" ", "")) <= 20:
+            return []
+
+        query_specs = [{"label": "entity_focus", "query": subject}]
+        # “某主体只有某地/某机构一家”同时包含主体、范围和唯一性，拆成短查询才能命中文档原文。
+        if claim_logic.get("has_exclusive") and "一家" in remainder:
+            scope = cls._sanitize_retrieval_query_text(remainder.split("一家", 1)[0])
+            if 1 < len(scope.replace(" ", "")) <= 20:
+                query_specs.append({"label": "scope_focus", "query": f"{subject} {scope}"})
+            query_specs.append({"label": "scope_focus", "query": f"{subject} 企业"})
+        return query_specs
 
     @classmethod
     def _normalize_claim_query_for_retrieval(cls, claim_text: str) -> str:
@@ -878,6 +995,11 @@ class QualityService:
         queries: list[str] = []
         head = entity_terms[0]
         tail = entity_terms[-1]
+        target_aliases = cls._expand_medical_target_aliases(cls._extract_required_evidence_terms(query))
+        for alias in target_aliases:
+            queries.append(alias)
+            if core_entity:
+                queries.append(f"{core_entity} {alias}")
         if core_entity and relation_terms:
             for relation_term in relation_terms:
                 queries.append(f"{core_entity} {relation_term}")
@@ -889,6 +1011,13 @@ class QualityService:
         if head and relation_terms:
             queries.append(f"{head} {relation_terms[0]}")
         return queries
+
+    @classmethod
+    def _keyword_query_label(cls, query: str, claim_text: str) -> str:
+        """标记医疗目标查询，便于为同义主题分配更大的召回窗口。"""
+
+        aliases = cls._expand_medical_target_aliases(cls._extract_required_evidence_terms(claim_text))
+        return "medical_focus" if str(query or "").strip() in aliases else "keyword_focus"
 
     @staticmethod
     def _extract_core_entity_for_keyword_query(query: str) -> str:
@@ -1068,13 +1197,44 @@ class QualityService:
     def _annotate_evidence_relations(cls, *, claim_text: str, evidence_list: list[dict], claim_logic: dict) -> list[dict]:
         """为每条证据补充支持/矛盾/不足关系，便于前端解释。"""
 
+        required_terms = cls._extract_required_evidence_terms(claim_text)
+        medical_target_aliases = cls._expand_medical_target_aliases(required_terms)
         annotated_items: list[dict] = []
         for item in evidence_list:
-            content = str(item.get("expanded_content") or item.get("content") or "")
+            # 医疗关系只使用当前 chunk 原文，避免相邻章节的“治疗癌症”被误借给本条证据。
+            content = str(item.get("content") or item.get("expanded_content") or "")
+            normalized_content = normalize_query_text(content)
+            medical_topic_match = sum(
+                1 for alias in medical_target_aliases if alias and alias in normalized_content
+            )
+            normalized_claim = normalize_query_text(claim_text)
+            relation_term = next(
+                (term for term in ("治疗", "缓解", "改善", "预防", "调理") if term in normalized_claim),
+                "",
+            )
+            subject_text = normalized_claim.split(relation_term, 1)[0] if relation_term else normalized_claim
+            for phrase in cls._QUERY_STOP_PHRASES:
+                subject_text = subject_text.replace(phrase, " ")
+            subject_text = cls._sanitize_retrieval_query_text(subject_text).replace(" ", "")
+            subject_text = subject_text.rstrip("不没未")
+            medical_subject_match = int(bool(subject_text) and subject_text in normalized_content)
+            medical_relation_match = int(bool(relation_term) and relation_term in normalized_content)
+            medical_subject_target_match = int(
+                bool(subject_text)
+                and any(
+                    subject_text in sentence
+                    and any(alias in sentence for alias in medical_target_aliases)
+                    for sentence in re.split(r"[。！？；\n]+", normalized_content)
+                    if sentence.strip()
+                )
+            )
             relation = "support"
             reason = "检索结果与当前 Claim 主题相关。"
 
-            if claim_logic.get("requires_strict_evidence"):
+            if required_terms and not cls._evidence_directly_supports_required_terms(claim_text, content):
+                relation = "insufficient"
+                reason = f'证据未直接支持 Claim 的目标对象“{"/".join(required_terms)}”及其功效关系，不能作为直接支持。'
+            elif claim_logic.get("requires_strict_evidence"):
                 relation = "insufficient"
                 reason = "该 Claim 含强逻辑约束，需要更直接的边界或排他性证据。"
                 if cls._content_contains_counter_signal(content, claim_logic):
@@ -1098,10 +1258,108 @@ class QualityService:
                     **item,
                     "evidence_relation": relation,
                     "relation_reason": reason,
+                    # 证据不足时仍保留主题命中分，供最终 Top-K 排序使用。
+                    "medical_topic_match": medical_topic_match,
+                    "medical_subject_match": medical_subject_match,
+                    "medical_relation_match": medical_relation_match,
+                    "medical_subject_target_match": medical_subject_target_match,
                 }
             )
 
         return sorted(annotated_items, key=cls._evidence_relation_sort_key)
+
+    @classmethod
+    def _extract_required_evidence_terms(cls, claim_text: str) -> list[str]:
+        """提取医疗功效 Claim 中必须在直接证据出现的治疗目标或核心功效词。"""
+
+        normalized = cls._sanitize_retrieval_query_text(normalize_query_text(claim_text))
+        target_relations = ("治疗", "缓解", "改善", "预防", "调理")
+        for relation in target_relations:
+            if relation not in normalized:
+                continue
+            target = normalized.split(relation, 1)[1]
+            for phrase in cls._QUERY_STOP_PHRASES:
+                target = target.replace(phrase, " ")
+            target = cls._sanitize_retrieval_query_text(target).replace(" ", "")
+            if 2 <= len(target) <= 20:
+                return [target]
+        return [term for term in ("补血", "养血", "滋补") if term in normalized]
+
+    @classmethod
+    def _expand_medical_target_aliases(cls, required_terms: list[str]) -> list[str]:
+        """返回医疗目标的主题别名，帮助全文检索覆盖疾病与研究章节用词差异。"""
+
+        aliases: list[str] = []
+        for term in required_terms:
+            candidates = cls._MEDICAL_TARGET_ALIASES.get(term, (term,))
+            for candidate in candidates:
+                if candidate and candidate not in aliases:
+                    aliases.append(candidate)
+        return aliases
+
+    @classmethod
+    def _evidence_directly_supports_required_terms(cls, claim_text: str, content: str) -> bool:
+        """判断证据是否同时覆盖医疗目标与 Claim 声称的功效关系。"""
+
+        normalized_claim = cls._sanitize_retrieval_query_text(normalize_query_text(claim_text))
+        normalized_content = normalize_query_text(content)
+        required_terms = cls._extract_required_evidence_terms(normalized_claim)
+        if not required_terms:
+            return True
+        if any(term in normalized_claim for term in ("补血", "养血", "滋补")):
+            return any(term in normalized_content for term in required_terms)
+
+        relation = next(
+            (term for term in ("治疗", "缓解", "改善", "预防", "调理") if term in normalized_claim),
+            "",
+        )
+        if not relation:
+            return all(term in normalized_content for term in required_terms)
+        subject_text = normalized_claim.split(relation, 1)[0]
+        for phrase in cls._QUERY_STOP_PHRASES:
+            subject_text = subject_text.replace(phrase, " ")
+        subject = cls._sanitize_retrieval_query_text(subject_text).replace(" ", "").rstrip("不没未")
+        sentences = [
+            cls._sanitize_retrieval_query_text(sentence).replace(" ", "")
+            for sentence in re.split(r"[。！？；\n]+", normalized_content)
+            if sentence.strip()
+        ]
+        for target in required_terms:
+            direct_patterns = (
+                f"{relation}{target}",
+                f"用于{target}",
+                f"主治{target}",
+                f"治{target}",
+                f"{target}治疗",
+                f"{target}疗效",
+            )
+            for sentence in sentences:
+                if subject and subject not in sentence:
+                    continue
+                # “复方阿胶浆用于癌症贫血”属于复方/对症证据，不能直接支持
+                # “阿胶能治疗癌症”这类单体、治愈式 Claim。
+                if subject and cls._is_compound_medical_evidence(sentence, subject):
+                    continue
+                if any(pattern in sentence for pattern in direct_patterns):
+                    return True
+        return False
+
+    @classmethod
+    def _is_compound_medical_evidence(cls, sentence: str, subject: str) -> bool:
+        """识别复方或具体制剂证据，避免把产品/复方效果冒充单体功效。"""
+
+        if subject not in {"阿胶", "驴皮胶"}:
+            return False
+        if not any(marker in sentence for marker in cls._MEDICAL_COMPOUND_MARKERS):
+            return False
+        direct_subject_markers = (
+            f"{subject}治疗",
+            f"{subject}能治疗",
+            f"{subject}可以治疗",
+            f"{subject}可治疗",
+            f"{subject}用于治疗",
+        )
+        return not any(marker in sentence for marker in direct_subject_markers)
 
     @classmethod
     def _finalize_evidence_list(cls, evidence_list: list[dict], *, final_top_k: int) -> list[dict]:
@@ -1165,7 +1423,7 @@ class QualityService:
         return selected
 
     @staticmethod
-    def _insufficient_complementarity_sort_key(item: dict) -> tuple[int, int, int, float]:
+    def _insufficient_complementarity_sort_key(item: dict) -> tuple[int, int, int, int, int, int, int, float]:
         """为证据不足项做补充排序，尽量保留更有解释价值的证据。"""
 
         matched_queries = {str(value) for value in (item.get("matched_queries") or []) if str(value).strip()}
@@ -1173,12 +1431,32 @@ class QualityService:
         counter_bonus = 1 if "counter_probe" in matched_queries else 0
         topic_penalty = 1 if matched_queries == {"topic_focus"} else 0
         try:
+            medical_topic_match = int(item.get("medical_topic_match") or 0)
+        except (TypeError, ValueError):
+            medical_topic_match = 0
+        try:
+            medical_subject_match = int(item.get("medical_subject_match") or 0)
+        except (TypeError, ValueError):
+            medical_subject_match = 0
+        try:
+            medical_relation_match = int(item.get("medical_relation_match") or 0)
+        except (TypeError, ValueError):
+            medical_relation_match = 0
+        try:
+            medical_subject_target_match = int(item.get("medical_subject_target_match") or 0)
+        except (TypeError, ValueError):
+            medical_subject_target_match = 0
+        try:
             score = -float(item.get("rerank_score")) if item.get("rerank_score") is not None else 0.0
         except (TypeError, ValueError):
             score = 0.0
         return (
             -literal_bonus,
             -counter_bonus,
+            -medical_subject_target_match,
+            -medical_subject_match,
+            -medical_relation_match,
+            -medical_topic_match,
             topic_penalty,
             score,
         )

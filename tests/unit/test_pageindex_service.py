@@ -15,7 +15,17 @@ from src.db.connection import initialize_database
 from src.db.transaction import transaction
 from src.ingest.service import IngestService
 from src.knowledge_base.service import KnowledgeBaseService
+from src.pageindex.answer_orchestrator import PageIndexAnswerOrchestrator
+from src.pageindex.index_repository import PageIndexRepository
 from src.pageindex.service import PageIndexService
+from src.pageindex.templates import PageIndexTemplateService
+from src.pageindex.tree_retriever import extract_cross_reference_targets, find_cross_reference_candidates
+
+
+def build_answer_orchestrator() -> PageIndexAnswerOrchestrator:
+    """构造无需数据库的 PageIndex 回答编排器。"""
+
+    return PageIndexAnswerOrchestrator(PageIndexTemplateService())
 
 
 def build_pageindex_test_settings(tmp_path: Path, *, llm_provider: str = "disabled") -> AppSettings:
@@ -81,6 +91,14 @@ def seed_chunk(settings: AppSettings, *, doc_uid: str, chunk_id: str, content: s
         )
 
 
+def get_index_record(service: PageIndexService, knowledge_base_id: str, doc_uid: str) -> dict:
+    """读取测试所需索引记录，并明确断言仓储已返回数据。"""
+
+    record = service.index_repository.get_index_record(knowledge_base_id, doc_uid)
+    assert record is not None
+    return record
+
+
 def test_pageindex_service_should_list_documents_inside_selected_knowledge_base(tmp_path: Path) -> None:
     """PageIndex 文档列表必须按 knowledge_base_id 隔离，不能混入其它知识库文档。"""
 
@@ -95,6 +113,17 @@ def test_pageindex_service_should_list_documents_inside_selected_knowledge_base(
     assert [item["doc_uid"] for item in alpha_documents] == [first["doc_uid"]]
     assert alpha_documents[0]["source_path"] == "kb_alpha/alpha.md"
     assert second["doc_uid"] not in {item["doc_uid"] for item in alpha_documents}
+
+
+def test_pageindex_service_should_expose_persistence_repository(tmp_path: Path) -> None:
+    """PageIndex 服务应把自有表持久化委托给单一仓储。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+
+    service = PageIndexService(settings)
+
+    assert isinstance(service.index_repository, PageIndexRepository)
 
 
 def test_pageindex_service_should_build_markdown_locally_when_llm_disabled(tmp_path: Path) -> None:
@@ -305,7 +334,7 @@ def test_pageindex_build_should_write_and_prefer_normalized_structure(
             raise AssertionError("存在规范化树时不应读取 vendor")
 
     monkeypatch.setattr("src.pageindex.service.PageIndexClient", FailingPageIndexClient)
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
     assert service._load_structure(record) == payload["structure"]
 
     with transaction(settings.sqlite_db_path) as connection:
@@ -313,7 +342,7 @@ def test_pageindex_build_should_write_and_prefer_normalized_structure(
             "UPDATE documents SET source_hash = ? WHERE doc_uid = ?",
             ("changed-source-hash", document["doc_uid"]),
         )
-    stale_record = service._get_index_record("kb_alpha", document["doc_uid"])
+    stale_record = get_index_record(service, "kb_alpha", document["doc_uid"])
     with pytest.raises(ValidationAppError, match="stale_index"):
         service._load_structure(stale_record)
 
@@ -846,7 +875,7 @@ def test_pageindex_template_retrieval_policy_should_limit_selected_nodes(tmp_pat
 def test_pageindex_should_extract_cross_reference_targets() -> None:
     """PageIndex 应识别明确的文档内交叉引用目标。"""
 
-    targets = PageIndexService._extract_cross_reference_targets(
+    targets = extract_cross_reference_targets(
         "主文提到详见附录 G；另参见表 5.3，见第六章，并详见“质量标准”。"
     )
 
@@ -862,7 +891,7 @@ def test_pageindex_should_find_cross_reference_candidates() -> None:
         {"title": "质量标准", "summary": "检测依据", "line_num": 80, "level": 1, "nodes": []},
     ]
 
-    candidates = PageIndexService._find_cross_reference_candidates(structure, ["附录 G", "质量标准"])
+    candidates = find_cross_reference_candidates(structure, ["附录 G", "质量标准"])
 
     assert [item["title"] for item in candidates] == ["附录 G", "质量标准"]
     assert candidates[0]["candidate_id"] == "xref_1"
@@ -1163,7 +1192,7 @@ def test_pageindex_candidate_ranking_should_penalize_generic_front_matter(tmp_pa
     )
     service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
 
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
     candidates = service._build_tree_candidates(
         record,
         structure,
@@ -1212,7 +1241,7 @@ def test_pageindex_local_rank_should_return_empty_when_only_generic_terms_match(
         structure=structure,
     )
     service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶对感冒有没有作用")
 
@@ -1239,7 +1268,7 @@ def test_pageindex_local_rank_should_keep_direct_quality_detection_match(tmp_pat
         structure=structure,
     )
     service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶质量检测方法有哪些")
 
@@ -1267,7 +1296,7 @@ def test_pageindex_local_rank_should_penalize_toc_like_nodes(tmp_path: Path) -> 
         structure=structure,
     )
     service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     evidence, debug_nodes = service._rank_evidence(record, structure, "阿胶制作工艺有什么特点")
 
@@ -1294,7 +1323,7 @@ def test_pageindex_tree_candidates_should_fallback_to_question_terms_when_llm_te
         structure=structure,
     )
     service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     candidates = service._build_tree_candidates(
         record,
@@ -1379,7 +1408,7 @@ def test_pageindex_rag_evidence_should_ignore_generic_entity_terms(tmp_path: Pat
         content="感冒期间是否适合服用阿胶，需要结合发热、咳嗽和外感病程判断，不能只看滋补功效。",
         source_span="line 20",
     )
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1461,7 +1490,7 @@ def test_pageindex_rag_evidence_should_skip_when_only_generic_terms(tmp_path: Pa
         content="阿胶功效与作用介绍，包含补血、止血、滋阴等常见泛化描述。",
         source_span="line 1",
     )
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1493,7 +1522,7 @@ def test_pageindex_rag_evidence_should_skip_incidental_trial_dropout_context(tmp
         content="阿胶贫血研究中有1例患者因流行性感冒停止治疗，其数据被排除在分析之外。",
         source_span="line 30",
     )
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1532,7 +1561,7 @@ def test_pageindex_rag_evidence_should_not_use_expanded_generic_medical_terms(tm
         content="阿胶珠联合孕激素用于妇科研究，观察子宫内膜与出血改善情况。",
         source_span="line 120",
     )
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1571,7 +1600,7 @@ def test_pageindex_rag_evidence_should_keep_question_specific_term_over_broad_co
         content="不孕不育患者辨证使用阿胶相关方剂时，需结合月经、卵巢储备和助孕方案综合判断。",
         source_span="line 240",
     )
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1625,7 +1654,7 @@ def test_pageindex_rag_evidence_should_expand_heart_disease_to_heart_related_chu
             ("chunk_heart", document["doc_uid"], "阿胶养血滋阴。如心脏相关病证用炙甘草汤，需由医师辨证使用。"),
         )
 
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,
@@ -1642,7 +1671,7 @@ def test_pageindex_rag_evidence_should_expand_heart_disease_to_heart_related_chu
 def test_pageindex_local_answer_should_return_conclusion_not_hit_description() -> None:
     """本地降级答案应先给结论，不能只说明命中了哪个节点。"""
 
-    answer = PageIndexService._build_local_answer(
+    answer = build_answer_orchestrator().build_local_answer(
         "心脏病吃阿胶有好处",
         [
             {
@@ -1671,7 +1700,7 @@ def test_pageindex_local_answer_should_return_conclusion_not_hit_description() -
 def test_pageindex_evidence_should_be_classified_before_answering() -> None:
     """PageIndex 证据应标注直接支持、间接相关或风险提醒，供结论判断使用。"""
 
-    classified = PageIndexService._classify_evidence_items(
+    classified = build_answer_orchestrator().classify_evidence_items(
         "心脏病吃阿胶有好处",
         [
             {
@@ -1696,7 +1725,7 @@ def test_pageindex_evidence_should_be_classified_before_answering() -> None:
 def test_pageindex_formula_context_should_not_be_direct_support_for_benefit_claim() -> None:
     """方剂语境中的“心脏相关病证”不能当作“吃阿胶有好处”的直接支持。"""
 
-    classified = PageIndexService._classify_evidence_items(
+    classified = build_answer_orchestrator().classify_evidence_items(
         "心脏病吃阿胶有好处",
         [
             {
@@ -1715,7 +1744,7 @@ def test_pageindex_formula_context_should_not_be_direct_support_for_benefit_clai
 def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
     """PageIndex 本地答案应展示证据判断，说明为什么不能直接下肯定结论。"""
 
-    classified = PageIndexService._classify_evidence_items(
+    classified = build_answer_orchestrator().classify_evidence_items(
         "心脏病吃阿胶有好处",
         [
             {
@@ -1733,7 +1762,7 @@ def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
         ],
     )
 
-    answer = PageIndexService._build_local_answer("心脏病吃阿胶有好处", classified)
+    answer = build_answer_orchestrator().build_local_answer("心脏病吃阿胶有好处", classified)
 
     assert "证据判断：" in answer
     assert "条件或限制" in answer
@@ -1744,7 +1773,7 @@ def test_pageindex_local_answer_should_explain_evidence_judgement() -> None:
 def test_pageindex_local_answer_should_give_clear_formula_context_conclusion_for_dysmenorrhea() -> None:
     """方剂语境证据不能让用户自己判断，应明确说明不能证明单独吃阿胶可缓解痛经。"""
 
-    classified = PageIndexService._classify_evidence_items(
+    classified = build_answer_orchestrator().classify_evidence_items(
         "吃阿胶能缓解痛经",
         [
             {
@@ -1762,7 +1791,7 @@ def test_pageindex_local_answer_should_give_clear_formula_context_conclusion_for
         ],
     )
 
-    answer = PageIndexService._build_local_answer("吃阿胶能缓解痛经", classified)
+    answer = build_answer_orchestrator().build_local_answer("吃阿胶能缓解痛经", classified)
 
     assert [item["evidence_type"] for item in classified] == ["partial_support", "method_or_formula_context"]
     assert "不能证明“吃阿胶能缓解痛经”" in answer
@@ -1795,7 +1824,7 @@ def test_pageindex_llm_answer_should_pass_question_plan_to_final_template(tmp_pa
             return {"answer": "结论：证据列出了真伪鉴别、重金属检测和微生物检测。\n\n来源：质量检测方法（line 580）。"}
 
     service = PageIndexService(settings, llm_client=QuestionPlanClient())
-    answer = service._generate_llm_answer(
+    answer_payload = service.answer_orchestrator.generate_llm_answer_payload(
         QuestionPlanClient(),
         "阿胶有哪些质量检测方法",
         [
@@ -1807,6 +1836,7 @@ def test_pageindex_llm_answer_should_pass_question_plan_to_final_template(tmp_pa
             }
         ],
     )
+    answer = str(answer_payload.get("answer") or "")
 
     assert "真伪鉴别" in answer
     assert "微生物检测" in answer
@@ -1908,7 +1938,7 @@ def test_pageindex_rag_evidence_should_use_source_span_as_anchor_fallback(tmp_pa
         source_span="section-9:chunk-3",
     )
 
-    record = service._get_index_record("kb_alpha", document["doc_uid"])
+    record = get_index_record(service, "kb_alpha", document["doc_uid"])
 
     rag_items = service._search_rag_fts_evidence(
         record,

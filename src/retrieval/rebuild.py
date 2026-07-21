@@ -31,7 +31,7 @@ ValidationGate = Callable[[dict], bool]
 
 
 class RetrievalIndexRebuilder:
-    """以可恢复方式重建 SQLite FTS 与 Chroma 向量索引。"""
+    """以可恢复方式重建 SQLite FTS 与本地向量索引。"""
 
     def __init__(
         self,
@@ -98,7 +98,7 @@ class RetrievalIndexRebuilder:
                 vector_store.close()
 
     def backup(self) -> Path:
-        """备份 SQLite、WAL/SHM、Chroma 和索引清单。"""
+        """备份 SQLite、WAL/SHM、本地向量索引和索引清单。"""
 
         if not self.database_path.exists():
             raise ValidationAppError(
@@ -152,7 +152,7 @@ class RetrievalIndexRebuilder:
         return backup_path
 
     def build_staging(self) -> dict:
-        """构建 FTS 临时表和独立 Chroma 影子目录。"""
+        """构建 FTS 临时表和独立向量索引影子目录。"""
 
         timestamp = self._timestamp()
         staging_chroma_path = self.chroma_path.with_name(f"{self.chroma_path.name}.staging.{timestamp}")
@@ -367,7 +367,7 @@ class RetrievalIndexRebuilder:
             return str(exc)
 
     def restore_latest(self, *, apply: bool = False) -> dict:
-        """从最近一次完整备份恢复 SQLite、Chroma 和索引清单。"""
+        """从最近一次完整备份恢复 SQLite、向量索引和索引清单。"""
 
         backups = sorted(path for path in self.backup_root.glob("*") if path.is_dir())
         if not backups:

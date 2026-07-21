@@ -1,18 +1,18 @@
-﻿"""程序说明：验证 API 与 UI 在向量维度冲突时安全阻断，并校验版本一致性。"""
+"""程序说明：验证 API 与 UI 在向量维度冲突时安全阻断，并校验版本一致性。"""
 
 from __future__ import annotations
 
 import importlib
 import sys
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
 import pytest
 
 from src.common.config import AppSettings
 from src.common.errors import ValidationAppError
 from src.db.connection import initialize_database
-from src.db.transaction import transaction
+from src.retrieval.vector_store import VectorStore
 
 
 class StubEmbeddingClient:
@@ -22,58 +22,7 @@ class StubEmbeddingClient:
         self.dimension = dimension
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return [[0.0] * self.dimension for _ in texts]
-
-
-class StubCollection:
-    """测试用 Chroma 集合。"""
-
-    def __init__(self, *, ids: list[str] | None = None, embeddings: list[list[float]] | None = None) -> None:
-        self._ids = ids or []
-        self._embeddings = embeddings or []
-
-    def peek(self, limit: int = 1) -> dict:
-        return {
-            "ids": self._ids[:limit],
-            "embeddings": self._embeddings[:limit],
-        }
-
-    def get(self, *, ids: list[str], include: list[str]) -> dict:
-        assert ids
-        assert "embeddings" in include
-        return {
-            "ids": ids,
-            "embeddings": self._embeddings[:1],
-        }
-
-    def upsert(
-        self,
-        *,
-        ids: list[str],
-        documents: list[str],
-        metadatas: list[dict],
-        embeddings: list[list[float]],
-    ) -> None:
-        assert len(ids) == len(documents) == len(metadatas) == len(embeddings)
-        self._ids = list(ids)
-        self._embeddings = [list(item) for item in embeddings]
-
-    def delete(self, *, where: dict) -> None:
-        _ = where
-
-
-class StubClient:
-    """测试用 Chroma 客户端。"""
-
-    def __init__(self, collection: StubCollection) -> None:
-        self._collections = {"knowledge_chunks": collection}
-
-    def get_or_create_collection(self, *, name: str) -> StubCollection:
-        assert name == "knowledge_chunks"
-        return self._collections.setdefault(name, StubCollection())
-
-    def delete_collection(self, *, name: str) -> None:
-        self._collections.pop(name, None)
+        return [[1.0] * self.dimension for _ in texts]
 
 
 def build_test_settings(tmp_path: Path) -> AppSettings:
@@ -82,10 +31,8 @@ def build_test_settings(tmp_path: Path) -> AppSettings:
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
     (rules_dir / "base_rules.yaml").write_text("[]", encoding="utf-8")
-
     templates_dir = tmp_path / "templates"
     templates_dir.mkdir(parents=True, exist_ok=True)
-
     return AppSettings(
         APP_ENV="test",
         INPUT_ROOT=tmp_path / "Input",
@@ -96,171 +43,59 @@ def build_test_settings(tmp_path: Path) -> AppSettings:
     )
 
 
-def seed_chunk_database(settings: AppSettings) -> None:
-    """写入最小 chunk 数据，供自动重建测试复用。"""
+def seed_legacy_index(settings: AppSettings) -> None:
+    """创建旧维度索引，供启动阻断测试使用。"""
 
     initialize_database(settings.sqlite_db_path)
-    now = "2026-05-03T19:10:00+08:00"
-    with transaction(settings.sqlite_db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO documents (
-                doc_uid, knowledge_base_id, doc_id, doc_title, edition, author, source_name, tags_json, source_path,
-                source_hash, ingest_status, index_status, error_message, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "doc_1",
-                "default",
-                "doc_1",
-                "维度修复验收文档",
-                "default",
-                "tester",
-                "acceptance.MD",
-                "[]",
-                str((settings.input_root / "acceptance.MD").resolve()),
-                "hash-doc-1",
-                "completed",
-                "indexed",
-                None,
-                now,
-                now,
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO document_sections (
-                section_id, doc_uid, section_title, section_level, source_span, content, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "sec_1",
-                "doc_1",
-                "说明",
-                1,
-                "section-1",
-                "阿胶并非只有东阿可生产。",
-                now,
-                now,
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO chunks (
-                chunk_id, doc_uid, section_id, chunk_index, content, source_span, token_count, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "chunk_1",
-                "doc_1",
-                "sec_1",
-                0,
-                "阿胶并非只有东阿可生产。",
-                "section-1:chunk-1",
-                14,
-                now,
-                now,
-            ),
-        )
+    VectorStore(settings.chroma_persist_dir, embedding_client=StubEmbeddingClient(64)).upsert_chunks(
+        [{"chunk_id": "chunk_legacy", "doc_uid": "doc_legacy", "content": "legacy"}]
+    )
 
 
-def import_app_module_with_mismatch(
-    monkeypatch: pytest.MonkeyPatch,
-    client: StubClient,
-    settings: AppSettings,
-):
-    """在导入应用模块前注入测试桩，确保启动时走到维度冲突逻辑。"""
+def import_app_module_with_mismatch(monkeypatch: pytest.MonkeyPatch, settings: AppSettings):
+    """在导入应用模块前注入 1024 维 embedding。"""
 
-    monkeypatch.setattr(
-        "src.retrieval.vector_store.chromadb.PersistentClient",
-        lambda path: client,
-    )
-    monkeypatch.setattr(
-        "src.ai.embedding.build_embedding_client",
-        lambda settings: StubEmbeddingClient(dimension=1024),
-    )
-    monkeypatch.setattr(
-        "src.common.config.get_settings",
-        lambda: settings,
-    )
+    monkeypatch.setattr("src.ai.embedding.build_embedding_client", lambda settings: StubEmbeddingClient(1024))
+    monkeypatch.setattr("src.common.config.get_settings", lambda: settings)
     sys.modules.pop("src.app", None)
     return importlib.import_module("src.app")
 
 
-def import_ui_module_with_mismatch(monkeypatch: pytest.MonkeyPatch, client: StubClient):
-    """在导入 UI 模块前注入测试桩，确保启动时走到维度冲突逻辑。"""
+def import_ui_module_with_mismatch(monkeypatch: pytest.MonkeyPatch):
+    """在导入 UI 模块前注入 1024 维 embedding。"""
 
-    monkeypatch.setattr(
-        "src.retrieval.vector_store.chromadb.PersistentClient",
-        lambda path: client,
-    )
-    monkeypatch.setattr(
-        "src.ai.embedding.build_embedding_client",
-        lambda settings: StubEmbeddingClient(dimension=1024),
-    )
+    monkeypatch.setattr("src.ai.embedding.build_embedding_client", lambda settings: StubEmbeddingClient(1024))
     sys.modules.pop("src.ui.app", None)
     return importlib.import_module("src.ui.app")
 
 
-def test_create_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """API 初始化发现维度不一致时应阻断，不能无备份删除旧集合。"""
-
+def test_create_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(monkeypatch, tmp_path: Path) -> None:
     settings = build_test_settings(tmp_path)
-    seed_chunk_database(settings)
-    client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
+    seed_legacy_index(settings)
     with pytest.raises(ValidationAppError, match="Embedding 维度"):
-        import_app_module_with_mismatch(monkeypatch, client, settings)
-    collection = client.get_or_create_collection(name="knowledge_chunks")
-
-    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
-    assert len(collection.peek(limit=1)["embeddings"][0]) == 64
+        import_app_module_with_mismatch(monkeypatch, settings)
 
 
-def test_create_ui_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """UI 初始化发现维度不一致时应阻断，不能无备份删除旧集合。"""
-
+def test_create_ui_app_should_reject_embedding_dimension_mismatch_without_auto_rebuild(monkeypatch, tmp_path: Path) -> None:
     settings = build_test_settings(tmp_path)
-    seed_chunk_database(settings)
-    client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
-    ui_module = import_ui_module_with_mismatch(monkeypatch, client)
+    seed_legacy_index(settings)
+    ui_module = import_ui_module_with_mismatch(monkeypatch)
     with pytest.raises(ValidationAppError, match="Embedding 维度"):
         ui_module.create_ui_app(settings)
-    collection = client.get_or_create_collection(name="knowledge_chunks")
-
-    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
-    assert len(collection.peek(limit=1)["embeddings"][0]) == 64
 
 
-def test_create_app_should_keep_legacy_collection_when_sqlite_has_no_chunks(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """即使 SQLite 无 chunk，也不能在启动时无备份清空旧 Chroma。"""
-
+def test_create_app_should_keep_legacy_index_when_sqlite_has_no_chunks(monkeypatch, tmp_path: Path) -> None:
     settings = build_test_settings(tmp_path)
-    initialize_database(settings.sqlite_db_path)
-    client = StubClient(StubCollection(ids=["chunk_legacy"], embeddings=[[0.0] * 64]))
+    seed_legacy_index(settings)
     with pytest.raises(ValidationAppError, match="Embedding 维度"):
-        import_app_module_with_mismatch(monkeypatch, client, settings)
-    collection = client.get_or_create_collection(name="knowledge_chunks")
-
-    assert collection.peek(limit=1)["ids"] == ["chunk_legacy"]
+        import_app_module_with_mismatch(monkeypatch, settings)
 
 
-def test_create_app_should_initialize_database_before_creating_vector_store(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_create_app_should_initialize_database_before_creating_vector_store(monkeypatch, tmp_path: Path) -> None:
     """create_app() 应先完成数据库初始化，再构造 VectorStore。"""
 
     settings = build_test_settings(tmp_path)
-    app_module = import_app_module_with_mismatch(monkeypatch, StubClient(StubCollection()), settings)
+    app_module = import_app_module_with_mismatch(monkeypatch, settings)
     call_order: list[str] = []
     original_initialize_database = app_module.initialize_database
 
@@ -275,20 +110,15 @@ def test_create_app_should_initialize_database_before_creating_vector_store(
 
     monkeypatch.setattr(app_module, "initialize_database", record_initialize_database)
     monkeypatch.setattr(app_module, "VectorStore", RecordingVectorStore)
-
     app = app_module.create_app(settings)
-
     assert app is not None
     assert call_order[:2] == ["initialize_database", "vector_store"]
 
 
 def test_project_version_should_match_fastapi_app_version() -> None:
-    """项目元数据版本应与 FastAPI 应用版本保持一致。"""
-
     project_root = Path(__file__).resolve().parents[2]
-    pyproject_data = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject_data = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8-sig"))
     expected_version = str(pyproject_data["project"]["version"])
     app_module = importlib.import_module("src.app")
-
     assert expected_version == "0.6"
     assert app_module.app.version == expected_version

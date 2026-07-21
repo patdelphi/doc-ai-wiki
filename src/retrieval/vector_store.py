@@ -1,12 +1,13 @@
-﻿"""程序说明：封装 ChromaDB 持久化向量索引、维度校验与自动重建逻辑。"""
+"""程序说明：提供稳定的本地向量索引，避免 Windows 下 Chroma 原生库崩溃。"""
 
 from __future__ import annotations
 
-import shutil
+import json
+import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import chromadb
+import numpy as np
 
 from src.ai.embedding import BaseEmbeddingClient, DeterministicEmbeddingClient
 from src.common.errors import ValidationAppError
@@ -15,7 +16,14 @@ from src.retrieval.scope import normalize_knowledge_base_scope
 
 
 class VectorStore:
-    """ChromaDB 向量集合封装。"""
+    """使用 NumPy 精确余弦相似度的持久化向量存储。
+
+    ``CHROMA_PERSIST_DIR`` 配置名保留，以兼容已有部署配置；目录内容改为
+    单个原子替换的 ``vectors.npz`` 文件，避免 Chroma/HNSW 在 Windows 上的
+    native access violation 以及多文件半写入状态。
+    """
+
+    _FILE_NAME = "vectors.npz"
 
     def __init__(
         self,
@@ -36,7 +44,11 @@ class VectorStore:
         self.index_version = str(index_version or "retrieval-v2")
         self.embedding_dimension = 0
         self.last_repair_summary: dict | None = None
-        self._initialize_collection()
+        self._ids: np.ndarray = np.empty(0, dtype=str)
+        self._documents: np.ndarray = np.empty(0, dtype=str)
+        self._metadata_json: np.ndarray = np.empty(0, dtype=str)
+        self._embeddings: np.ndarray = np.empty((0, 0), dtype=np.float32)
+        self._load()
         try:
             self._validate_embedding_dimension()
         except ValidationAppError as exc:
@@ -44,75 +56,88 @@ class VectorStore:
                 raise
             self._repair_dimension_mismatch(exc)
 
-    def _initialize_collection(self) -> None:
-        """初始化 Chroma 客户端与集合，并在旧索引格式不兼容时尝试自修复。"""
+    @property
+    def _index_path(self) -> Path:
+        return Path(self.persist_directory) / self._FILE_NAME
 
+    def _load(self) -> None:
+        """加载单文件索引；旧 Chroma 文件不参与读取，等待显式重建。"""
+
+        path = self._index_path
+        if not path.exists():
+            Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
+            return
         try:
-            self.client = chromadb.PersistentClient(path=self.persist_directory)
-            self.collection = self.client.get_or_create_collection(name=self.collection_name)
+            with np.load(path, allow_pickle=False) as data:
+                ids = np.asarray(data["ids"], dtype=str)
+                documents = np.asarray(data["documents"], dtype=str)
+                metadata_json = np.asarray(data["metadata_json"], dtype=str)
+                embeddings = np.asarray(data["embeddings"], dtype=np.float32)
         except Exception as exc:  # noqa: BLE001
-            if not self._should_auto_repair_legacy_index(exc):
-                raise
-            self._repair_legacy_index(exc)
-
-    def _should_auto_repair_legacy_index(self, exc: Exception) -> bool:
-        """判断是否命中了可自动修复的旧版 Chroma 索引格式异常。"""
-
-        message = str(exc)
-        return bool(
-            self.auto_repair_dimension_mismatch
-            and self.sqlite_db_path
-            and (
-                (isinstance(exc, KeyError) and message.strip("'") == "_type")
-                or "_type" in message
-                or "configuration" in message.lower()
+            raise ValidationAppError(
+                "读取本地向量索引失败",
+                details={"index_path": str(path), "reason": str(exc)},
+            ) from exc
+        if embeddings.ndim != 2 or not (len(ids) == len(documents) == len(metadata_json) == len(embeddings)):
+            raise ValidationAppError(
+                "本地向量索引文件不完整",
+                details={"index_path": str(path)},
             )
+        self._ids, self._documents, self._metadata_json, self._embeddings = (
+            ids,
+            documents,
+            metadata_json,
+            embeddings,
         )
 
-    def _repair_legacy_index(self, exc: Exception) -> None:
-        """旧版 Chroma 集合元数据不兼容时，重建索引目录并从 SQLite 回填。"""
+    def _persist(self) -> None:
+        """事务式写入：临时文件刷盘后原子替换正式索引。"""
 
-        persist_path = Path(self.persist_directory)
-        backup_path = persist_path.with_name(f"{persist_path.name}_legacy_backup")
-        if backup_path.exists():
-            if backup_path.is_dir():
-                shutil.rmtree(backup_path)
-            else:
-                backup_path.unlink()
-        if persist_path.exists():
-            shutil.move(str(persist_path), str(backup_path))
-        persist_path.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=self.persist_directory)
-        self.collection = self.client.get_or_create_collection(name=self.collection_name)
-        repaired_docs, repaired_chunks = self.rebuild_from_sqlite()
-        self.last_repair_summary = {
-            "repaired": True,
-            "repair_reason": "legacy_collection_config",
-            "repaired_docs": repaired_docs,
-            "repaired_chunks": repaired_chunks,
-            "persist_directory": self.persist_directory,
-            "legacy_backup_path": str(backup_path),
-            "repair_error": str(exc),
-        }
+        directory = Path(self.persist_directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        temp_path = directory / f"{self._FILE_NAME}.tmp"
+        try:
+            with temp_path.open("wb") as handle:
+                np.savez_compressed(
+                    handle,
+                    ids=self._ids,
+                    documents=self._documents,
+                    metadata_json=self._metadata_json,
+                    embeddings=self._embeddings.astype(np.float32, copy=False),
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self._index_path)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise ValidationAppError(
+                "写入本地向量索引失败",
+                details={"index_path": str(self._index_path), "reason": str(exc)},
+            ) from exc
 
     def _validate_embedding_dimension(self) -> None:
-        """启动时校验当前 embedding 维度与现有集合维度是否一致。"""
+        """启动时校验当前模型维度与已保存索引维度。"""
 
-        current_dimension = self._infer_current_embedding_dimension()
+        vectors = self.embedding.embed_texts(["embedding-dimension-self-check"])
+        if not vectors or not vectors[0]:
+            raise ValidationAppError("启动时无法探测当前 Embedding 维度")
+        current_dimension = len(vectors[0])
         self.embedding_dimension = current_dimension
-        stored_dimension = self._infer_stored_embedding_dimension()
-        if stored_dimension is None or stored_dimension == current_dimension:
-            return
-        raise ValidationAppError(
-            "当前 Embedding 维度与现有向量索引不一致，请删除旧的 Chroma 索引后重建",
-            details={
-                "collection_name": self.collection_name,
-                "persist_directory": self.persist_directory,
-                "stored_dimension": stored_dimension,
-                "current_dimension": current_dimension,
-                "recommended_action": "备份后删除 index/chroma，并重新执行向量重建或文档入库",
-            },
-        )
+        stored_dimension = int(self._embeddings.shape[1]) if self._embeddings.size else None
+        if stored_dimension is not None and stored_dimension != current_dimension:
+            raise ValidationAppError(
+                "当前 Embedding 维度与现有向量索引不一致，请备份后重建本地向量索引",
+                details={
+                    "collection_name": self.collection_name,
+                    "persist_directory": self.persist_directory,
+                    "stored_dimension": stored_dimension,
+                    "current_dimension": current_dimension,
+                    "recommended_action": "备份后删除 index/chroma，并重新执行向量重建或文档入库",
+                },
+            )
 
     def _should_auto_repair_dimension_mismatch(self, exc: ValidationAppError) -> bool:
         """判断当前异常是否可自动重建。"""
@@ -126,7 +151,7 @@ class VectorStore:
         )
 
     def _repair_dimension_mismatch(self, exc: ValidationAppError) -> None:
-        """检测到维度不一致时，重建向量集合。"""
+        """清空旧索引并从 SQLite 回填。"""
 
         try:
             self.reset_collection()
@@ -142,118 +167,28 @@ class VectorStore:
         except Exception as repair_exc:  # noqa: BLE001
             raise ValidationAppError(
                 "检测到向量维度不一致，但自动重建失败",
-                details={
-                    **(exc.details or {}),
-                    "persist_directory": self.persist_directory,
-                    "repair_error": str(repair_exc),
-                    "recommended_action": "检查 Embedding 配置与网络后重启；如仍失败，可删除 index/chroma 后重新入库",
-                },
+                details={**(exc.details or {}), "repair_error": str(repair_exc)},
             ) from repair_exc
 
-    def _infer_current_embedding_dimension(self) -> int:
-        """探测当前 embedding 客户端返回的维度。"""
-
-        vectors = self.embedding.embed_texts(["embedding-dimension-self-check"])
-        if not vectors or not vectors[0]:
-            raise ValidationAppError(
-                "启动时无法探测当前 Embedding 维度",
-                details={
-                    "collection_name": self.collection_name,
-                    "persist_directory": self.persist_directory,
-                },
-            )
-        return len(vectors[0])
-
-    def _infer_stored_embedding_dimension(self) -> int | None:
-        """从现有集合中读取一条向量，探测已存储的维度。"""
-
-        snapshot = self.collection.peek(limit=1)
-        ids = self._to_sequence(snapshot.get("ids"))
-        if not ids:
-            return None
-
-        embeddings = self._to_sequence(snapshot.get("embeddings"))
-        first_embedding = self._get_first_embedding(embeddings)
-        if first_embedding is not None:
-            return len(first_embedding)
-
-        detail = self.collection.get(ids=[ids[0]], include=["embeddings"])
-        stored_embeddings = self._to_sequence(detail.get("embeddings"))
-        first_stored_embedding = self._get_first_embedding(stored_embeddings)
-        if first_stored_embedding is not None:
-            return len(first_stored_embedding)
-
-        raise ValidationAppError(
-            "启动时无法读取现有向量索引维度，请检查 Chroma 索引是否完整",
-            details={
-                "collection_name": self.collection_name,
-                "persist_directory": self.persist_directory,
-                "sample_id": ids[0],
-                "recommended_action": "备份后删除 index/chroma，并重新执行向量重建或文档入库",
-            },
-        )
-
-    def _to_sequence(self, value) -> list:
-        """将 Chroma 返回值转换为可安全判空的顺序结构。"""
-
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return value
-        if hasattr(value, "tolist"):
-            converted = value.tolist()
-            return converted if isinstance(converted, list) else [converted]
-        try:
-            return list(value)
-        except TypeError:
-            return [value]
-
-    def _get_first_embedding(self, embeddings: list) -> list[float] | None:
-        """安全读取第一条向量，兼容 list 与 ndarray 等结构。"""
-
-        if not embeddings:
-            return None
-        first_embedding = embeddings[0]
-        if first_embedding is None:
-            return None
-        if hasattr(first_embedding, "tolist"):
-            first_embedding = first_embedding.tolist()
-        if isinstance(first_embedding, list):
-            return first_embedding if first_embedding else None
-        try:
-            converted = list(first_embedding)
-        except TypeError:
-            return None
-        return converted if converted else None
-
     def reset_collection(self) -> None:
-        """删除并重建当前向量集合。"""
+        """清空并持久化空索引。"""
 
-        try:
-            self.client.delete_collection(name=self.collection_name)
-        except Exception:  # noqa: BLE001
-            pass
-        self.collection = self.client.get_or_create_collection(name=self.collection_name)
+        self._ids = np.empty(0, dtype=str)
+        self._documents = np.empty(0, dtype=str)
+        self._metadata_json = np.empty(0, dtype=str)
+        self._embeddings = np.empty((0, self.embedding_dimension), dtype=np.float32)
+        self._persist()
 
     def close(self) -> None:
-        """显式释放 Chroma 客户端，避免 Windows 持有索引目录句柄。"""
-
-        close_client = getattr(self.client, "close", None)
-        if callable(close_client):
-            close_client()
+        """兼容旧调用方；NumPy 索引无外部句柄需要释放。"""
 
     def rebuild_from_sqlite(self, *, page_size: int = 100) -> tuple[int, int]:
         """基于 SQLite 已存储的 chunks 重建整个向量集合。"""
 
         if not self.sqlite_db_path:
-            raise ValidationAppError(
-                "缺少 sqlite_db_path，无法自动重建向量集合",
-                details={"persist_directory": self.persist_directory},
-            )
-
+            raise ValidationAppError("缺少 sqlite_db_path，无法自动重建向量集合")
         repository = DocumentRepository(Path(self.sqlite_db_path))
-        repaired_docs = 0
-        repaired_chunks = 0
+        repaired_docs = repaired_chunks = 0
         page = 1
         while True:
             documents, total = repository.list_documents(page=page, page_size=page_size)
@@ -265,40 +200,43 @@ class VectorStore:
                 if not chunk_items:
                     continue
                 knowledge_base_id = str(document.get("knowledge_base_id") or "")
-                # chunks 表不重复存知识库 ID，全量重建时必须从 documents 继承。
-                enriched_chunks = [
-                    {**item, "knowledge_base_id": knowledge_base_id}
-                    for item in chunk_items
-                ]
-                self.upsert_chunks(enriched_chunks)
+                self.upsert_chunks(
+                    [{**item, "knowledge_base_id": knowledge_base_id} for item in chunk_items],
+                    batch_size=32,
+                )
                 repaired_docs += 1
-                repaired_chunks += len(enriched_chunks)
+                repaired_chunks += len(chunk_items)
             if page * page_size >= total:
                 break
             page += 1
         return repaired_docs, repaired_chunks
 
     def upsert_chunks(self, items: list[dict], *, batch_size: int = 8, progress_callback=None) -> None:
-        """批量写入 chunk 向量记录。H7 修复：metadata 中增加 knowledge_base_id。"""
+        """批量写入 chunk 向量记录，并在完成后原子保存。"""
 
         if not items:
             return
-
         total = len(items)
+        new_records: dict[str, tuple[str, str, Any]] = {}
         for start in range(0, total, batch_size):
             batch = items[start : start + batch_size]
-            documents = [item["content"] for item in batch]
-            metadatas = []
-            for item in batch:
-                metadata = {
-                    "doc_uid": item["doc_uid"],
-                    "chunk_id": item["chunk_id"],
+            documents = [str(item["content"]) for item in batch]
+            raw_vectors = np.asarray(self.embedding.embed_texts(documents), dtype=np.float32)
+            if raw_vectors.ndim != 2 or len(raw_vectors) != len(batch):
+                raise ValidationAppError("Embedding 返回数量与 chunk 数量不一致")
+            if raw_vectors.shape[1] != self.embedding_dimension:
+                raise ValidationAppError("Embedding 返回维度与当前索引不一致")
+            if not np.isfinite(raw_vectors).all():
+                raise ValidationAppError("Embedding 返回了无效数值")
+            for item, vector in zip(batch, raw_vectors):
+                metadata: dict[str, Any] = {
+                    "doc_uid": str(item["doc_uid"]),
+                    "chunk_id": str(item["chunk_id"]),
                     "source_span": item.get("source_span") or "",
                     "heading_path": item.get("heading_path") or "",
                     "source_anchor": item.get("source_anchor") or "",
                     "chunk_type": item.get("chunk_type") or "",
                     "content_hash": item.get("content_hash") or "",
-                    # H7 修复：写入知识库 ID，支持向量检索按知识库过滤
                     "knowledge_base_id": item.get("knowledge_base_id") or "",
                     "embedding_model": self.embedding_model,
                     "embedding_dimension": self.embedding_dimension,
@@ -307,75 +245,60 @@ class VectorStore:
                 for trace_key in ("source_start_line", "source_end_line", "page_no"):
                     if item.get(trace_key) is not None:
                         metadata[trace_key] = int(item[trace_key])
-                metadatas.append(metadata)
-            self.collection.upsert(
-                ids=[item["chunk_id"] for item in batch],
-                documents=documents,
-                metadatas=cast(Any, metadatas),
-                embeddings=cast(Any, self.embedding.embed_texts(documents)),
-            )
+                chunk_id = str(item["chunk_id"])
+                new_records[chunk_id] = (str(item["content"]), json.dumps(metadata, ensure_ascii=False, sort_keys=True), vector)
             if progress_callback:
-                progress_callback(
-                    {
-                        "completed_chunks": min(start + len(batch), total),
-                        "total_chunks": total,
-                        "batch_size": len(batch),
-                    }
-                )
+                progress_callback({"completed_chunks": min(start + len(batch), total), "total_chunks": total, "batch_size": len(batch)})
+
+        existing: dict[str, tuple[str, str, Any]] = {
+            str(chunk_id): (str(self._documents[index]), str(self._metadata_json[index]), self._embeddings[index])
+            for index, chunk_id in enumerate(self._ids)
+        }
+        existing.update(new_records)
+        ordered_ids = sorted(existing)
+        self._ids = np.asarray(ordered_ids, dtype=str)
+        self._documents = np.asarray([existing[key][0] for key in ordered_ids], dtype=str)
+        self._metadata_json = np.asarray([existing[key][1] for key in ordered_ids], dtype=str)
+        self._embeddings = np.asarray([existing[key][2] for key in ordered_ids], dtype=np.float32).reshape((-1, self.embedding_dimension))
+        self._persist()
+
+    def _metadata(self, index: int) -> dict[str, Any]:
+        try:
+            value = json.loads(str(self._metadata_json[index]))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValidationAppError("本地向量索引元数据损坏", details={"index": index}) from exc
+        return value if isinstance(value, dict) else {}
 
     def delete_by_doc_uid(self, doc_uid: str) -> None:
         """按文档标识删除旧向量。"""
 
-        self.collection.delete(where={"doc_uid": doc_uid})
+        if not doc_uid or not len(self._ids):
+            return
+        keep = np.asarray([self._metadata(index).get("doc_uid") != doc_uid for index in range(len(self._ids))], dtype=bool)
+        if keep.all():
+            return
+        self._ids, self._documents, self._metadata_json, self._embeddings = self._ids[keep], self._documents[keep], self._metadata_json[keep], self._embeddings[keep]
+        self._persist()
 
     def count_by_doc_uid(self, doc_uid: str) -> int:
         """统计指定文档当前已写入的向量条数。"""
 
         if not doc_uid:
             return 0
-        result = self.collection.get(
-            where={"doc_uid": doc_uid},
-            include=[],
-        )
-        ids = self._to_sequence(result.get("ids"))
-        if ids and isinstance(ids[0], list):
-            return sum(len(self._to_sequence(item)) for item in ids)
-        return len(ids)
+        return sum(self._metadata(index).get("doc_uid") == doc_uid for index in range(len(self._ids)))
 
     def inspect_index(self) -> dict:
         """汇总向量数量、归属和必填模型元数据。"""
 
-        try:
-            snapshot = self.collection.get(include=["metadatas"])
-        except Exception as exc:  # noqa: BLE001
-            raise ValidationAppError(
-                "读取向量索引元数据失败",
-                details={"collection_name": self.collection_name, "reason": str(exc)},
-            ) from exc
-
-        ids = self._to_sequence(snapshot.get("ids"))
-        metadatas = self._to_sequence(snapshot.get("metadatas"))
-        if ids and isinstance(ids[0], list):
-            ids = [item for group in ids for item in self._to_sequence(group)]
-        if metadatas and isinstance(metadatas[0], list):
-            metadatas = [item for group in metadatas for item in self._to_sequence(group)]
-
-        required_fields = (
-            "chunk_id",
-            "doc_uid",
-            "knowledge_base_id",
-            "embedding_model",
-            "embedding_dimension",
-            "index_version",
-        )
+        required_fields = ("chunk_id", "doc_uid", "knowledge_base_id", "embedding_model", "embedding_dimension", "index_version")
         by_knowledge_base: dict[str, int] = {}
         by_document: dict[str, int] = {}
         models: set[str] = set()
         dimensions: set[int] = set()
         versions: set[str] = set()
         missing_metadata_count = 0
-        for raw_metadata in metadatas:
-            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        for index in range(len(self._ids)):
+            metadata = self._metadata(index)
             if any(metadata.get(field) in (None, "") for field in required_fields):
                 missing_metadata_count += 1
             knowledge_base_id = str(metadata.get("knowledge_base_id") or "")
@@ -390,74 +313,33 @@ class VectorStore:
                 dimensions.add(int(metadata["embedding_dimension"]))
             if metadata.get("index_version"):
                 versions.add(str(metadata["index_version"]))
-        missing_metadata_count += max(len(ids) - len(metadatas), 0)
-        return {
-            "total_count": len(ids),
-            "by_knowledge_base": by_knowledge_base,
-            "by_document": by_document,
-            "missing_metadata_count": missing_metadata_count,
-            "embedding_models": sorted(models),
-            "embedding_dimensions": sorted(dimensions),
-            "index_versions": sorted(versions),
-        }
+        return {"total_count": len(self._ids), "by_knowledge_base": by_knowledge_base, "by_document": by_document, "missing_metadata_count": missing_metadata_count, "embedding_models": sorted(models), "embedding_dimensions": sorted(dimensions), "index_versions": sorted(versions)}
 
-    def query(
-        self,
-        query_text: str,
-        top_k: int = 5,
-        doc_uid: str | None = None,
-        knowledge_base_id: str | None = None,
-        knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
-    ) -> list[dict]:
-        """执行向量检索，支持单知识库或多知识库范围。"""
+    def query(self, query_text: str, top_k: int = 5, doc_uid: str | None = None, knowledge_base_id: str | None = None, knowledge_base_ids: list[str] | tuple[str, ...] | None = None) -> list[dict]:
+        """执行精确余弦检索，支持单知识库或多知识库范围。"""
 
-        knowledge_base_scope = normalize_knowledge_base_scope(knowledge_base_id, knowledge_base_ids)
-        if knowledge_base_scope == ():
+        scope = normalize_knowledge_base_scope(knowledge_base_id, knowledge_base_ids)
+        if scope == () or not len(self._ids) or top_k <= 0:
             return []
-
-        query_kwargs = {
-            "query_embeddings": self.embedding.embed_texts([query_text]),
-            "n_results": top_k,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        # 文档范围和知识库范围同时存在时，使用 Chroma 的 $and 组合。
-        where_conditions: dict[str, object] = {}
-        if doc_uid:
-            where_conditions["doc_uid"] = doc_uid
-        if knowledge_base_scope:
-            where_conditions["knowledge_base_id"] = (
-                knowledge_base_scope[0]
-                if len(knowledge_base_scope) == 1
-                else {"$in": list(knowledge_base_scope)}
-            )
-        if len(where_conditions) == 1:
-            query_kwargs["where"] = where_conditions
-        elif len(where_conditions) > 1:
-            query_kwargs["where"] = {"$and": [{k: v} for k, v in where_conditions.items()]}
-
-        query_collection = cast(Any, self.collection.query)
-        result = query_collection(**query_kwargs)
-
-        documents = (result.get("documents") or [[]])[0]
-        metadatas = (result.get("metadatas") or [[]])[0]
-        distances = (result.get("distances") or [[]])[0]
-
-        items: list[dict] = []
-        for document, metadata, distance in zip(documents, metadatas, distances):
-            items.append(
-                {
-                    "chunk_id": metadata.get("chunk_id"),
-                    "doc_uid": metadata.get("doc_uid"),
-                    "source_span": metadata.get("source_span"),
-                    "heading_path": metadata.get("heading_path"),
-                    "source_start_line": metadata.get("source_start_line"),
-                    "source_end_line": metadata.get("source_end_line"),
-                    "page_no": metadata.get("page_no"),
-                    "source_anchor": metadata.get("source_anchor"),
-                    "chunk_type": metadata.get("chunk_type"),
-                    "content_hash": metadata.get("content_hash"),
-                    "content": document,
-                    "score": 1 - float(distance),
-                }
-            )
-        return items
+        query_vector = np.asarray(self.embedding.embed_texts([query_text]), dtype=np.float32)
+        if query_vector.shape != (1, self.embedding_dimension):
+            raise ValidationAppError("查询 Embedding 维度与索引不一致")
+        query_norm = float(np.linalg.norm(query_vector[0]))
+        if query_norm == 0:
+            return []
+        candidates: list[tuple[float, str, int]] = []
+        for index, chunk_id in enumerate(self._ids):
+            metadata = self._metadata(index)
+            if doc_uid and metadata.get("doc_uid") != doc_uid:
+                continue
+            if scope and metadata.get("knowledge_base_id") not in scope:
+                continue
+            vector_norm = float(np.linalg.norm(self._embeddings[index]))
+            score = float(np.dot(query_vector[0], self._embeddings[index]) / (query_norm * vector_norm)) if vector_norm else 0.0
+            candidates.append((score, str(chunk_id), index))
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        results: list[dict] = []
+        for score, _, index in candidates[:top_k]:
+            metadata = self._metadata(index)
+            results.append({**{key: metadata.get(key) for key in ("chunk_id", "doc_uid", "source_span", "heading_path", "source_start_line", "source_end_line", "page_no", "source_anchor", "chunk_type", "content_hash")}, "content": str(self._documents[index]), "score": score})
+        return results

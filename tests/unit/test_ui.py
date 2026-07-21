@@ -1027,8 +1027,8 @@ def test_restore_login_session_should_show_pending_access_tab_for_zero_permissio
     assert "pending_user" in pending_access_update["value"]
 
 
-def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Path) -> None:
-    """admin 恢复登录态后应默认落到 AI 质检页，而不是停在隐藏页。"""
+def test_restore_login_session_should_preserve_active_tab_for_admin(tmp_path: Path) -> None:
+    """admin 恢复登录态时只恢复权限，不得覆盖用户当前选择的 PageIndex 等标签页。"""
 
     settings = AppSettings(
         APP_ENV="test",
@@ -1080,7 +1080,128 @@ def test_restore_login_session_should_select_quality_tab_for_admin(tmp_path: Pat
         pageindex_knowledge_base_update,
     ):
         assert knowledge_base_update["value"].startswith("default | ")
-    assert main_tabs_update["selected"] == "main-tab-quality"
+    assert "selected" not in main_tabs_update
+
+
+def test_repeated_login_session_restore_should_not_override_active_main_tab(tmp_path: Path) -> None:
+    """首次及后续登录态恢复均不得把当前页签强制切回 AI 质检。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        connection.execute("UPDATE users SET is_active = 1 WHERE username = 'admin'")
+        admin_user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = 'admin'"
+        ).fetchone()[0]
+        connection.commit()
+
+    demo = create_ui_app(settings)
+    restore_fn = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"
+    )
+    stored_session = {"user_id": admin_user_id, "username": "admin"}
+
+    first_outputs = restore_fn(stored_session, False)
+    repeated_outputs = restore_fn(stored_session, True)
+
+    assert "selected" not in first_outputs[12]
+    assert first_outputs[-1] is True
+    assert "selected" not in repeated_outputs[12]
+    assert repeated_outputs[-1] is True
+
+
+def test_auth_refresh_should_reload_document_management_after_startup_snapshot(tmp_path: Path) -> None:
+    """登录或会话恢复后，知识库管理页必须重新读取启动后发生变化的数据库状态。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    settings.ensure_runtime_directories()
+    initialize_database(settings.sqlite_db_path)
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        connection.execute("UPDATE users SET is_active = 1 WHERE username = 'admin'")
+        connection.commit()
+
+    # 先构建 UI，再写入文档，复现服务启动快照仍为 0 的场景。
+    demo = create_ui_app(settings)
+    document_path = settings.input_root / "default" / "after_startup.md"
+    document_path.write_text("# 启动后文档\n\n用于验证认证完成后的实时刷新。", encoding="utf-8")
+    DocumentRepository(settings.sqlite_db_path).upsert_document(
+        {
+            "doc_uid": "after_startup_default",
+            "knowledge_base_id": "default",
+            "doc_id": "after_startup",
+            "doc_title": "启动后文档",
+            "source_path": "default/after_startup.md",
+            "source_hash": "startup-snapshot-test",
+            "ingest_status": "completed",
+            "index_status": "indexed",
+            "error_message": None,
+        }
+    )
+
+    with sqlite3.connect(settings.sqlite_db_path) as connection:
+        admin_user_id = connection.execute(
+            "SELECT user_id FROM users WHERE username = 'admin'"
+        ).fetchone()[0]
+
+    restore_fn = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "_restore_login_session"
+    )
+    outputs = restore_fn({"user_id": admin_user_id, "username": "admin"})
+    document_outputs = outputs[-64:-24]
+    assert document_outputs[2][0] == ["1", "已入库文档", "1"]
+    assert document_outputs[5][0][1] == "after_startup.md"
+
+    change_knowledge_base_fn = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "change_document_knowledge_base_ui"
+    )
+    changed_outputs = change_knowledge_base_fn("default | 默认知识库", build_admin_login_session())
+    assert changed_outputs[6][0] == ["1", "已入库文档", "1"]
+    assert changed_outputs[9][0][1] == "after_startup.md"
+
+    dependencies = demo.config.get("dependencies", [])
+    dependency_names = {
+        dependency.get("id"): getattr(block_fn.fn, "__name__", "")
+        for dependency in dependencies
+        for block_fn in demo.fns.values()
+        if block_fn._id == dependency.get("id")
+    }
+    auth_dependencies = [
+        dependency
+        for dependency in dependencies
+        if dependency_names.get(dependency.get("id")) in {"_do_login", "_restore_login_session"}
+    ]
+    component_ids = {
+        str(component.get("props", {}).get("elem_id", "")): component.get("id")
+        for component in demo.config.get("components", [])
+    }
+    required_document_output_ids = {
+        component_ids["database-summary-table"],
+        component_ids["document-table"],
+    }
+
+    # 登录按钮、密码回车和浏览器会话恢复三条认证入口都必须直接刷新整页输出。
+    assert len(auth_dependencies) == 3
+    assert all(required_document_output_ids.issubset(set(dependency.get("outputs", []))) for dependency in auth_dependencies)
 
 
 def test_restore_login_session_should_clear_review_workspace_without_kb_permission(tmp_path: Path) -> None:
@@ -1116,7 +1237,7 @@ def test_restore_login_session_should_clear_review_workspace_without_kb_permissi
     assert restore_fn is not None
 
     outputs = restore_fn({"user_id": user_id, "username": "review_no_kb_user"})
-    review_outputs = outputs[-23:]
+    review_outputs = outputs[-24:-1]
 
     assert review_outputs[0] == []
     assert review_outputs[3] == []

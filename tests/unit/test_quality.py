@@ -125,8 +125,8 @@ def test_quality_service_should_apply_template_rule_tags_and_retrieval_policy(tm
     assert result["check"]["retrieval_policy"]["use_rerank"] is True
     assert captured_search_kwargs["fulltext_top_k"] >= 6
     assert captured_search_kwargs["vector_top_k"] >= 6
-    # 多查询候选先合并，子查询阶段不重复调用重排模型。
-    assert captured_search_kwargs["use_rerank"] is False
+    # 每个互补查询独立重排，避免批量拼接查询稀释实体、关系词和反证意图。
+    assert captured_search_kwargs["use_rerank"] is True
     assert captured_expand_kwargs["neighbor_window"] == 1
     assert captured_expand_kwargs["include_section_context"] is True
     assert result["rule_hits"][0]["rule_code"] == "M001"
@@ -385,31 +385,46 @@ def test_quality_service_should_retrieve_counter_evidence_and_reject_exclusive_c
     assert len(result["claims"][0]["evidence_details"]) >= 2
 
 
-def test_quality_service_should_limit_strict_claim_to_three_complementary_queries() -> None:
-    """强约束 Claim 只保留原文、语义归一和反证三类查询。"""
+def test_quality_service_should_keep_diverse_queries_for_strict_claim() -> None:
+    """强约束 Claim 应保留原文、实体、主题、关键词与反证查询，避免召回范围退化。"""
 
     query_specs = QualityService._build_retrieval_queries("阿胶只有东阿一家有")
 
     labels = [item["label"] for item in query_specs]
     queries = [item["query"] for item in query_specs]
 
-    assert labels == ["claim_literal", "semantic_normalized", "counter_probe"]
-    assert len(query_specs) == 3
+    assert labels[0] == "claim_literal"
+    assert "logic_relaxed" in labels
+    assert "entity_expanded" in labels
+    assert "entity_focus" in labels
+    assert "scope_focus" in labels
+    assert "topic_focus" in labels
+    assert "counter_probe" in labels
+    assert len(query_specs) > 3
     assert queries[0] == "阿胶只有东阿一家有"
-    assert "只有" not in queries[1]
-    assert "也有" in queries[2] or "并非唯一" in queries[2]
+    logic_relaxed_query = next(item["query"] for item in query_specs if item["label"] == "logic_relaxed")
+    counter_query = next(item["query"] for item in query_specs if item["label"] == "counter_probe")
+    assert "只有" not in logic_relaxed_query
+    assert "也有" in counter_query or "并非唯一" in counter_query
+    assert "阿胶" in queries
+    assert "阿胶 东阿" in queries
 
 
-def test_quality_service_should_build_one_semantic_query_for_chinese_sentence_claim() -> None:
-    """普通中文整句 Claim 应收敛为一个实体与目标组合查询。"""
+def test_quality_service_should_build_multiple_focus_queries_for_chinese_sentence_claim() -> None:
+    """普通中文整句 Claim 应同时生成实体、关系和目标查询，降低单一改写漏召回风险。"""
 
     query_specs = QualityService._build_retrieval_queries("阿胶能治疗癌症")
 
     labels = [item["label"] for item in query_specs]
     queries = [item["query"] for item in query_specs]
 
-    assert labels == ["claim_literal", "semantic_normalized"]
-    assert queries == ["阿胶能治疗癌症", "阿胶 癌症"]
+    assert labels[0] == "claim_literal"
+    assert queries[0] == "阿胶能治疗癌症"
+    assert "阿胶 治疗" in queries
+    assert "阿胶 癌症" in queries
+    assert "癌症" in queries
+    assert "肿瘤" in queries
+    assert "抗肿瘤" in queries
 
 
 def test_quality_service_should_build_keyword_queries_for_category_claim() -> None:
@@ -419,7 +434,9 @@ def test_quality_service_should_build_keyword_queries_for_category_claim() -> No
 
     queries = [item["query"] for item in query_specs]
 
-    assert queries == ["阿胶在资料中常被归入滋补类内容", "阿胶 滋补"]
+    assert queries[0] == "阿胶在资料中常被归入滋补类内容"
+    assert "阿胶 滋补" in queries
+    assert "滋补" in queries
 
 
 def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
@@ -429,7 +446,9 @@ def test_quality_service_should_expand_entity_alias_queries_for_claim() -> None:
 
     queries = [item["query"] for item in query_specs]
 
-    assert queries == ["驴皮胶能改善贫血", "阿胶 贫血"]
+    assert queries[0] == "驴皮胶能改善贫血"
+    assert any("阿胶" in query for query in queries[1:])
+    assert "阿胶 贫血" in queries
 
 
 def test_quality_service_should_keep_broader_candidate_pool_before_final_judgement(tmp_path: Path) -> None:
@@ -502,6 +521,30 @@ def test_quality_service_should_finalize_evidence_list_by_relation_priority() ->
     assert any(item["chunk_id"] == "c3" for item in final_list)
 
 
+def test_quality_service_should_prioritize_medical_topic_evidence() -> None:
+    """医疗证据不足时，应优先展示命中疾病主题的片段，而不是同主题噪声。"""
+
+    evidence_list = [
+        {
+            "chunk_id": "noise",
+            "evidence_relation": "insufficient",
+            "medical_topic_match": 0,
+            "rerank_score": 0.99,
+        },
+        {
+            "chunk_id": "tumor",
+            "evidence_relation": "insufficient",
+            "medical_topic_match": 1,
+            "medical_subject_target_match": 1,
+            "rerank_score": 0.20,
+        },
+    ]
+
+    final_list = QualityService._finalize_evidence_list(evidence_list, final_top_k=1)
+
+    assert final_list[0]["chunk_id"] == "tumor"
+
+
 def test_quality_service_should_keep_one_support_evidence_when_contradictions_dominate() -> None:
     """存在明显反证时，最终证据仍应尽量保留一条直接支持证据，便于人工对比。"""
 
@@ -540,6 +583,83 @@ def test_quality_service_should_mark_direct_strict_evidence_as_support() -> None
 
     assert annotated_items[0]["evidence_relation"] == "support"
     assert "唯一性约束" in annotated_items[0]["relation_reason"]
+
+
+def test_quality_service_should_not_mark_other_disease_evidence_as_support() -> None:
+    """医疗 Claim 的目标疾病未出现在证据中时，只能标记为证据不足。"""
+
+    claim_text = "阿胶能治疗癌症"
+    annotated_items = QualityService._annotate_evidence_relations(
+        claim_text=claim_text,
+        evidence_list=[
+            {
+                "chunk_id": "c1",
+                "content": "研究观察了阿胶联合用药治疗妊娠早期先兆流产的临床效果。",
+                "matched_queries": ["keyword_focus"],
+            },
+            {
+                "chunk_id": "c2",
+                "content": "研究讨论癌症化疗后贫血及免疫损伤。",
+                "matched_queries": ["keyword_focus"],
+            },
+            {
+                "chunk_id": "c3",
+                "content": "药物化疗已经成为治疗癌症的重要手段。阿胶可用于治疗贫血。",
+                "matched_queries": ["keyword_focus"],
+            }
+        ],
+        claim_logic=QualityService._build_claim_logic_snapshot(claim_text),
+    )
+
+    assert all(item["evidence_relation"] == "insufficient" for item in annotated_items)
+    assert all("癌症" in item["relation_reason"] for item in annotated_items)
+
+
+def test_medical_claim_without_direct_evidence_should_not_be_verified() -> None:
+    """医疗功效 Claim 没有直接支持证据时，不能被模型结果覆盖为 verified。"""
+
+    claim_text = "阿胶能治疗癌症"
+    result = QualityService._evaluate_claim(
+        claim_text=claim_text,
+        evidence_list=[
+            {
+                "chunk_id": "c1",
+                "content": "研究讨论癌症化疗后的贫血及免疫损伤。",
+                "evidence_relation": "insufficient",
+            }
+        ],
+        matched_rules=[],
+        claim_logic=QualityService._build_claim_logic_snapshot(claim_text),
+    )
+
+    assert result["verdict"] == "needs_review"
+    assert result["evidence_judgement"] == "insufficient"
+
+
+def test_medical_claim_llm_support_cannot_override_insufficient_heuristic() -> None:
+    """LLM 误返回 support 时，医疗证据门禁仍应保留人工复核结论。"""
+
+    heuristic = {
+        "verdict": "needs_review",
+        "confidence": 0.45,
+        "risk_level": "high",
+        "has_evidence": True,
+        "evidence_judgement": "insufficient",
+        "reason": "目标疾病未被直接证据覆盖。",
+    }
+    merged = QualityService._merge_evaluation_result(
+        heuristic=heuristic,
+        llm_result={
+            "verdict": "verified",
+            "confidence": 0.95,
+            "risk_level": "low",
+            "has_evidence": True,
+            "evidence_judgement": "support",
+            "reason": "模型认为可以通过。",
+        },
+    )
+
+    assert merged["verdict"] == "needs_review"
 
 
 def test_quality_service_should_prefer_more_informative_insufficient_evidence() -> None:

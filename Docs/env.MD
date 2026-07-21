@@ -12,7 +12,7 @@
 
 - 本地 Markdown 文档入库
 - SQLite 数据库存储
-- ChromaDB 向量索引
+- 本地 NumPy 向量索引（`vectors.npz`）
 - Embedding 与 LLM 调用
 - 本地 Gradio + FastAPI 开发调试
 
@@ -28,7 +28,7 @@
 
 - 文档目录：`Input`
 - SQLite 数据库：`index/app.db`
-- ChromaDB 目录：`index/chroma`
+- 本地向量索引目录：`index/chroma`（兼容旧配置名，内部使用 NumPy `vectors.npz`）
 - 规则目录：`rules`
 - 模板目录：`templates`
 - 测试数据目录：`tests/fixtures`
@@ -59,7 +59,7 @@
 |------|------|------|------|
 | `INPUT_ROOT` | 否 | `Input` | 知识库输入目录 |
 | `SQLITE_DB_PATH` | 否 | `index/app.db` | SQLite 文件路径 |
-| `CHROMA_PERSIST_DIR` | 否 | `index/chroma` | ChromaDB 持久化目录 |
+| `CHROMA_PERSIST_DIR` | 否 | `index/chroma` | 本地向量索引目录（配置名兼容旧版本，实际为 NumPy 精确余弦索引） |
 | `RULES_DIR` | 否 | `rules` | 规则目录 |
 | `TEMPLATES_DIR` | 否 | `templates` | 模板目录 |
 
@@ -181,7 +181,7 @@ ANTHROPIC_API_VERSION=2023-06-01
 测试环境建议单独使用以下配置：
 
 - 测试数据库：`index/test_app.db`
-- 测试 Chroma 目录：`index/test_chroma`
+- 测试向量目录：`index/test_chroma`
 - 测试输入目录：`tests/fixtures/docs`
 - 测试规则目录：`tests/fixtures/rules`
 
@@ -230,7 +230,7 @@ ANTHROPIC_API_VERSION=2023-06-01
 - 已准备好 Markdown 样本文档
 - 已准备好 OpenAI 兼容或 Anthropic LLM 密钥
 - 已确认 Embedding 使用在线模型还是本地回退
-- 已确认 SQLite 和 Chroma 持久化目录
+- 已确认 SQLite 和本地向量持久化目录
 - 已确认默认模板与规则目录
 - 已确定测试数据目录
 

@@ -60,11 +60,11 @@ class RetrievalService:
         knowledge_base_id: str | None = None,
         knowledge_base_ids: list[str] | tuple[str, ...] | None = None,
     ) -> list[dict]:
-        """H7 修复：向量检索支持按 knowledge_base_id 过滤。"""
+        """执行支持单知识库或授权知识库集合过滤的向量检索。"""
 
         if self.vector_store is None:
             return []
-        # H7 修复：将 knowledge_base_id 传递到向量存储层做元数据过滤
+        # 权限范围必须下推到向量存储层，不能在 Top-K 截断后再过滤。
         query_kwargs: dict[str, Any] = {
             "top_k": top_k,
             "doc_uid": doc_uid,
