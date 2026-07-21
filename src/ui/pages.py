@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import partial, update_wrapper
 import json
+import logging
 
 import gradio as gr
 
@@ -114,6 +115,7 @@ from src.ui.viewmodels import (
 RECENT_QUALITY_FETCH_LIMIT = 200
 AUTH_SESSION_STORAGE_KEY = "doc-ai-wiki-auth-session"
 AUTH_SESSION_SECRET = "doc_ai_wiki_auth_session_v1"
+LOGGER = logging.getLogger(__name__)
 MAIN_TAB_NAMES = list(AUTH_TAB_NAMES)
 MAIN_TAB_IDS = {
     "待开通": "main-tab-pending-access",
@@ -3123,6 +3125,31 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             ),
         )
 
+    def build_quality_error_outputs(
+        message: str,
+        *,
+        error_code: str = "QUALITY_CHECK_FAILED",
+    ) -> tuple:
+        """构建质检失败终态，避免 Gradio 保留最后一个 running 进度。"""
+
+        return build_quality_outputs(
+            progress_html=format_quality_progress_html(
+                {
+                    "status": "error",
+                    "stage": "failed",
+                    "message": message,
+                    "model_status": "-",
+                }
+            ),
+            result_html=format_operation_result_html(
+                {"success": False, "message": message, "error_code": error_code},
+                title="质检结果",
+            ),
+            formatted_result={},
+            recent_results=[],
+            recent_rows=[],
+        )
+
     def build_recent_quality_view_outputs(
         recent_results: list[dict] | None,
         *,
@@ -3348,8 +3375,15 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
     ):
         """执行 AI 质检，并将输出适配为带分页的界面结果。"""
 
-        for base_outputs in run_quality_check(input_text, template_choice, knowledge_base_choice, login_session):
-            yield build_quality_ui_outputs(base_outputs)
+        try:
+            for base_outputs in run_quality_check(input_text, template_choice, knowledge_base_choice, login_session):
+                yield build_quality_ui_outputs(base_outputs)
+        except AppError as exc:
+            yield build_quality_ui_outputs(build_quality_error_outputs(exc.message, error_code=exc.error_code))
+        except Exception:  # noqa: BLE001
+            # 结果格式化或分页渲染失败时，质检可能已经落库，也必须向前端发送终态。
+            LOGGER.exception("AI 质检 UI 结果渲染失败")
+            yield build_quality_ui_outputs(build_quality_error_outputs("质检结果渲染失败，请到历史记录中查看。"))
 
     def change_quality_claim_page(
         formatted_result: dict | None,
@@ -3751,6 +3785,7 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
             )
             return
         try:
+            completed = False
             for event in quality_service.run_check_stream(
                 input_text,
                 knowledge_base_id=knowledge_base_id,
@@ -3762,6 +3797,10 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         result_html=initial_result_html,
                         formatted_result={},
                     )
+                    continue
+
+                if event.get("type") != "result":
+                    LOGGER.warning("AI 质检流返回未知事件类型：%s", event.get("type"))
                     continue
 
                 result = event.get("result", {})
@@ -3804,18 +3843,18 @@ def build_ui(*, ingest_service, retrieval_service, quality_service, review_servi
                         recent_results,
                     ),
                 )
+                completed = True
                 return
+            if not completed:
+                raise RuntimeError("质检流未返回最终结果")
         except AppError as exc:
-            yield build_quality_outputs(
-                progress_html=format_quality_progress_html(
-                    {"status": "error", "stage": "persist", "message": exc.message, "model_status": "-"},
-                ),
-                result_html=format_operation_result_html(
-                    {"success": False, "message": exc.message, "error_code": exc.error_code},
-                    title="质检结果",
-                ),
-                formatted_result={},
-            )
+            yield build_quality_error_outputs(exc.message, error_code=exc.error_code)
+            return
+        except Exception:  # noqa: BLE001
+            # 普通异常不能直接交给 Gradio，否则前端会保留最后一个 running 进度。
+            # 记录完整堆栈供日志排查，同时给页面发送明确终态。
+            LOGGER.exception("AI 质检 UI 回调执行失败")
+            yield build_quality_error_outputs("质检执行失败，未生成结果，请稍后重试。")
             return
 
     review_action_choices = ["通过", "不通过", "更新结论"]

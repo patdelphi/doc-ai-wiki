@@ -14,6 +14,7 @@ from src.common.config import AppSettings
 from src.db.connection import initialize_database
 from src.db.repositories import DocumentRepository, QualityRepository
 from src.ingest.service import IngestService
+from src.quality.service import QualityService
 from src.review.service import ReviewService
 from src.ui.app import create_ui_app
 from src.ui.css import UI_CSS
@@ -1949,6 +1950,132 @@ def test_quality_claim_select_handler_should_switch_detail_and_evidence(tmp_path
     assert evidence_rows == [["1", "chunk_2", "标题二", "section-2:chunk-2", "证据不足", "fulltext", "logic_relaxed", "0.700", "第二条证据内容"]]
     assert "claim_2" in evaluation_cases
     assert "第二条 Claim" in evaluation_cases
+
+
+def test_quality_check_ui_should_finish_with_error_when_stream_crashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """质检流异常时，前端必须收到终态错误，而不能一直停在运行中。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+    quality_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "run_quality_check_ui"
+    )
+    def failing_stream(*args, **kwargs):
+        yield {
+            "type": "progress",
+            "status": "running",
+            "stage": "prepare",
+            "message": "开始执行",
+            "claim_index": 0,
+            "claim_total": 1,
+        }
+        raise RuntimeError("simulated quality stream failure")
+
+    monkeypatch.setattr(QualityService, "run_check_stream", failing_stream)
+
+    outputs = list(
+        quality_handler(
+            "测试质检异常",
+            "general_fact_check | 通用事实核检",
+            "default | 默认知识库",
+            None,
+        )
+    )
+
+    assert len(outputs) == 2
+    assert "错误代码：QUALITY_CHECK_FAILED" in outputs[-1][1]
+    assert "失败" in outputs[-1][0]
+
+
+def test_quality_check_ui_should_render_final_result_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """质检流返回 result 事件时，前端应展示最终质检 ID。"""
+
+    settings = AppSettings(
+        APP_ENV="test",
+        INPUT_ROOT=tmp_path / "Input",
+        SQLITE_DB_PATH=tmp_path / "app.db",
+        CHROMA_PERSIST_DIR=tmp_path / "chroma",
+        RULES_DIR=tmp_path / "rules",
+        TEMPLATES_DIR=tmp_path / "templates",
+    )
+    initialize_database(settings.sqlite_db_path)
+    demo = create_ui_app(settings)
+    quality_handler = next(
+        block_fn.fn
+        for block_fn in demo.fns.values()
+        if getattr(block_fn.fn, "__name__", "") == "run_quality_check_ui"
+    )
+
+    def successful_stream(*args, **kwargs):
+        yield {
+            "type": "progress",
+            "status": "running",
+            "stage": "prepare",
+            "message": "开始执行",
+            "claim_index": 0,
+            "claim_total": 1,
+        }
+        yield {
+            "type": "result",
+            "status": "success",
+            "stage": "persist",
+            "message": "质检已完成",
+            "result": {
+                "check": {
+                    "check_id": "chkres_ui_success",
+                    "template_name": "通用事实核检",
+                    "overall_verdict": "passed",
+                    "summary": "共 1 条 claim，verified 1 条。",
+                    "created_at": "2026-07-21T00:00:00+00:00",
+                    "updated_at": "2026-07-21T00:00:00+00:00",
+                    "persist_verified": True,
+                },
+                "claims": [
+                    {
+                        "claim_id": "claim_ui_success",
+                        "claim_text": "测试事实",
+                        "verdict": "passed",
+                        "risk_level": "low",
+                        "confidence": 1.0,
+                        "evidence_judgement": "support",
+                        "review_status": "pending",
+                        "evidence_details": [],
+                    }
+                ],
+                "rule_hits": [],
+            },
+        }
+
+    monkeypatch.setattr(QualityService, "run_check_stream", successful_stream)
+
+    outputs = list(
+        quality_handler(
+            "测试事实",
+            "general_fact_check | 通用事实核检",
+            "default | 默认知识库",
+            None,
+        )
+    )
+
+    assert len(outputs) == 2
+    assert "chkres_ui_success" in outputs[-1][1]
+    assert "已完成" in outputs[-1][0]
 
 
 def test_quality_evidence_select_handler_should_switch_evidence_detail(tmp_path: Path) -> None:
