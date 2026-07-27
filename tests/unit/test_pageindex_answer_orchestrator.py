@@ -291,3 +291,52 @@ def test_information_extraction_local_answer_should_not_be_misclassified_as_clai
     assert "当前证据可提取" in answer
     assert "当前证据不支持" not in answer
     assert "提高红细胞数量" in answer
+
+
+def test_normalize_answer_should_render_structured_dict_as_readable_markdown() -> None:
+    """模型返回 dict 时，最终答案不能落成 Python repr。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(RecordingTemplateService())
+
+    answer = orchestrator.normalize_answer(
+        {
+            "结论": "证据部分支持。",
+            "证据能说明什么": ["支持辅助作用。", {"来源": "研究"}],
+            "不确定点": "缺少大样本临床试验。",
+        }
+    )
+
+    assert answer.startswith("#### 结论")
+    assert "#### 证据能说明什么" in answer
+    assert "- 支持辅助作用。" in answer
+    assert "**来源**：研究" in answer
+    assert "#### 不确定点" in answer
+    assert not answer.startswith("{")
+
+
+def test_normalize_answer_should_parse_python_dict_string() -> None:
+    """兼容模型把结构化答案包成 Python 字典字符串的情况。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(RecordingTemplateService())
+
+    answer = orchestrator.normalize_answer("{'结论': '证据不足。', '来源': ['文档 A']}")
+
+    assert "#### 结论" in answer
+    assert "证据不足。" in answer
+    assert "- 文档 A" in answer
+
+
+def test_normalize_answer_should_order_evidence_sections_before_limits() -> None:
+    """证据审查回答应先说明能证明什么，再说明不能证明什么。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(RecordingTemplateService())
+
+    answer = orchestrator.normalize_answer(
+        {
+            "审查结论": "部分支持",
+            "证据不能证明什么": ["不能外推"],
+            "证据能证明什么": ["支持传统功效"],
+        }
+    )
+
+    assert answer.index("#### 证据能证明什么") < answer.index("#### 证据不能证明什么")

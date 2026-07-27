@@ -717,3 +717,100 @@ def test_quality_service_should_return_specific_heuristic_reason_for_strict_clai
     reason = result["claims"][0]["evidence_reason"]
     assert "唯一性" in reason or "排他" in reason
     assert "heuristic" not in reason
+
+
+def test_scoped_safety_negation_should_not_be_treated_as_counter_evidence() -> None:
+    """“不能随意多吃/不能替代治疗”是安全边界，不应被反向证据误杀。"""
+
+    claim = "阿胶糕通常含糖，糖尿病患者不能随意多吃"
+    logic = QualityService._build_claim_logic_snapshot(claim)
+
+    assert logic["has_scoped_negation"] is True
+    assert logic["has_negation"] is False
+    assert QualityService._has_counter_evidence(
+        [{"evidence_relation": "support", "content": "配料含冰糖，糖尿病患者不可妄用。"}],
+        logic,
+    ) is False
+
+
+def test_negated_scope_claim_should_not_be_marked_as_exclusive_or_universal() -> None:
+    """“不是唯一/不能覆盖所有类型”不能按正向排他或全称断言处理。"""
+
+    logic = QualityService._build_claim_logic_snapshot("东阿是产区之一，但不是唯一产地")
+    anemia_logic = QualityService._build_claim_logic_snapshot("不能治疗所有类型贫血")
+
+    assert logic["has_exclusive"] is False
+    assert logic["has_exclusive_negation"] is True
+    assert anemia_logic["has_universal"] is False
+    assert anemia_logic["has_universal_negation"] is True
+
+
+def test_medical_target_extraction_should_remove_scope_words() -> None:
+    """医疗目标应提取“贫血”，不能把“所有类型”误当作疾病名。"""
+
+    assert QualityService._extract_required_evidence_terms("不能治疗所有类型贫血") == ["贫血"]
+
+
+def test_evidence_gap_claim_should_require_review_instead_of_rejection() -> None:
+    """“没有证据证明相互作用”应保持未知边界，不能因机制证据直接拒绝。"""
+
+    claim = "当前知识库没有证据证明阿胶与华法林存在明确相互作用"
+    logic = QualityService._build_claim_logic_snapshot(claim)
+    result = QualityService._evaluate_claim(
+        claim_text=claim,
+        evidence_list=[
+            {
+                "evidence_relation": "insufficient",
+                "content": "知识库未检索到华法林相互作用的直接临床研究。",
+            }
+        ],
+        matched_rules=[],
+        claim_logic=logic,
+    )
+
+    assert logic["has_evidence_gap"] is True
+    assert result["verdict"] == "needs_review"
+    assert result["evidence_judgement"] == "insufficient"
+    merged = QualityService._merge_evaluation_result(
+        heuristic=result,
+        llm_result={
+            "verdict": "rejected",
+            "confidence": 0.9,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "把机制证据误当成直接相互作用。",
+        },
+        claim_logic=logic,
+    )
+    assert merged["verdict"] == "needs_review"
+    assert merged["evidence_judgement"] == "insufficient"
+    assert "证据缺口" in merged["reason"]
+
+
+def test_scoped_boundary_should_not_be_overridden_by_conservative_llm_rejection() -> None:
+    """证据支持的安全边界不能仅因模型把否定词误判为反证而 rejected。"""
+
+    heuristic = {
+        "verdict": "verified",
+        "confidence": 0.85,
+        "risk_level": "low",
+        "has_evidence": True,
+        "evidence_judgement": "support",
+        "reason": "证据支持安全边界。",
+    }
+    merged = QualityService._merge_evaluation_result(
+        heuristic=heuristic,
+        llm_result={
+            "verdict": "rejected",
+            "confidence": 0.8,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "模型将不能替代误判为反证。",
+        },
+        claim_logic={"has_scoped_negation": True, "has_evidence_gap": False},
+    )
+
+    assert merged["verdict"] == "verified"
+    assert merged["risk_level"] == "low"

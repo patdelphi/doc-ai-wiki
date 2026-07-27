@@ -465,7 +465,25 @@ def _build_claim_logic_block(claim_text: str) -> str:
         logic_labels.append("唯一化/排他性表述")
     if any(marker in text for marker in ("全部", "所有", "一律", "必然", "总是", "完全")):
         logic_labels.append("全称或绝对化表述")
-    if any(marker in text for marker in ("不会", "不能", "没有", "不存在", "绝不", "从不")):
+    boundary_markers = (
+        "不能随意",
+        "不能替代",
+        "不能直接",
+        "不能作为",
+        "不能证明",
+        "不是唯一",
+        "并非唯一",
+        "不能治疗所有",
+        "不是所有",
+        "需结合",
+        "应结合",
+    )
+    evidence_gap_markers = ("没有证据", "无证据", "缺乏证据", "尚无证据", "未见明确")
+    if any(marker in text for marker in boundary_markers):
+        logic_labels.append("安全边界或限制性表述（不能将否定词误判为反证）")
+    elif any(marker in text for marker in evidence_gap_markers):
+        logic_labels.append("证据缺口表述（应输出未知或需复核）")
+    elif any(marker in text for marker in ("不会", "不能", "没有", "不存在", "绝不", "从不")):
         logic_labels.append("否定性表述")
     # L1 修复：增加比较型检测
     if any(marker in text for marker in ("高于", "低于", "强于", "弱于", "优于", "不如", "最多", "最少", "超过", "不少于", "不低于")):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 from typing import Any, cast
 
 from src.pageindex.evidence_judge import classify_evidence_relation, infer_conclusion
@@ -17,6 +19,15 @@ class PageIndexAnswerOrchestrator:
         """复用现有 PageIndex 模板事实源。"""
 
         self.template_service = template_service
+
+    @staticmethod
+    def normalize_answer(value: object) -> str:
+        """统一模型答案格式，避免结构化 dict 被 ``str()`` 成 Python repr。"""
+
+        payload = _coerce_structured_answer(value)
+        if payload is not None:
+            return _render_structured_answer(payload)
+        return str(value or "").strip()
 
     def build_question_plan(
         self,
@@ -126,10 +137,115 @@ class PageIndexAnswerOrchestrator:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+        answer_value = result.get("answer") if isinstance(result, dict) else ""
         return {
-            "answer": str(result.get("answer") or "").strip(),
+            "answer": self.normalize_answer(answer_value),
             "question_plan": resolved_question_plan,
         }
+
+
+def _coerce_structured_answer(value: object) -> dict | None:
+    """兼容 JSON dict、Python dict 字符串和外层 answer 包装。"""
+
+    payload: object = value
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return None
+        payload = None
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                candidate = parser(text)
+            except (ValueError, SyntaxError, TypeError):
+                continue
+            if isinstance(candidate, dict):
+                payload = candidate
+                break
+        if payload is None:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    if set(payload) == {"answer"}:
+        nested = _coerce_structured_answer(payload.get("answer"))
+        if nested is not None:
+            return nested
+    return payload
+
+
+def _render_structured_answer(payload: dict) -> str:
+    """将结构化答案渲染成稳定、可读的 Markdown。"""
+
+    if not payload:
+        return ""
+    ordered_keys = (
+        "结论",
+        "审查结论",
+        "证据判断",
+        "证据能说明什么",
+        "证据能证明什么",
+        "证据不能证明什么",
+        "不能外推的原因",
+        "风险或人群边界",
+        "依据",
+        "来源",
+        "要点",
+        "不确定点",
+        "非医疗建议",
+    )
+    keys = [key for key in ordered_keys if key in payload]
+    keys.extend(key for key in payload if key not in keys)
+    lines: list[str] = []
+    for key in keys:
+        label = str(key).strip()
+        if not label:
+            continue
+        lines.extend([f"#### {label}", ""])
+        lines.extend(_render_answer_value(payload.get(key)))
+        lines.append("")
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def _render_answer_value(value: object) -> list[str]:
+    """渲染列表、嵌套对象和普通文本，保留证据审查的层级。"""
+
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"- **{key}**：")
+                lines.extend(f"  {line}" for line in _render_answer_value(item))
+            else:
+                lines.append(f"- **{key}**：{_stringify_answer_scalar(item)}")
+        return lines or ["- 无"]
+    if isinstance(value, (list, tuple)):
+        lines = []
+        for item in value:
+            if isinstance(item, dict):
+                nested = _render_answer_value(item)
+                if nested:
+                    lines.append(nested[0].removeprefix("- "))
+                    lines.extend(f"  {line}" for line in nested[1:])
+            elif isinstance(item, (list, tuple)):
+                lines.extend(f"- {line}" for line in _render_answer_value(item))
+            else:
+                text = _stringify_answer_scalar(item)
+                if text:
+                    lines.append(f"- {text}")
+        return lines or ["- 无"]
+    text = str(value or "").strip()
+    return text.splitlines() if text else ["无"]
+
+
+def _stringify_answer_scalar(value: object) -> str:
+    """将标量转成不带 Python repr 的展示文本。"""
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    return str(value).strip()
 
 
 def _build_answer_structure_context(evidence: list[dict]) -> str:

@@ -16,6 +16,7 @@ from src.quality.verdicts import (
     EvidenceRelation,
     QualityVerdict,
     build_overall_verdict,
+    coerce_verdict,
     coerce_evidence_relation,
     merge_verdict_with_evidence_relation,
     most_conservative_verdict,
@@ -32,6 +33,42 @@ class QualityService:
     _STRICT_EXCLUSIVE_MARKERS = ("只有", "唯一", "仅有", "仅限", "独家")
     _STRICT_UNIVERSAL_MARKERS = ("全部", "所有", "一律", "必然", "总是", "完全")
     _STRICT_NEGATION_MARKERS = ("不会", "不能", "没有", "不存在", "绝不", "从不")
+    _NEGATION_BOUNDARY_PHRASES = (
+        "不能随意",
+        "不能替代",
+        "不能直接",
+        "不能作为",
+        "不能证明",
+        "不能得出",
+        "不能用于",
+        "不能治疗所有",
+        "不能覆盖所有",
+        "不能覆盖全部",
+        "不是唯一",
+        "并非唯一",
+        "不唯一",
+        "不是所有",
+        "并非所有",
+        "不是全部",
+        "并非全部",
+        "不应",
+        "不宜",
+        "不可妄用",
+        "不可替代",
+        "不建议",
+        "需结合",
+        "应结合",
+    )
+    _EVIDENCE_GAP_PHRASES = (
+        "没有证据",
+        "无证据",
+        "未有证据",
+        "缺乏证据",
+        "尚无证据",
+        "未见明确",
+        "没有明确证据",
+        "尚未证实",
+    )
     _STRICT_COMPARISON_MARKERS = ("高于", "低于", "强于", "弱于", "优于", "不如", "最多", "最少", "超过", "不少于", "不低于")
     _LOGIC_STOPWORDS = (
         "只有",
@@ -498,7 +535,11 @@ class QualityService:
                 "reason": llm_result.get("reason", ""),
                 "evidence_judgement": llm_result.get("evidence_judgement", ""),
             }
-            return self._merge_evaluation_result(heuristic=heuristic, llm_result=merged_result)
+            return self._merge_evaluation_result(
+                heuristic=heuristic,
+                llm_result=merged_result,
+                claim_logic=claim_logic,
+            )
         except (ExternalServiceAppError, ValidationAppError):
             return heuristic
 
@@ -620,6 +661,17 @@ class QualityService:
                 "has_evidence": has_evidence,
                 "evidence_judgement": EvidenceRelation.CONTRADICT.value,
                 "reason": "命中阻断级规则，当前内容不能直接放行。",
+            }
+        # “没有证据证明”是知识边界陈述，不应把相关机制证据误当成对该
+        # 否定命题的直接反证；此类 Claim 必须保持人工复核，而不是拒绝。
+        if logic_snapshot.get("has_evidence_gap"):
+            return {
+                "verdict": QualityVerdict.NEEDS_REVIEW.value,
+                "confidence": 0.45 if has_evidence else 0.2,
+                "risk_level": "medium",
+                "has_evidence": has_evidence,
+                "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
+                "reason": "Claim 表述的是当前知识库的证据缺口，不能据此确认相互作用或安全性，建议人工复核。",
             }
         if QualityService._has_counter_evidence(evidence_list, logic_snapshot):
             return {
@@ -764,7 +816,12 @@ class QualityService:
         )
 
     @staticmethod
-    def _merge_evaluation_result(*, heuristic: dict, llm_result: dict) -> dict:
+    def _merge_evaluation_result(
+        *,
+        heuristic: dict,
+        llm_result: dict,
+        claim_logic: dict | None = None,
+    ) -> dict:
         """合并启发式和模型结论，始终选择更保守的判定。"""
 
         risk_priority = {"low": 0, "medium": 1, "high": 2}
@@ -774,10 +831,40 @@ class QualityService:
         evidence_judgement = str(llm_result.get("evidence_judgement") or "").lower()
         normalized_relation = coerce_evidence_relation(evidence_judgement or heuristic.get("evidence_judgement"))
         llm_verdict = merge_verdict_with_evidence_relation(llm_verdict, normalized_relation)
+        logic_snapshot = claim_logic or {}
+        if logic_snapshot.get("has_evidence_gap"):
+            # 证据缺口 Claim 的正确输出是“未知/需复核”，不应沿用模型
+            # 对相关机制证据的 contradict 判断，也不能生成相反的风险结论。
+            heuristic_risk = str(heuristic.get("risk_level") or "medium")
+            return {
+                "verdict": QualityVerdict.NEEDS_REVIEW.value,
+                "confidence": min(
+                    float(llm_result.get("confidence", heuristic.get("confidence", 0.2))),
+                    float(heuristic.get("confidence", 0.2)),
+                ),
+                "risk_level": heuristic_risk,
+                "has_evidence": bool(heuristic.get("has_evidence", llm_result.get("has_evidence", False))),
+                "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
+                "reason": str(heuristic.get("reason") or "当前知识库存在证据缺口，建议人工复核。"),
+            }
+        # 模型常把“不能替代/不是唯一/不能随意”等安全边界中的否定词
+        # 误读成反证。启发式已确认存在支持证据时，保留边界 Claim 的原判定。
+        if (
+            logic_snapshot.get("has_scoped_negation")
+            and heuristic_verdict != QualityVerdict.REJECTED.value
+            and llm_verdict == QualityVerdict.REJECTED.value
+        ):
+            llm_verdict = coerce_verdict(heuristic_verdict).value
         final_verdict = most_conservative_verdict(heuristic_verdict, llm_verdict).value
 
         heuristic_risk = str(heuristic.get("risk_level") or "medium")
         llm_risk = str(llm_result.get("risk_level") or heuristic_risk)
+        if (
+            logic_snapshot.get("has_scoped_negation")
+            and heuristic_verdict != QualityVerdict.REJECTED.value
+            and llm_verdict == heuristic_verdict
+        ):
+            llm_risk = heuristic_risk
         final_risk = max(
             (heuristic_risk, llm_risk),
             key=lambda value: risk_priority.get(value, 1),
@@ -1077,14 +1164,37 @@ class QualityService:
         """识别 claim 中的逻辑约束类型，供检索与判定使用。"""
 
         text = str(claim_text or "")
-        has_exclusive = any(marker in text for marker in cls._STRICT_EXCLUSIVE_MARKERS)
-        has_universal = any(marker in text for marker in cls._STRICT_UNIVERSAL_MARKERS)
-        has_negation = any(marker in text for marker in cls._STRICT_NEGATION_MARKERS)
+        has_exclusive_negation = any(
+            marker in text for marker in ("不是唯一", "并非唯一", "不唯一", "不是独家", "并非独家")
+        )
+        has_universal_negation = any(
+            marker in text
+            for marker in (
+                "不能治疗所有",
+                "不能覆盖所有",
+                "不能覆盖全部",
+                "不是所有",
+                "并非所有",
+                "不是全部",
+                "并非全部",
+            )
+        )
+        has_evidence_gap = any(marker in text for marker in cls._EVIDENCE_GAP_PHRASES)
+        has_scoped_negation = has_evidence_gap or any(
+            marker in text for marker in cls._NEGATION_BOUNDARY_PHRASES
+        )
+        has_exclusive = any(marker in text for marker in cls._STRICT_EXCLUSIVE_MARKERS) and not has_exclusive_negation
+        has_universal = any(marker in text for marker in cls._STRICT_UNIVERSAL_MARKERS) and not has_universal_negation
+        has_negation = any(marker in text for marker in cls._STRICT_NEGATION_MARKERS) and not has_scoped_negation
         has_comparison = any(marker in text for marker in cls._STRICT_COMPARISON_MARKERS)
         return {
             "has_exclusive": has_exclusive,
+            "has_exclusive_negation": has_exclusive_negation,
             "has_universal": has_universal,
+            "has_universal_negation": has_universal_negation,
             "has_negation": has_negation,
+            "has_scoped_negation": has_scoped_negation,
+            "has_evidence_gap": has_evidence_gap,
             "has_comparison": has_comparison,
             "requires_strict_evidence": has_exclusive or has_universal or has_negation or has_comparison,
         }
@@ -1212,11 +1322,7 @@ class QualityService:
                 (term for term in ("治疗", "缓解", "改善", "预防", "调理") if term in normalized_claim),
                 "",
             )
-            subject_text = normalized_claim.split(relation_term, 1)[0] if relation_term else normalized_claim
-            for phrase in cls._QUERY_STOP_PHRASES:
-                subject_text = subject_text.replace(phrase, " ")
-            subject_text = cls._sanitize_retrieval_query_text(subject_text).replace(" ", "")
-            subject_text = subject_text.rstrip("不没未")
+            subject_text = cls._extract_claim_subject(normalized_claim, relation_term)
             medical_subject_match = int(bool(subject_text) and subject_text in normalized_content)
             medical_relation_match = int(bool(relation_term) and relation_term in normalized_content)
             medical_subject_target_match = int(
@@ -1278,12 +1384,31 @@ class QualityService:
             if relation not in normalized:
                 continue
             target = normalized.split(relation, 1)[1]
+            # 去掉“所有类型/全部类别”等范围修饰，只保留可检索的医疗目标。
+            for scope_word in (*cls._STRICT_UNIVERSAL_MARKERS, "类型", "类别", "各类", "各种"):
+                target = target.replace(scope_word, " ")
             for phrase in cls._QUERY_STOP_PHRASES:
                 target = target.replace(phrase, " ")
             target = cls._sanitize_retrieval_query_text(target).replace(" ", "")
             if 2 <= len(target) <= 20:
                 return [target]
         return [term for term in ("补血", "养血", "滋补") if term in normalized]
+
+    @classmethod
+    def _extract_claim_subject(cls, normalized_claim: str, relation: str) -> str:
+        """提取关系词前最近一段主体，避免多分句 Claim 污染主体匹配。"""
+
+        if not relation:
+            return cls._sanitize_retrieval_query_text(normalized_claim).replace(" ", "").rstrip("不没未")
+        prefix = normalized_claim.split(relation, 1)[0]
+        segments = [item for item in re.split(r"[，,；;。]", prefix) if item.strip()]
+        prefix = segments[-1] if segments else prefix
+        match = re.match(r"^(.{2,16}?)(?:在|被|常被|通常被|一般被|属于|归入|归为|是|为|能|可|可以|能够|具有|用于)", prefix)
+        if match:
+            return cls._sanitize_retrieval_query_text(match.group(1)).replace(" ", "").rstrip("不没未")
+        for phrase in cls._QUERY_STOP_PHRASES:
+            prefix = prefix.replace(phrase, " ")
+        return cls._sanitize_retrieval_query_text(prefix).replace(" ", "").rstrip("不没未")
 
     @classmethod
     def _expand_medical_target_aliases(cls, required_terms: list[str]) -> list[str]:
@@ -1315,10 +1440,7 @@ class QualityService:
         )
         if not relation:
             return all(term in normalized_content for term in required_terms)
-        subject_text = normalized_claim.split(relation, 1)[0]
-        for phrase in cls._QUERY_STOP_PHRASES:
-            subject_text = subject_text.replace(phrase, " ")
-        subject = cls._sanitize_retrieval_query_text(subject_text).replace(" ", "").rstrip("不没未")
+        subject = cls._extract_claim_subject(normalized_claim, relation)
         sentences = [
             cls._sanitize_retrieval_query_text(sentence).replace(" ", "")
             for sentence in re.split(r"[。！？；\n]+", normalized_content)

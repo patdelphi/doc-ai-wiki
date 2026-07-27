@@ -536,7 +536,7 @@ class PageIndexService:
                     question_plan=aggregate_question_plan,
                     budget=budget,
                 )
-                answer = str(answer_payload.get("answer") or answer)
+                answer = self.answer_orchestrator.normalize_answer(answer_payload.get("answer") or answer)
                 aggregate_question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else aggregate_question_plan
             except Exception as exc:  # noqa: BLE001
                 llm_errors.append(str(exc))
@@ -781,7 +781,7 @@ class PageIndexService:
             sufficiency = self._normalize_retrieval_sufficiency(selection.get("sufficiency"))
             missing_information = str(selection.get("missing_information") or "").strip()
             next_search_focus = str(selection.get("next_search_focus") or "").strip()
-            answer = str(selection.get("answer") or answer or "").strip()
+            answer = self.answer_orchestrator.normalize_answer(selection.get("answer") or answer)
             candidate_map = {str(item["candidate_id"]): item for item in candidates}
             round_selected_debug: list[dict] = []
 
@@ -864,7 +864,7 @@ class PageIndexService:
                     question_plan=retrieval_question_plan,
                     budget=active_budget,
                 )
-                answer = str(answer_payload.get("answer") or answer or "")
+                answer = self.answer_orchestrator.normalize_answer(answer_payload.get("answer") or answer)
                 question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else {}
             except Exception:  # noqa: BLE001
                 if not answer:
