@@ -31,7 +31,20 @@ class QualityService:
     """质检服务。"""
 
     _STRICT_EXCLUSIVE_MARKERS = ("只有", "唯一", "仅有", "仅限", "独家")
-    _STRICT_UNIVERSAL_MARKERS = ("全部", "所有", "一律", "必然", "总是", "完全")
+    _STRICT_UNIVERSAL_MARKERS = (
+        "全部",
+        "所有",
+        "一律",
+        "必然",
+        "总是",
+        "完全",
+        "任何",
+        "绝对",
+        "一定",
+        "必定",
+        "无论",
+        "不限量",
+    )
     _STRICT_NEGATION_MARKERS = ("不会", "不能", "没有", "不存在", "绝不", "从不")
     _NEGATION_BOUNDARY_PHRASES = (
         "不能随意",
@@ -51,6 +64,8 @@ class QualityService:
         "并非所有",
         "不是全部",
         "并非全部",
+        "不一定",
+        "未必",
         "不应",
         "不宜",
         "不可妄用",
@@ -68,6 +83,27 @@ class QualityService:
         "未见明确",
         "没有明确证据",
         "尚未证实",
+    )
+    _EXTERNAL_REASON_MARKERS = (
+        "医学常识",
+        "营养学常识",
+        "基本常识",
+        "安全用药原则",
+        "标准治疗原则",
+        "首选标准治疗",
+    )
+    _BOUNDARY_SUPPORT_MARKERS = (
+        "其他地区",
+        "除东阿外",
+        "各地",
+        "多地",
+        "也有",
+        "还有",
+        "均能作",
+        "皆能作",
+        "不止",
+        "并非唯一",
+        "之一",
     )
     _STRICT_COMPARISON_MARKERS = ("高于", "低于", "强于", "弱于", "优于", "不如", "最多", "最少", "超过", "不少于", "不低于")
     _LOGIC_STOPWORDS = (
@@ -299,6 +335,10 @@ class QualityService:
                 self.rule_service.match_claim(claim_text, active_tags=active_rule_tags)
                 if self.rule_service
                 else []
+            )
+            matched_rules = self._filter_rule_hits_for_claim_logic(
+                matched_rules,
+                claim_logic,
             )
 
             yield {
@@ -735,6 +775,20 @@ class QualityService:
                     "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
                     "reason": "医疗功效 Claim 的现有证据未同时覆盖目标对象和功效关系，不能直接放行。",
                 }
+        if logic_snapshot.get("has_exclusive_negation"):
+            has_boundary_support = any(
+                str(item.get("evidence_relation") or "") == EvidenceRelation.SUPPORT.value
+                for item in evidence_list
+            )
+            if not has_boundary_support:
+                return {
+                    "verdict": QualityVerdict.NEEDS_REVIEW.value,
+                    "confidence": 0.45 if has_evidence else 0.2,
+                    "risk_level": "medium",
+                    "has_evidence": has_evidence,
+                    "evidence_judgement": EvidenceRelation.INSUFFICIENT.value,
+                    "reason": "“不是唯一”需要其他对象、地区或例外的直接证据，当前证据链尚不完整。",
+                }
         if logic_snapshot.get("requires_strict_evidence"):
             return {
                 "verdict": QualityVerdict.NEEDS_REVIEW.value,
@@ -862,7 +916,7 @@ class QualityService:
         if (
             logic_snapshot.get("has_scoped_negation")
             and heuristic_verdict != QualityVerdict.REJECTED.value
-            and llm_verdict == heuristic_verdict
+            and llm_verdict != QualityVerdict.REJECTED.value
         ):
             llm_risk = heuristic_risk
         final_risk = max(
@@ -873,6 +927,35 @@ class QualityService:
         llm_confidence = float(llm_result.get("confidence", heuristic.get("confidence", 0.2)))
         heuristic_confidence = float(heuristic.get("confidence", llm_confidence))
         final_confidence = llm_confidence if final_verdict == llm_verdict else min(llm_confidence, heuristic_confidence)
+        llm_reason = str(llm_result.get("reason") or "")
+        heuristic_reason = str(heuristic.get("reason") or "")
+        has_strict_logic = any(
+            logic_snapshot.get(key)
+            for key in ("has_exclusive", "has_universal", "has_negation", "has_comparison")
+        )
+        uses_external_reason = any(
+            marker in llm_reason for marker in QualityService._EXTERNAL_REASON_MARKERS
+        )
+        if uses_external_reason:
+            final_reason = (
+                QualityService._build_strict_rejection_reason(logic_snapshot)
+                if (
+                    has_strict_logic
+                    and final_verdict == QualityVerdict.REJECTED.value
+                    and heuristic_verdict != QualityVerdict.REJECTED.value
+                )
+                else heuristic_reason
+            )
+        elif (
+            has_strict_logic
+            and final_verdict == QualityVerdict.REJECTED.value
+            and heuristic_verdict != QualityVerdict.REJECTED.value
+        ):
+            final_reason = QualityService._build_strict_rejection_reason(logic_snapshot)
+        elif has_strict_logic:
+            final_reason = heuristic_reason
+        else:
+            final_reason = llm_reason or heuristic_reason
 
         return {
             "verdict": final_verdict,
@@ -880,8 +963,22 @@ class QualityService:
             "risk_level": final_risk,
             "has_evidence": bool(llm_result.get("has_evidence", heuristic.get("has_evidence", False))),
             "evidence_judgement": (evidence_judgement or normalized_relation.value),
-            "reason": str(llm_result.get("reason") or heuristic.get("reason") or ""),
+            "reason": final_reason,
         }
+
+    @staticmethod
+    def _build_strict_rejection_reason(claim_logic: dict) -> str:
+        """为模型升级为拒绝的强约束 Claim 生成证据限定理由。"""
+
+        if claim_logic.get("has_universal"):
+            return "Claim 含全称或绝对化范围，现有证据未覆盖其全部人群、剂量或时间条件，按高风险不能放行。"
+        if claim_logic.get("has_exclusive"):
+            return "Claim 含唯一或排他范围，现有证据不足以证明该范围成立，按高风险不能放行。"
+        if claim_logic.get("has_comparison"):
+            return "Claim 含确定性比较结论，现有证据不足以证明其比较优势，按高风险不能放行。"
+        if claim_logic.get("has_negation"):
+            return "Claim 含强否定结论，现有证据不足以覆盖该否定范围，按高风险不能放行。"
+        return "Claim 含强约束结论，当前证据不足以覆盖其完整范围，按高风险不能放行。"
 
     def _retrieve_evidence_candidates(
         self,
@@ -960,6 +1057,12 @@ class QualityService:
         if normalized_entity_query and normalized_entity_query != normalized_query:
             query_specs.append({"label": "entity_expanded", "query": normalized_entity_query})
         query_specs.extend(cls._build_strict_scope_queries(literal_query, claim_logic))
+        if claim_logic.get("has_exclusive_negation"):
+            boundary_query = cls._sanitize_retrieval_query_text(
+                f"{normalized_query or literal_query} 其他地区 多地 也有"
+            )
+            if boundary_query:
+                query_specs.append({"label": "boundary_support", "query": boundary_query})
         topic_query = cls._build_topic_focus_query(normalized_query or literal_query)
         if topic_query:
             query_specs.append({"label": "topic_focus", "query": topic_query})
@@ -1177,6 +1280,8 @@ class QualityService:
                 "并非所有",
                 "不是全部",
                 "并非全部",
+                "不一定",
+                "未必",
             )
         )
         has_evidence_gap = any(marker in text for marker in cls._EVIDENCE_GAP_PHRASES)
@@ -1196,8 +1301,18 @@ class QualityService:
             "has_scoped_negation": has_scoped_negation,
             "has_evidence_gap": has_evidence_gap,
             "has_comparison": has_comparison,
+            "requires_boundary_evidence": has_exclusive_negation or has_universal_negation,
             "requires_strict_evidence": has_exclusive or has_universal or has_negation or has_comparison,
         }
+
+    @staticmethod
+    def _filter_rule_hits_for_claim_logic(matched_rules: list[dict], claim_logic: dict) -> list[dict]:
+        """过滤被否定范围词触发的规则误报。"""
+
+        if not claim_logic.get("has_exclusive_negation"):
+            return matched_rules
+        # G002 检测“唯一化断言”；“不是唯一”表达的是边界否定，不能按唯一化风险处罚。
+        return [rule for rule in matched_rules if str(rule.get("rule_code") or "") != "G002"]
 
     @classmethod
     def _has_counter_evidence(cls, evidence_list: list[dict], claim_logic: dict) -> bool:
@@ -1223,17 +1338,63 @@ class QualityService:
             return True
         return False
 
-    @staticmethod
-    def _split_claims(input_text: str) -> list[str]:
+    @classmethod
+    def _split_claims(cls, input_text: str) -> list[str]:
         """按句号、分号和换行进行简单切分。"""
 
-        normalized = (
+        normalized = re.sub(
+            r"[，,]\s*(?:但是|但|然而|同时|且|并且|而且|另外|此外)\s*",
+            "。",
             input_text.replace("；", "。")
             .replace(";", "。")
-            .replace("\n", "。")
+            .replace("\n", "。"),
         )
-        claims = [item.strip() for item in normalized.split("。") if item.strip()]
+        normalized = re.sub(
+            r"[，,]\s*(?=[^，。；]{2,24}(?:患者|人群)[^，。；]{0,18}(?:可以|能够|适合|不能|不宜|应|无需))",
+            "。",
+            normalized,
+        )
+        raw_claims = [item.strip() for item in normalized.split("。") if item.strip()]
+        claims: list[str] = []
+        inherited_subject = ""
+        predicate_prefixes = (
+            "不能",
+            "不可",
+            "不应",
+            "不宜",
+            "不是",
+            "并非",
+            "不一定",
+            "未必",
+            "可以",
+            "能够",
+            "可",
+            "无需",
+        )
+        for raw_claim in raw_claims:
+            claim = raw_claim
+            if inherited_subject and claim.startswith(predicate_prefixes):
+                claim = f"{inherited_subject}{claim}"
+            subject = cls._extract_leading_claim_subject(claim)
+            if subject:
+                inherited_subject = subject
+            claims.append(claim)
         return claims or [input_text.strip()]
+
+    @staticmethod
+    def _extract_leading_claim_subject(claim_text: str) -> str:
+        """提取分句开头的主体，供后续省略主语的并列分句复用。"""
+
+        match = re.match(
+            r"^(.{1,16}?)(?:通常|一般|常见)?"
+            r"(?:可用于|用于|可以|能够|具有|含有|含|治疗|改善|缓解|预防|调理|优于|低于|高于|"
+            r"不是|并非|是|为|能|可)",
+            str(claim_text or "").strip(),
+        )
+        if not match:
+            return ""
+        subject = re.sub(r"\s+", "", match.group(1)).strip()
+        return subject if 1 <= len(subject) <= 16 else ""
 
     @staticmethod
     def _build_retrieval_policy(template: dict) -> dict:
@@ -1337,7 +1498,16 @@ class QualityService:
             relation = "support"
             reason = "检索结果与当前 Claim 主题相关。"
 
-            if required_terms and not cls._evidence_directly_supports_required_terms(claim_text, content):
+            if claim_logic.get("has_evidence_gap"):
+                relation = "insufficient"
+                reason = "该 Claim 表述的是当前知识库证据缺口，相关主题材料不能证明缺口已被填补。"
+            elif claim_logic.get("has_exclusive_negation"):
+                relation = "insufficient"
+                reason = "“不是唯一”需要其他对象、地区或例外的直接证据。"
+                if any(marker in content for marker in cls._BOUNDARY_SUPPORT_MARKERS):
+                    relation = "support"
+                    reason = "证据明确出现其他对象、地区或例外，可支持“不是唯一”的边界表述。"
+            elif required_terms and not cls._evidence_directly_supports_required_terms(claim_text, content):
                 relation = "insufficient"
                 reason = f'证据未直接支持 Claim 的目标对象“{"/".join(required_terms)}”及其功效关系，不能作为直接支持。'
             elif claim_logic.get("requires_strict_evidence"):

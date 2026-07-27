@@ -814,3 +814,211 @@ def test_scoped_boundary_should_not_be_overridden_by_conservative_llm_rejection(
 
     assert merged["verdict"] == "verified"
     assert merged["risk_level"] == "low"
+
+
+def test_split_claims_should_separate_contrastive_compound_assertions() -> None:
+    """安全边界和危险绝对化断言位于不同分句时，应分别质检。"""
+
+    claims = QualityService._split_claims(
+        "东阿是历史产区之一，但不是唯一产地，同时所有患者都可以长期大量服用阿胶"
+    )
+
+    assert claims == [
+        "东阿是历史产区之一",
+        "东阿不是唯一产地",
+        "所有患者都可以长期大量服用阿胶",
+    ]
+
+
+def test_claim_logic_should_detect_extended_universal_scope_markers() -> None:
+    """“任何人/绝对/一定”等范围词应进入严格证据模式。"""
+
+    for claim in (
+        "任何人每天服用500克阿胶都绝对安全",
+        "阿胶一定不会产生任何不良反应",
+    ):
+        logic = QualityService._build_claim_logic_snapshot(claim)
+        assert logic["has_universal"] is True
+        assert logic["requires_strict_evidence"] is True
+
+
+def test_split_claims_should_separate_population_and_comparison_clauses() -> None:
+    """独立人群结论和“而且”后的替代治疗结论应保留明确主体。"""
+
+    product_claims = QualityService._split_claims(
+        "阿胶糕通常含糖和坚果，糖尿病患者及坚果过敏人群可以长期不限量食用"
+    )
+    comparison_claims = QualityService._split_claims(
+        "阿胶治疗贫血的效果一定优于铁剂，而且可以完全替代铁剂"
+    )
+
+    assert product_claims == [
+        "阿胶糕通常含糖和坚果",
+        "糖尿病患者及坚果过敏人群可以长期不限量食用",
+    ]
+    assert comparison_claims == [
+        "阿胶治疗贫血的效果一定优于铁剂",
+        "阿胶可以完全替代铁剂",
+    ]
+
+
+def test_evidence_gap_should_mark_each_evidence_item_as_insufficient() -> None:
+    """证据缺口 Claim 的明细关系应与最终 needs_review/insufficient 保持一致。"""
+
+    claim = "当前知识库没有证据证明阿胶与华法林存在明确相互作用"
+    logic = QualityService._build_claim_logic_snapshot(claim)
+
+    annotated = QualityService._annotate_evidence_relations(
+        claim_text=claim,
+        evidence_list=[
+            {
+                "chunk_id": "c1",
+                "content": "阿胶可能影响凝血指标，但未涉及华法林相互作用研究。",
+                "matched_queries": ["claim_literal"],
+            }
+        ],
+        claim_logic=logic,
+    )
+
+    assert annotated[0]["evidence_relation"] == "insufficient"
+    assert "证据缺口" in annotated[0]["relation_reason"]
+
+
+def test_negated_exclusive_claim_should_require_alternative_origin_evidence() -> None:
+    """“不是唯一”需要出现其他对象或产地证据，不能仅凭主题相关就通过。"""
+
+    claim = "东阿不是唯一产地"
+    logic = QualityService._build_claim_logic_snapshot(claim)
+    annotated = QualityService._annotate_evidence_relations(
+        claim_text=claim,
+        evidence_list=[
+            {"chunk_id": "c1", "content": "东阿具有悠久的阿胶生产历史。", "matched_queries": ["claim_literal"]},
+            {"chunk_id": "c2", "content": "除东阿外，济州、禹州等其他地区也有阿胶生产。", "matched_queries": ["boundary_support"]},
+        ],
+        claim_logic=logic,
+    )
+
+    relations = {item["chunk_id"]: item["evidence_relation"] for item in annotated}
+    assert relations == {"c2": "support", "c1": "insufficient"}
+    assert logic["requires_boundary_evidence"] is True
+
+
+def test_negated_exclusive_claim_should_filter_unique_rule_false_positive() -> None:
+    """“不是唯一”不得保留 G002 唯一化断言误报。"""
+
+    filtered = QualityService._filter_rule_hits_for_claim_logic(
+        [
+            {"rule_code": "G002", "rule_name": "唯一正确结论"},
+            {"rule_code": "M001", "rule_name": "医疗风险"},
+        ],
+        QualityService._build_claim_logic_snapshot("东阿不是唯一产地"),
+    )
+
+    assert [item["rule_code"] for item in filtered] == ["M001"]
+
+
+def test_scoped_boundary_review_should_not_escalate_to_high_risk_without_rejection() -> None:
+    """非拒绝的安全边界 Claim 应沿用启发式风险，不被模型抬成 high。"""
+
+    merged = QualityService._merge_evaluation_result(
+        heuristic={
+            "verdict": "needs_review",
+            "confidence": 0.45,
+            "risk_level": "medium",
+            "has_evidence": True,
+            "evidence_judgement": "insufficient",
+            "reason": "需要其他产地证据。",
+        },
+        llm_result={
+            "verdict": "needs_review",
+            "confidence": 0.7,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "insufficient",
+            "reason": "证据不足。",
+        },
+        claim_logic={"has_scoped_negation": True, "has_evidence_gap": False},
+    )
+
+    assert merged["verdict"] == "needs_review"
+    assert merged["risk_level"] == "medium"
+
+
+def test_external_common_knowledge_reason_should_fallback_to_heuristic_reason() -> None:
+    """模型理由若依赖外部常识，应保留证据驱动的启发式理由。"""
+
+    merged = QualityService._merge_evaluation_result(
+        heuristic={
+            "verdict": "needs_review",
+            "confidence": 0.45,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "insufficient",
+            "reason": "该 Claim 含绝对化范围，现有证据不足。",
+        },
+        llm_result={
+            "verdict": "rejected",
+            "confidence": 0.9,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "该说法违背基本医学常识和标准治疗原则。",
+        },
+        claim_logic={"has_universal": True},
+    )
+
+    assert merged["verdict"] == "rejected"
+    assert merged["reason"] == "Claim 含全称或绝对化范围，现有证据未覆盖其全部人群、剂量或时间条件，按高风险不能放行。"
+
+
+def test_strict_claim_should_keep_evidence_bound_heuristic_reason() -> None:
+    """绝对化 Claim 的理由应由证据关系生成，不采纳模型补充的库外医学推断。"""
+
+    merged = QualityService._merge_evaluation_result(
+        heuristic={
+            "verdict": "rejected",
+            "confidence": 0.25,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "Claim 检索到矛盾证据，绝对化范围被反证。",
+        },
+        llm_result={
+            "verdict": "rejected",
+            "confidence": 0.95,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "不限量食用会导致血糖失控并造成消化负担。",
+        },
+        claim_logic={"has_universal": True, "requires_strict_evidence": True},
+    )
+
+    assert merged["reason"] == "Claim 检索到矛盾证据，绝对化范围被反证。"
+
+
+def test_llm_only_strict_rejection_should_use_scope_limited_reason() -> None:
+    """模型把严格 Claim 升级为拒绝时，理由应与证据不足和范围约束保持一致。"""
+
+    merged = QualityService._merge_evaluation_result(
+        heuristic={
+            "verdict": "needs_review",
+            "confidence": 0.45,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "insufficient",
+            "reason": "现有证据不足以覆盖全部范围。",
+        },
+        llm_result={
+            "verdict": "rejected",
+            "confidence": 0.9,
+            "risk_level": "high",
+            "has_evidence": True,
+            "evidence_judgement": "contradict",
+            "reason": "会导致血糖失控。",
+        },
+        claim_logic={"has_universal": True, "requires_strict_evidence": True},
+    )
+
+    assert merged["verdict"] == "rejected"
+    assert merged["reason"] == "Claim 含全称或绝对化范围，现有证据未覆盖其全部人群、剂量或时间条件，按高风险不能放行。"

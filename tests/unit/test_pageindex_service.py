@@ -634,7 +634,9 @@ def test_pageindex_service_should_use_llm_tree_reasoning_before_keyword_fallback
 
     answer = service.ask_question("kb_alpha", document["doc_uid"], "哪些内容说明它对皮肤有帮助")
 
-    assert answer["answer"] == "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。"
+    assert "相关内容位于“功效”，证据提到滋养、润泽与皮肤状态改善。" in answer["answer"]
+    assert "#### 来源" in answer["answer"]
+    assert answer["debug"]["answer_contract"]["repaired"] is True
     assert answer["retrieval_mode"] == "LLM 语义树推理"
     assert answer["evidence"][0]["title"] == "功效"
     assert answer["evidence"][0]["reason"] == "语义上对应皮肤状态改善"
@@ -1014,6 +1016,63 @@ def test_pageindex_service_should_report_keyword_fallback_when_llm_reasoning_fai
     assert answer["evidence"][0]["title"] == "风险"
     assert answer["debug"]["question_analysis"]["mode"] == "本地关键词"
     assert answer["debug"]["candidate_nodes"][0]["title"] == "风险"
+
+
+def test_pageindex_service_should_persist_final_answer_degradation_reason(tmp_path: Path) -> None:
+    """最终回答模型失败时，应返回本地答案并把失败阶段写入历史 debug。"""
+
+    settings = build_pageindex_test_settings(tmp_path)
+    initialize_database(settings.sqlite_db_path)
+    document = seed_markdown_document(settings, knowledge_base_id="kb_alpha", file_name="alpha.md")
+
+    class FinalAnswerFailingClient:
+        """仅让最终回答调用失败，保留前置语义检索成功路径。"""
+
+        def complete_json(self, *, system_prompt: str, user_prompt: str) -> dict:
+            if "问题分析" in system_prompt:
+                return {
+                    "intent": "风险查询",
+                    "entities": ["风险"],
+                    "keywords": ["风险"],
+                    "expanded_terms": [],
+                }
+            if "Question Planner" in system_prompt:
+                return {
+                    "question_type": "claim_judgement",
+                    "answer_strategy": "判断风险说明。",
+                    "target": "风险",
+                    "required_output": ["结论", "来源"],
+                    "needs_evidence_relation": True,
+                }
+            if "迭代式树结构检索" in system_prompt:
+                return {
+                    "selected_nodes": [{"candidate_id": "node_2", "reason": "风险节点直接相关"}],
+                    "sufficiency": "sufficient",
+                    "missing_information": "",
+                    "next_search_focus": "",
+                    "answer": "",
+                }
+            raise RuntimeError("final answer down")
+
+    service = PageIndexService(settings, llm_client=FinalAnswerFailingClient())
+    pageindex_doc_id = seed_pageindex_workspace(
+        settings,
+        knowledge_base_id="kb_alpha",
+        doc_uid=document["doc_uid"],
+        file_name="alpha.md",
+    )
+    service.upsert_index_record("kb_alpha", document["doc_uid"], pageindex_doc_id, source_hash="hash_alpha")
+
+    answer = service.ask_question("kb_alpha", document["doc_uid"], "当前文档说明了什么风险")
+    history = service.get_query_history_record("kb_alpha", document["doc_uid"], answer["query_id"])
+
+    assert answer["retrieval_mode"] == "LLM 语义树推理"
+    assert answer["llm_error"] == "final answer down"
+    assert answer["debug"]["llm_error"] == "final answer down"
+    assert answer["debug"]["degraded_stage"] == "final_answer"
+    assert answer["answer"].startswith("结论：")
+    assert history["debug"]["llm_error"] == "final answer down"
+    assert history["debug"]["degraded_stage"] == "final_answer"
 
 
 def test_pageindex_service_should_not_use_keyword_or_rag_fallback_when_llm_selects_no_node(tmp_path: Path) -> None:
@@ -2317,9 +2376,12 @@ def test_pageindex_knowledge_base_question_should_use_aggregate_question_plan_an
     result = service.ask_knowledge_base_question("kb_alpha", "阿胶有哪些质量检测方法")
 
     assert result["debug"]["question_plan"]["question_type"] == "information_extraction"
+    assert result["debug"]["answer_contract"]["mode"] == "strict_qa"
+    assert result["debug"]["answer_contract"]["repaired"] is True
     assert result["debug"]["document_retrieval_rounds"][0]["doc_uid"] == document["doc_uid"]
     assert result["debug"]["document_retrieval_rounds"][0]["rounds"][0]["sufficiency"] == "insufficient"
     assert "真伪鉴别" in result["answer"]
+    assert "#### 不确定点" in result["answer"]
     assert "不能证明" not in result["answer"]
 
 

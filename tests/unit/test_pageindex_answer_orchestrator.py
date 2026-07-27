@@ -46,6 +46,18 @@ class RecordingTemplateService(PageIndexTemplateService):
         return "answer-system", "answer-user"
 
 
+class ContractTemplateService(RecordingTemplateService):
+    """返回带回答模式的模板，用于验证最终答案契约。"""
+
+    def get_template(self, template_id: str | None = None) -> dict:
+        """返回医学安全模板的最小契约字段。"""
+
+        return {
+            "template_id": template_id or "medical_safety_qa",
+            "answer_mode": "medical_safety",
+        }
+
+
 class RecordingLLMClient:
     """按顺序返回 JSON，并记录模型调用。"""
 
@@ -340,3 +352,189 @@ def test_normalize_answer_should_order_evidence_sections_before_limits() -> None
     )
 
     assert answer.index("#### 证据能证明什么") < answer.index("#### 证据不能证明什么")
+
+
+def test_generate_answer_should_repair_missing_medical_contract_sections() -> None:
+    """医学模板回答缺少来源和边界时，应基于现有证据做保守补全。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(ContractTemplateService())
+    evidence = [
+        {
+            **build_evidence()[0],
+            "chunk_id": "chunk-1",
+        }
+    ]
+
+    payload = orchestrator.generate_llm_answer_payload(
+        RecordingLLMClient([{"answer": "现有材料提到相关作用。"}]),
+        "该材料能否证明临床治疗效果？",
+        evidence,
+        template_id="medical_safety_qa",
+        question_plan={"question_type": "claim_judgement"},
+    )
+
+    answer = payload["answer"]
+    assert "#### 结论" in answer
+    assert "#### 证据能说明什么" in answer
+    assert "#### 证据不能证明什么" in answer
+    assert "#### 风险或人群边界" in answer
+    assert "#### 依据" in answer
+    assert "#### 来源" in answer
+    assert "doc-1" in answer
+    assert "chunk-1" in answer
+    assert "#### 不确定点" in answer
+    assert "#### 非医疗建议" in answer
+    assert payload["answer_contract"]["repaired"] is True
+    assert "来源" in payload["answer_contract"]["missing_sections"]
+
+
+def test_generate_answer_should_not_repair_complete_structured_contract() -> None:
+    """模型已完整返回医学安全结构时，不应重复追加章节。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(ContractTemplateService())
+    answer_payload = {
+        "结论": "证据不足。",
+        "证据能说明什么": "材料涉及相关机制。",
+        "证据不能证明什么": "不能证明临床疗效。",
+        "风险或人群边界": "缺少特定人群资料。",
+        "依据": "当前仅有间接证据。",
+        "来源": "预算制度（line 8），文档：doc-1",
+        "不确定点": "缺少临床终点。",
+        "非医疗建议": "不能替代医生判断。",
+    }
+
+    payload = orchestrator.generate_llm_answer_payload(
+        RecordingLLMClient([{"answer": answer_payload}]),
+        "该材料能否证明临床治疗效果？",
+        build_evidence(),
+        template_id="medical_safety_qa",
+        question_plan={"question_type": "claim_judgement"},
+    )
+
+    assert payload["answer_contract"] == {
+        "mode": "medical_safety",
+        "required_sections": list(answer_payload),
+        "missing_sections": [],
+        "repaired": False,
+    }
+    assert payload["answer"].count("#### 来源") == 1
+
+
+def test_generate_answer_should_degrade_when_model_uses_external_common_knowledge() -> None:
+    """模型自行引用一般常识时，应回退到仅基于当前证据的保守答案。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(ContractTemplateService())
+    evidence = [
+        {
+            "title": "产品配料表",
+            "position": "line 10",
+            "doc_uid": "doc-product",
+            "chunk_id": "chunk-product",
+            "evidence_type": "method_or_formula_context",
+            "evidence_label": "方法/组合语境",
+            "content": "配料表：黑芝麻、核桃仁、麦芽糖浆、冰糖、阿胶。",
+        },
+        {
+            "title": "杨玉环",
+            "position": "line 20",
+            "doc_uid": "doc-history",
+            "evidence_type": "context_only",
+            "evidence_label": "仅背景相关",
+            "content": "相传杨玉环长期食用阿胶羹。",
+        },
+        {
+            "title": "生产工艺",
+            "position": "line 25",
+            "doc_uid": "doc-process",
+            "evidence_type": "method_or_formula_context",
+            "evidence_label": "方法/组合语境",
+            "content": "阿胶工业生产过程包括配料、泡皮、化皮、浓缩和包装。",
+        },
+        {
+            "title": "阿胶使用注意",
+            "position": "line 30",
+            "doc_uid": "doc-safety",
+            "chunk_id": "chunk-safety",
+            "evidence_type": "method_or_formula_context",
+            "evidence_label": "方法/组合语境",
+            "content": "阿胶必须在医师指导下正确服用，否则可能产生不良反应。",
+        },
+    ]
+
+    payload = orchestrator.generate_llm_answer_payload(
+        RecordingLLMClient(
+            [
+                {
+                    "answer": {
+                        "结论": "糖尿病患者绝对不能食用。",
+                        "证据能说明什么": "配料含糖。",
+                        "证据不能证明什么": "缺少临床数据。",
+                        "风险或人群边界": "基于食品科学常识，高糖食品均不适合。",
+                        "依据": "食品科学常识。",
+                        "来源": "预算制度。",
+                        "不确定点": "无。",
+                        "非医疗建议": "咨询医生。",
+                    }
+                }
+            ]
+        ),
+        "阿胶糕常见配料有哪些？糖尿病患者、坚果过敏人群是否适合长期不限量食用？",
+        evidence,
+        template_id="medical_safety_qa",
+        question_plan={"question_type": "claim_judgement"},
+    )
+
+    assert "食品科学常识" not in payload["answer"]
+    assert "特定人群、长期使用、剂量上限" in payload["answer"]
+    assert "配料表：黑芝麻、核桃仁" in payload["answer"]
+    assert "医师指导" in payload["answer"]
+    assert "杨玉环" not in payload["answer"]
+    assert "生产工艺" not in payload["answer"]
+    assert "doc-product" in payload["answer"]
+    assert "doc-safety" in payload["answer"]
+    assert payload["answer_contract"]["repaired"] is False
+    assert payload["answer_contract"]["degraded_reason"] == "unsupported_external_knowledge"
+    assert "食品科学常识" in payload["answer_contract"]["external_knowledge_markers"]
+
+
+def test_generate_answer_should_degrade_unsupported_strong_medical_claim() -> None:
+    """证据原文没有的“严禁”等强医疗结论即使不提常识，也必须降级。"""
+
+    orchestrator = PageIndexAnswerOrchestrator(ContractTemplateService())
+    evidence = [
+        {
+            "title": "产品配料表",
+            "position": "line 10",
+            "doc_uid": "doc-product",
+            "evidence_type": "method_or_formula_context",
+            "evidence_label": "方法/组合语境",
+            "content": "配料表包含核桃仁、麦芽糖浆和阿胶。",
+        }
+    ]
+
+    payload = orchestrator.generate_llm_answer_payload(
+        RecordingLLMClient(
+            [
+                {
+                    "answer": {
+                        "结论": "坚果过敏人群严禁食用。",
+                        "证据能说明什么": "配料含核桃仁。",
+                        "证据不能证明什么": "缺少人群研究。",
+                        "风险或人群边界": "坚果过敏人群严禁食用。",
+                        "依据": "配料表。",
+                        "来源": "产品配料表。",
+                        "不确定点": "无。",
+                        "非医疗建议": "咨询医生。",
+                    }
+                }
+            ]
+        ),
+        "坚果过敏人群是否适合食用？",
+        evidence,
+        template_id="medical_safety_qa",
+        question_plan={"question_type": "claim_judgement"},
+    )
+
+    assert "严禁" not in payload["answer"]
+    assert payload["answer_contract"]["degraded_reason"] == "unsupported_external_knowledge"
+    assert "严禁" in payload["answer_contract"]["external_knowledge_markers"]

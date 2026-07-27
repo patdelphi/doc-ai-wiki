@@ -475,6 +475,8 @@ class PageIndexService:
         llm_errors: list[str] = []
         question_plans: list[dict] = []
         document_retrieval_rounds: list[dict] = []
+        answer_contract: dict = {}
+        degraded_stage = ""
         for record in routed_records:
             try:
                 structure = self._load_structure(record)
@@ -538,8 +540,13 @@ class PageIndexService:
                 )
                 answer = self.answer_orchestrator.normalize_answer(answer_payload.get("answer") or answer)
                 aggregate_question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else aggregate_question_plan
+                answer_contract = answer_payload.get("answer_contract") if isinstance(answer_payload.get("answer_contract"), dict) else {}
+                if answer_contract.get("degraded_reason"):
+                    degraded_stage = "answer_contract"
+                    llm_errors.append("模型答案包含未由知识库证据支持的外部常识，已改用保守回答")
             except Exception as exc:  # noqa: BLE001
                 llm_errors.append(str(exc))
+                degraded_stage = "final_answer"
         return {
             "evidence": evidence,
             "answer": answer,
@@ -551,6 +558,8 @@ class PageIndexService:
                 "rag_evidence": rag_evidence,
                 "selected_nodes": candidate_nodes[: len(evidence)],
                 "question_plan": aggregate_question_plan,
+                "answer_contract": answer_contract,
+                "degraded_stage": degraded_stage,
                 "document_question_plans": question_plans,
                 "document_retrieval_rounds": document_retrieval_rounds,
                 "routed_documents": [
@@ -611,6 +620,7 @@ class PageIndexService:
                 debug["retrieval_mode"] = "LLM 语义树推理"
                 debug["question_analysis"] = resolved_analysis
                 debug["budget"] = active_budget.snapshot()
+                llm_error = str(debug.get("llm_error") or "")
                 return {
                     "evidence": evidence,
                     "answer": answer or self.answer_orchestrator.build_local_answer(
@@ -619,12 +629,13 @@ class PageIndexService:
                         question_plan=debug.get("question_plan") if isinstance(debug, dict) else None,
                     ),
                     "retrieval_mode": "LLM 语义树推理",
-                    "llm_error": "",
+                    "llm_error": llm_error,
                     "debug": debug,
                 }
             debug["retrieval_mode"] = "LLM 语义树推理"
             debug["question_analysis"] = resolved_analysis
             debug["budget"] = active_budget.snapshot()
+            llm_error = str(debug.get("llm_error") or "")
             return {
                 "evidence": [],
                 "answer": self.answer_orchestrator.build_local_answer(
@@ -633,7 +644,7 @@ class PageIndexService:
                     question_plan=debug.get("question_plan") if isinstance(debug, dict) else None,
                 ),
                 "retrieval_mode": "LLM 语义树推理",
-                "llm_error": "",
+                "llm_error": llm_error,
                 "debug": debug,
             }
         except RetrievalBudgetExceededError as exc:
@@ -692,6 +703,8 @@ class PageIndexService:
         cross_reference_candidates: list[dict] = []
         answer = ""
         debug_error = ""
+        degraded_stage = ""
+        answer_contract: dict = {}
         active_budget = budget or PageIndexBudget(
             max_llm_calls=6,
             max_rounds=max_rounds,
@@ -866,13 +879,18 @@ class PageIndexService:
                 )
                 answer = self.answer_orchestrator.normalize_answer(answer_payload.get("answer") or answer)
                 question_plan = answer_payload.get("question_plan") if isinstance(answer_payload.get("question_plan"), dict) else {}
-            except Exception:  # noqa: BLE001
-                if not answer:
-                    answer = self.answer_orchestrator.build_local_answer(
-                        question,
-                        evidence,
-                        question_plan=retrieval_question_plan,
-                    )
+                answer_contract = answer_payload.get("answer_contract") if isinstance(answer_payload.get("answer_contract"), dict) else {}
+                if answer_contract.get("degraded_reason"):
+                    debug_error = "模型答案包含未由知识库证据支持的外部常识，已改用保守回答"
+                    degraded_stage = "answer_contract"
+            except Exception as exc:  # noqa: BLE001
+                debug_error = exc.message if isinstance(exc, RetrievalBudgetExceededError) else str(exc)
+                degraded_stage = "final_answer"
+                answer = self.answer_orchestrator.build_local_answer(
+                    question,
+                    evidence,
+                    question_plan=retrieval_question_plan,
+                )
         return evidence, answer, {
             "candidate_nodes": list(candidate_debug_by_id.values()),
             "rag_evidence": rag_evidence,
@@ -882,6 +900,8 @@ class PageIndexService:
             "retrieval_question_plan": retrieval_question_plan,
             "retrieval_policy": retrieval_policy,
             "llm_error": debug_error,
+            "degraded_stage": degraded_stage,
+            "answer_contract": answer_contract,
             "budget": active_budget.snapshot(),
         }
 

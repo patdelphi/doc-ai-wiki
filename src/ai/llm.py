@@ -463,7 +463,23 @@ def _build_claim_logic_block(claim_text: str) -> str:
     logic_labels: list[str] = []
     if any(marker in text for marker in ("只有", "唯一", "仅有", "仅限", "独家")):
         logic_labels.append("唯一化/排他性表述")
-    if any(marker in text for marker in ("全部", "所有", "一律", "必然", "总是", "完全")):
+    if any(
+        marker in text
+        for marker in (
+            "全部",
+            "所有",
+            "一律",
+            "必然",
+            "总是",
+            "完全",
+            "任何",
+            "绝对",
+            "一定",
+            "必定",
+            "无论",
+            "不限量",
+        )
+    ):
         logic_labels.append("全称或绝对化表述")
     boundary_markers = (
         "不能随意",

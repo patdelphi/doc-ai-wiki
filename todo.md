@@ -1002,3 +1002,17 @@
 - [x] 完成 33 项聚焦测试、Ruff 与质检模块 Mypy 校验；UI 全依赖树仍有 235 个既有类型错误。
 - [x] 不部署、不迁移数据库、不执行 Git commit、push、merge 或 pull。
 - [ ] 修复或替换 Windows 上原生崩溃的 Chroma 向量后端，再恢复完整混合检索验收。
+
+## 2026-07-27 PageIndex 与 AI 质检质量收口
+
+> 详细计划：`Docs/optimization-plan/pageindex_ai_quality_followup_plan_20260727.md`
+> 状态：已执行完成，等待用户单独确认后提交。
+
+- [x] 为 PageIndex 增加回答契约、来源追溯和缺失章节保守补全。
+- [x] 为模型失败增加明确降级终态、原因和历史可追踪信息。
+- [x] 扩展 AI 质检复杂 Claim、范围否定、时间、人群、剂量和证据缺口测试。
+- [x] 使用完整 `.env` 运行真实 PageIndex 与 AI 质检，并逐条回读数据库。
+- [x] 对同一命题比较两条链路，持续修复不合格样例。
+- [x] 统一前端端口并验证刷新、切页、成功和异常终态。
+- [x] 完成聚焦测试、Ruff、Mypy、完整 Pytest 与结果文档。
+- [x] 执行完成后等待用户单独确认，再 commit。
